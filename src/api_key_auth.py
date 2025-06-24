@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from dotenv import load_dotenv
 
@@ -18,9 +19,22 @@ class FactSetAPIKeyClient:
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         })
+        
+        # Rate limiting: 10 requests per second
+        self.last_request_time = 0
+        self.min_request_interval = 0.1  # 100ms between requests
+    
+    def _rate_limit(self):
+        """Ensure we don't exceed rate limits"""
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+        if time_since_last < self.min_request_interval:
+            time.sleep(self.min_request_interval - time_since_last)
+        self.last_request_time = time.time()
     
     def get(self, endpoint, params=None):
         """Make GET request to FactSet API"""
+        self._rate_limit()
         url = f"{self.base_url}{endpoint}"
         response = self.session.get(url, params=params)
         response.raise_for_status()
@@ -28,6 +42,7 @@ class FactSetAPIKeyClient:
     
     def post(self, endpoint, data=None):
         """Make POST request to FactSet API"""
+        self._rate_limit()
         url = f"{self.base_url}{endpoint}"
         response = self.session.post(url, json=data)
         response.raise_for_status()
