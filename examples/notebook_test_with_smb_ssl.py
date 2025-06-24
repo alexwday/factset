@@ -84,11 +84,27 @@ try:
     )
     
     print(f"Status: {response.status_code}")
+    print(f"Content-Type: {response.headers.get('content-type', 'Not specified')}")
+    print(f"Response size: {len(response.content)} bytes")
+    
     if response.status_code == 200:
         print("Success!")
-        print(json.dumps(response.json(), indent=2)[:1000])
+        # Check if response is actually JSON
+        content_type = response.headers.get('content-type', '').lower()
+        if 'application/json' in content_type:
+            try:
+                data = response.json()
+                print(json.dumps(data, indent=2)[:1000])
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {e}")
+                print("Raw response content:")
+                print(response.text[:1000])
+        else:
+            print("Response is not JSON. Raw content:")
+            print(response.text[:1000])
     else:
-        print(f"Error: {response.text[:500]}")
+        print(f"Error response:")
+        print(f"Raw content: {response.text[:500]}")
         
 except requests.exceptions.ConnectionError as e:
     print(f"Connection Error: {e}")
