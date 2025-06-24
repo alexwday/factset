@@ -7,7 +7,10 @@ import requests
 import json
 import tempfile
 import os
+import time
 from smb.SMBConnection import SMBConnection
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # CONFIGURATION - UPDATE THESE VALUES
 SMB_USER = "your_username"
@@ -54,15 +57,53 @@ body = {
     "fiscalPeriodEnd": "2023-12-31"
 }
 
-print(f"Making API request with SSL certificate: {temp_cert.name}")
-response = requests.post(url, json=body, headers=headers, verify=temp_cert.name)
+# Create session with retry strategy
+session = requests.Session()
+retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["HEAD", "GET", "OPTIONS", "POST"]
+)
+adapter = HTTPAdapter(max_retries=retry_strategy)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
 
-print(f"Status: {response.status_code}")
-if response.status_code == 200:
-    print("Success!")
-    print(json.dumps(response.json(), indent=2)[:1000])
-else:
-    print(f"Error: {response.text[:500]}")
+# Set headers and timeout
+session.headers.update(headers)
+
+print(f"Making API request with SSL certificate: {temp_cert.name}")
+
+try:
+    response = session.post(
+        url, 
+        json=body, 
+        verify=temp_cert.name,
+        timeout=(30, 60),  # (connect timeout, read timeout)
+        stream=False
+    )
+    
+    print(f"Status: {response.status_code}")
+    if response.status_code == 200:
+        print("Success!")
+        print(json.dumps(response.json(), indent=2)[:1000])
+    else:
+        print(f"Error: {response.text[:500]}")
+        
+except requests.exceptions.ConnectionError as e:
+    print(f"Connection Error: {e}")
+    print("This could be due to:")
+    print("- Firewall blocking the connection")
+    print("- Proxy settings needed")
+    print("- Network connectivity issues")
+    print("- Server rejecting the connection")
+    
+except requests.exceptions.Timeout as e:
+    print(f"Timeout Error: {e}")
+    print("The server took too long to respond")
+    
+except Exception as e:
+    print(f"Error: {type(e).__name__}: {e}")
 
 # Clean up
 os.unlink(temp_cert.name)
