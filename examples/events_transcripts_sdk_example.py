@@ -57,11 +57,21 @@ except ImportError as e:
     print(f"Error: {e}")
     exit(1)
 
-# API-KEY authorization (following their pattern exactly)
+# API-KEY authorization with proxy and SSL configuration
 configuration = fds.sdk.EventsandTranscripts.Configuration(
      username=USERNAME,
      password=API_KEY
 )
+
+# Configure proxy and SSL for the SDK
+try:
+    configuration.proxy = HTTPS_PROXY
+    configuration.ssl_ca_cert = temp_cert.name
+    configuration.verify_ssl = True
+    print("✓ SDK proxy and SSL configured")
+except AttributeError as e:
+    print(f"Warning: Could not set SDK proxy/SSL: {e}")
+    print("SDK will use environment variables")
 
 # Create output directory
 os.makedirs(output_dir, exist_ok=True)
