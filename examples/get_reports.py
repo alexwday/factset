@@ -6,8 +6,16 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.api_key_auth import FactSetAPIKeyClient
-from src.oauth2_auth import FactSetOAuth2Client
+try:
+    from src.api_key_auth import FactSetAPIKeyClient
+    from src.oauth2_auth import FactSetOAuth2Client
+except ImportError:
+    # If relative import fails, try adding parent to path
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from src.api_key_auth import FactSetAPIKeyClient
+    from src.oauth2_auth import FactSetOAuth2Client
 
 def test_api_key_auth():
     """Test connection using API key authentication"""
