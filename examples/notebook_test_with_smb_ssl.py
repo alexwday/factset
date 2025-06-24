@@ -19,7 +19,7 @@ API_KEY = "your_api_key_here"
 
 # Connect to SMB and get certificate
 print("Connecting to SMB share...")
-conn = SMBConnection(SMB_USER, SMB_PASS, "python-client", "", use_ntlm_v2=True)
+conn = SMBConnection(SMB_USER, SMB_PASS, "python-client", "", use_ntlm_v2=True, is_direct_tcp=True)
 conn.connect(SMB_IP, 445)
 
 # Download certificate to temp file
