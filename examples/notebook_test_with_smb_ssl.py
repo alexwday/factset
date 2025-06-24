@@ -34,6 +34,13 @@ print(f"Certificate downloaded to: {temp_cert.name}")
 cert_size = os.path.getsize(temp_cert.name)
 print(f"Certificate file size: {cert_size} bytes")
 
+# Set SSL environment variables
+os.environ['REQUESTS_CA_BUNDLE'] = temp_cert.name
+os.environ['SSL_CERT_FILE'] = temp_cert.name
+os.environ['CURL_CA_BUNDLE'] = temp_cert.name
+os.environ['PYTHONHTTPSVERIFY'] = '1'
+print("SSL environment variables set")
+
 # Test FactSet API
 url = "https://api.factset.com/content/factset-fundamentals/v2/income-statement"
 headers = {
@@ -59,3 +66,7 @@ else:
 
 # Clean up
 os.unlink(temp_cert.name)
+
+# Clear SSL environment variables
+for var in ['REQUESTS_CA_BUNDLE', 'SSL_CERT_FILE', 'CURL_CA_BUNDLE', 'PYTHONHTTPSVERIFY']:
+    os.environ.pop(var, None)
