@@ -4,10 +4,27 @@ This project provides examples for connecting to FactSet API using both API Key 
 
 ## Setup
 
-1. **Clone and install dependencies**:
+1. **Clone and create virtual environment**:
    ```bash
-   cd factset-api-test
+   git clone https://github.com/alexwday/factset.git
+   cd factset
+   
+   # Create virtual environment
+   python3 -m venv venv
+   
+   # Activate it (Mac/Linux)
+   source venv/bin/activate
+   
+   # Or on Windows
+   # venv\Scripts\activate
+   
+   # Install dependencies
    pip install -r requirements.txt
+   ```
+   
+   Or use the setup script:
+   ```bash
+   ./setup.sh
    ```
 
 2. **Configure credentials**:
