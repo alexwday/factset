@@ -27,9 +27,18 @@ SMB_CERT_PATH = "/path/to/rbc-ca-bundle.cer"
 USERNAME = "your_factset_username"
 API_KEY = "your_api_key_here"
 
-# Proxy settings
-HTTP_PROXY = "http://proxy.company.com:8080"
-HTTPS_PROXY = "http://proxy.company.com:8080"
+# Proxy settings (with authentication if needed)
+PROXY_USER = "proxy_username"  # Leave empty "" if no auth needed
+PROXY_PASS = "proxy_password"  # Leave empty "" if no auth needed  
+PROXY_HOST = "proxy.company.com:8080"
+
+# Build proxy URLs
+if PROXY_USER and PROXY_PASS:
+    HTTP_PROXY = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}"
+    HTTPS_PROXY = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}"
+else:
+    HTTP_PROXY = f"http://{PROXY_HOST}"
+    HTTPS_PROXY = f"http://{PROXY_HOST}"
 # ===================================================
 
 print("FactSet SDK Test with SMB SSL")
@@ -67,7 +76,7 @@ except Exception as e:
 # Step 3: Import FactSet SDK (after SSL is configured)
 try:
     import fds.sdk.FactSetFundamentals
-    from fds.sdk.FactSetFundamentals.api import company_reports_api
+    from fds.sdk.FactSetFundamentals.api import income_statement_api
     from fds.sdk.FactSetFundamentals.models import *
     print("✓ FactSet SDK imported successfully")
 except ImportError as e:
@@ -99,19 +108,34 @@ print("\n3. Testing FactSet Fundamentals API...")
 
 try:
     with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
-        api_instance = company_reports_api.CompanyReportsApi(api_client)
+        api_instance = income_statement_api.IncomeStatementApi(api_client)
         
+        # Use correct method name
         ids = ["AAPL-US", "MSFT-US"]
-        api_response = api_instance.get_company_reports(ids=ids)
+        api_response = api_instance.get_income_statement(
+            ids=ids,
+            periodicity="ANN",
+            fiscal_period_start="2023-01-01",
+            fiscal_period_end="2023-12-31"
+        )
         
         results = pd.DataFrame(api_response.to_dict().get('data', []))
         print(f"✓ Fundamentals: Retrieved {len(results)} records")
         
         if not results.empty:
+            print("Sample data:")
             print(results.head())
 
 except Exception as e:
     print(f"✗ Fundamentals API failed: {e}")
+    print("Available methods:")
+    try:
+        with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
+            api_instance = income_statement_api.IncomeStatementApi(api_client)
+            methods = [m for m in dir(api_instance) if not m.startswith('_')]
+            print(f"Available methods: {methods}")
+    except:
+        pass
 
 # Step 6: Test Events & Transcripts API (their exact example)
 print("\n4. Testing Events & Transcripts API...")
