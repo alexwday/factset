@@ -84,24 +84,43 @@ except ImportError as e:
     print("Please install: pip install fds.sdk.FactSetFundamentals")
     exit(1)
 
-# Step 4: Configure FactSet SDK with API Key Authentication (official docs)
-print("\n2. Configuring FactSet SDK...")
+# Step 4: Test direct requests first (to confirm proxy works)
+print("\n2. Testing direct requests with proxy...")
+import requests
+try:
+    response = requests.get(
+        "https://api.factset.com", 
+        verify=temp_cert.name, 
+        timeout=10,
+        proxies={'https': HTTPS_PROXY}
+    )
+    print(f"✓ Direct requests work: {response.status_code}")
+except Exception as e:
+    print(f"✗ Direct requests fail: {e}")
 
-# API Key authentication (official pattern)
+# Step 5: Configure FactSet SDK
+print("\n3. Configuring FactSet SDK...")
+
+# Try without explicit proxy first (rely on environment variables)
 configuration = fds.sdk.FactSetFundamentals.Configuration(
     username=USERNAME,  # USERNAME-SERIAL from Developer Portal
     password=API_KEY,   # API-KEY from Developer Portal
-    # Proxy configuration
-    proxy=HTTPS_PROXY,
-    proxy_headers={} if PROXY_USER else None,
-    # SSL configuration
     ssl_ca_cert=temp_cert.name
 )
 
-print("✓ FactSet SDK configured with API Key authentication, proxy and SSL")
+print(f"Environment HTTP_PROXY: {os.environ.get('HTTP_PROXY')}")
+print(f"Environment HTTPS_PROXY: {os.environ.get('HTTPS_PROXY')}")
+print(f"SDK will use environment proxy settings")
 
-# Step 5: Test FactSet Fundamentals API
-print("\n3. Testing FactSet Fundamentals API...")
+# Enable debug to see what's happening
+import logging
+logging.basicConfig(level=logging.DEBUG)
+configuration.debug = True
+
+print("✓ FactSet SDK configured (using environment proxy)")
+
+# Step 6: Test FactSet Fundamentals API
+print("\n4. Testing FactSet Fundamentals API...")
 
 try:
     with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
@@ -134,22 +153,21 @@ except Exception as e:
     except:
         pass
 
-# Step 6: Test Events & Transcripts API
-print("\n4. Testing Events & Transcripts API...")
+# Step 7: Test Events & Transcripts API
+print("\n5. Testing Events & Transcripts API...")
 
 try:
     import fds.sdk.EventsandTranscripts
     from fds.sdk.EventsandTranscripts.api import transcripts_api
     from dateutil.parser import parse as dateutil_parser
     
-    # Configure Events SDK with same settings
+    # Configure Events SDK (let it use environment variables too)
     events_config = fds.sdk.EventsandTranscripts.Configuration(
         username=USERNAME,
         password=API_KEY,
-        proxy=HTTPS_PROXY,
-        proxy_headers={} if PROXY_USER else None,
         ssl_ca_cert=temp_cert.name
     )
+    events_config.debug = True
     
     with fds.sdk.EventsandTranscripts.ApiClient(events_config) as api_client:
         api_instance = transcripts_api.TranscriptsApi(api_client)
@@ -173,8 +191,8 @@ try:
 except Exception as e:
     print(f"✗ Events API failed: {e}")
 
-# Step 7: Cleanup
-print("\n5. Cleaning up...")
+# Step 8: Cleanup
+print("\n6. Cleaning up...")
 try:
     os.unlink(temp_cert.name)
     print("✓ Temporary certificate deleted")
