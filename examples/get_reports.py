@@ -15,13 +15,14 @@ def test_api_key_auth():
     try:
         client = FactSetAPIKeyClient()
         
-        # Common FactSet API endpoints to try
+        # FactSet v2 API endpoints to try
         endpoints_to_try = [
-            "/v1/catalog",
-            "/v1/reports",
-            "/v1/fundamentals/reports",
-            "/v1/analytics/reports",
-            "/v1/content/reports"
+            "/factset-funds/v2/reference",
+            "/factset-prices/v2/reference",
+            "/factset-fundamentals/v2/reference",
+            "/factset-estimates/v2/reference",
+            "/factset-analytics/v2/reference",
+            "/factset-concordance/v2/reference"
         ]
         
         for endpoint in endpoints_to_try:
@@ -50,13 +51,14 @@ def test_oauth2_auth():
         token = client._get_access_token()
         print("Successfully obtained access token!")
         
-        # Same endpoints as above
+        # Same v2 endpoints as above
         endpoints_to_try = [
-            "/v1/catalog",
-            "/v1/reports",
-            "/v1/fundamentals/reports",
-            "/v1/analytics/reports",
-            "/v1/content/reports"
+            "/factset-funds/v2/reference",
+            "/factset-prices/v2/reference",
+            "/factset-fundamentals/v2/reference",
+            "/factset-estimates/v2/reference",
+            "/factset-analytics/v2/reference",
+            "/factset-concordance/v2/reference"
         ]
         
         for endpoint in endpoints_to_try:

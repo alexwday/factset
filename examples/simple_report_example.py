@@ -11,26 +11,25 @@ from src.api_key_auth import FactSetAPIKeyClient
 import pandas as pd
 
 def get_company_fundamentals(ticker):
-    """Example: Get fundamental data for a company"""
+    """Example: Get fundamental data for a company using v2 API"""
     client = FactSetAPIKeyClient()
     
-    # This is an example - actual endpoint may differ
-    # Check FactSet API docs for exact endpoints
-    endpoint = f"/v1/fundamentals/factset-fundamentals/metrics"
+    # FactSet v2 fundamentals endpoint
+    endpoint = "/factset-fundamentals/v2/income-statement"
     
-    # Example request body - adjust based on API docs
+    # v2 API request format
     request_body = {
         "ids": [ticker],  # e.g., ["AAPL-US", "MSFT-US"]
-        "metrics": [
-            "SALES",
-            "TOTAL_REVENUE", 
-            "NET_INCOME",
-            "TOTAL_ASSETS",
-            "TOTAL_EQUITY"
-        ],
         "periodicity": "ANN",  # Annual
         "fiscalPeriodStart": "2020-01-01",
-        "fiscalPeriodEnd": "2023-12-31"
+        "fiscalPeriodEnd": "2023-12-31",
+        "fields": [
+            "sales",
+            "totalRevenue",
+            "netIncome",
+            "grossProfit",
+            "operatingIncome"
+        ]
     }
     
     try:
@@ -41,16 +40,17 @@ def get_company_fundamentals(ticker):
         return None
 
 def get_estimates_data(ticker):
-    """Example: Get consensus estimates for a company"""
+    """Example: Get consensus estimates using v2 API"""
     client = FactSetAPIKeyClient()
     
-    endpoint = "/v1/estimates/consensus"
+    endpoint = "/factset-estimates/v2/consensus"
     
     request_body = {
         "ids": [ticker],
-        "metrics": ["SALES_ESTIMATE", "EPS_ESTIMATE"],
+        "metrics": ["sales", "eps"],
         "periodicity": "ANN",
-        "fiscalPeriod": 1  # Next fiscal year
+        "fiscalPeriodStart": "2024-01-01",
+        "fiscalPeriodEnd": "2024-12-31"
     }
     
     try:
