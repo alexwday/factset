@@ -78,46 +78,32 @@ try:
     import fds.sdk.FactSetFundamentals
     from fds.sdk.FactSetFundamentals.api import income_statement_api
     from fds.sdk.FactSetFundamentals.models import *
-    from fds.sdk.utils.authentication import ConfidentialClient
     print("✓ FactSet SDK imported successfully")
 except ImportError as e:
     print(f"✗ SDK import failed: {e}")
-    print("Please install: pip install fds.sdk.utils fds.sdk.FactSetFundamentals")
+    print("Please install: pip install fds.sdk.FactSetFundamentals")
     exit(1)
 
-# Step 4: Create ConfidentialClient (per official docs)
-print("\n2. Configuring FactSet ConfidentialClient...")
+# Step 4: Configure FactSet SDK with API Key Authentication (official docs)
+print("\n2. Configuring FactSet SDK...")
 
-# Create a temporary config file for ConfidentialClient
-import json
-config_data = {
-    "username": USERNAME,
-    "password": API_KEY
-}
-config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-json.dump(config_data, config_file)
-config_file.close()
-
-# Create ConfidentialClient with proxy and SSL (official pattern)
-proxy_headers = {} if not PROXY_USER else None  # Custom headers if needed
-
-client = ConfidentialClient(
-    config_path=config_file.name,
+# API Key authentication (official pattern)
+configuration = fds.sdk.FactSetFundamentals.Configuration(
+    username=USERNAME,  # USERNAME-SERIAL from Developer Portal
+    password=API_KEY,   # API-KEY from Developer Portal
+    # Proxy configuration
     proxy=HTTPS_PROXY,
-    proxy_headers=proxy_headers,
-    verify_ssl=True,
+    proxy_headers={} if PROXY_USER else None,
+    # SSL configuration
     ssl_ca_cert=temp_cert.name
 )
 
-print("✓ ConfidentialClient configured with proxy and SSL (official method)")
+print("✓ FactSet SDK configured with API Key authentication, proxy and SSL")
 
-# Step 5: Test FactSet Fundamentals API using ConfidentialClient
+# Step 5: Test FactSet Fundamentals API
 print("\n3. Testing FactSet Fundamentals API...")
 
 try:
-    # Get configuration from ConfidentialClient
-    configuration = client.get_api_configuration()
-    
     with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
         api_instance = income_statement_api.IncomeStatementApi(api_client)
         
@@ -141,7 +127,6 @@ except Exception as e:
     print(f"✗ Fundamentals API failed: {e}")
     print("Available methods:")
     try:
-        configuration = client.get_api_configuration()
         with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
             api_instance = income_statement_api.IncomeStatementApi(api_client)
             methods = [m for m in dir(api_instance) if not m.startswith('_')]
@@ -149,7 +134,7 @@ except Exception as e:
     except:
         pass
 
-# Step 6: Test Events & Transcripts API using ConfidentialClient
+# Step 6: Test Events & Transcripts API
 print("\n4. Testing Events & Transcripts API...")
 
 try:
@@ -157,8 +142,14 @@ try:
     from fds.sdk.EventsandTranscripts.api import transcripts_api
     from dateutil.parser import parse as dateutil_parser
     
-    # Use the same ConfidentialClient configuration for Events SDK
-    events_config = client.get_api_configuration()
+    # Configure Events SDK with same settings
+    events_config = fds.sdk.EventsandTranscripts.Configuration(
+        username=USERNAME,
+        password=API_KEY,
+        proxy=HTTPS_PROXY,
+        proxy_headers={} if PROXY_USER else None,
+        ssl_ca_cert=temp_cert.name
+    )
     
     with fds.sdk.EventsandTranscripts.ApiClient(events_config) as api_client:
         api_instance = transcripts_api.TranscriptsApi(api_client)
@@ -186,8 +177,7 @@ except Exception as e:
 print("\n5. Cleaning up...")
 try:
     os.unlink(temp_cert.name)
-    os.unlink(config_file.name)
-    print("✓ Temporary files deleted")
+    print("✓ Temporary certificate deleted")
 except:
     pass
 
@@ -197,4 +187,4 @@ for var in ['REQUESTS_CA_BUNDLE', 'SSL_CERT_FILE', 'CURL_CA_BUNDLE', 'PYTHONHTTP
 print("✓ Environment variables cleared")
 
 print("\nFactSet SDK test completed!")
-print("If successful, you can now use FactSet SDK with ConfidentialClient in your workflows.")
+print("If successful, you can now use FactSet SDK with API Key authentication in your workflows.")
