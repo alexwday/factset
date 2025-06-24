@@ -17,7 +17,7 @@ def get_price_history(ticker, days=30):
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     
-    endpoint = "/factset-prices/v2/prices"
+    endpoint = "/content/factset-prices/v2/prices"
     request_body = {
         "ids": [ticker],
         "startDate": start_date,
@@ -39,7 +39,7 @@ def get_company_overview(ticker):
     """Get company overview information"""
     client = FactSetAPIKeyClient()
     
-    endpoint = "/factset-fundamentals/v2/company-overview"
+    endpoint = "/content/factset-fundamentals/v2/company-overview"
     request_body = {
         "ids": [ticker],
         "fields": ["companyName", "businessDescription", "industryGroup", "sector", "employees", "marketCap"]
@@ -58,7 +58,7 @@ def get_balance_sheet(ticker):
     """Get balance sheet data"""
     client = FactSetAPIKeyClient()
     
-    endpoint = "/factset-fundamentals/v2/balance-sheet"
+    endpoint = "/content/factset-fundamentals/v2/balance-sheet"
     request_body = {
         "ids": [ticker],
         "periodicity": "ANN",
@@ -80,7 +80,7 @@ def search_companies(search_term):
     """Search for companies by name"""
     client = FactSetAPIKeyClient()
     
-    endpoint = "/factset-concordance/v2/search"
+    endpoint = "/content/factset-concordance/v2/search"
     request_body = {
         "searchText": search_term,
         "includePrivate": False,

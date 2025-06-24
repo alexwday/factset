@@ -14,8 +14,8 @@ def get_company_fundamentals(ticker):
     """Example: Get fundamental data for a company using v2 API"""
     client = FactSetAPIKeyClient()
     
-    # FactSet v2 fundamentals endpoint
-    endpoint = "/factset-fundamentals/v2/income-statement"
+    # FactSet v2 fundamentals endpoint with full path
+    endpoint = "/content/factset-fundamentals/v2/income-statement"
     
     # v2 API request format
     request_body = {
@@ -43,7 +43,7 @@ def get_estimates_data(ticker):
     """Example: Get consensus estimates using v2 API"""
     client = FactSetAPIKeyClient()
     
-    endpoint = "/factset-estimates/v2/consensus"
+    endpoint = "/content/factset-estimates/v2/consensus"
     
     request_body = {
         "ids": [ticker],

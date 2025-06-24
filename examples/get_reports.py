@@ -17,12 +17,11 @@ def test_api_key_auth():
         
         # FactSet v2 API endpoints to try
         endpoints_to_try = [
-            "/factset-funds/v2/reference",
-            "/factset-prices/v2/reference",
-            "/factset-fundamentals/v2/reference",
-            "/factset-estimates/v2/reference",
-            "/factset-analytics/v2/reference",
-            "/factset-concordance/v2/reference"
+            "/content/factset-fundamentals/v2/company-reports",
+            "/content/factset-fundamentals/v2/income-statement",
+            "/content/factset-fundamentals/v2/balance-sheet",
+            "/content/factset-fundamentals/v2/cash-flow-statement",
+            "/content/factset-fundamentals/v2/reference"
         ]
         
         for endpoint in endpoints_to_try:
@@ -53,12 +52,11 @@ def test_oauth2_auth():
         
         # Same v2 endpoints as above
         endpoints_to_try = [
-            "/factset-funds/v2/reference",
-            "/factset-prices/v2/reference",
-            "/factset-fundamentals/v2/reference",
-            "/factset-estimates/v2/reference",
-            "/factset-analytics/v2/reference",
-            "/factset-concordance/v2/reference"
+            "/content/factset-fundamentals/v2/company-reports",
+            "/content/factset-fundamentals/v2/income-statement",
+            "/content/factset-fundamentals/v2/balance-sheet",
+            "/content/factset-fundamentals/v2/cash-flow-statement",
+            "/content/factset-fundamentals/v2/reference"
         ]
         
         for endpoint in endpoints_to_try:
