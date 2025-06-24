@@ -1,11 +1,12 @@
 """
-FactSet SDK Example with SMB SSL Certificate
-Uses official FactSet SDK following their example pattern
+FactSet SDK Complete Notebook Cell
+SMB SSL + Proxy + Official SDK Configuration
 Paste this entire code into a Dataiku/Jupyter notebook cell
 
 Required pip installs:
-pip install fds.sdk.utils
+pip install fds.sdk.utils  
 pip install fds.sdk.FactSetFundamentals
+pip install fds.sdk.EventsandTranscripts==0.21.8
 pip install pandas
 pip install pysmb
 """
@@ -93,52 +94,64 @@ configuration.debug = True
 
 print("✓ SDK configuration ready with proxy and SSL (official method)")
 
-# Step 5: Test API calls (following their example pattern)
+# Step 5: Test FactSet Fundamentals API
 print("\n3. Testing FactSet Fundamentals API...")
 
 try:
-    # Create API client and instance
     with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
         api_instance = company_reports_api.CompanyReportsApi(api_client)
         
-        # Test 1: Get company reports
-        print("\nCompany Reports response:")
-        
-        # Define request parameters
-        ids = ["AAPL-US", "MSFT-US"]  # Apple and Microsoft
-        
-        # Make API call
+        ids = ["AAPL-US", "MSFT-US"]
         api_response = api_instance.get_company_reports(ids=ids)
         
-        # Convert to DataFrame (following their pattern)
         results = pd.DataFrame(api_response.to_dict().get('data', []))
-        print(f"✓ Retrieved {len(results)} records")
+        print(f"✓ Fundamentals: Retrieved {len(results)} records")
         
         if not results.empty:
-            print("\nResults preview:")
             print(results.head())
-            
-            # Show available columns
-            print(f"\nAvailable columns: {list(results.columns)}")
-        else:
-            print("No data returned")
-            
-        # Print raw response structure
-        print(f"\nAPI Response structure:")
-        response_dict = api_response.to_dict()
-        for key in response_dict.keys():
-            print(f"- {key}: {type(response_dict[key])}")
 
 except Exception as e:
-    print(f"✗ API call failed: {type(e).__name__}: {e}")
+    print(f"✗ Fundamentals API failed: {e}")
+
+# Step 6: Test Events & Transcripts API (their exact example)
+print("\n4. Testing Events & Transcripts API...")
+
+try:
+    import fds.sdk.EventsandTranscripts
+    from fds.sdk.EventsandTranscripts.api import transcripts_api
+    from dateutil.parser import parse as dateutil_parser
     
-    # Try alternative endpoint if available
-    try:
-        print("\nTrying alternative API endpoint...")
-        # You can add other API endpoints here
+    # Configure Events SDK
+    events_config = fds.sdk.EventsandTranscripts.Configuration(
+        username=USERNAME,
+        password=API_KEY,
+        proxy=HTTPS_PROXY,
+        proxy_headers=None,
+        ssl_ca_cert=temp_cert.name
+    )
+    events_config.debug = True
+    
+    with fds.sdk.EventsandTranscripts.ApiClient(events_config) as api_client:
+        api_instance = transcripts_api.TranscriptsApi(api_client)
         
-    except Exception as e2:
-        print(f"✗ Alternative API also failed: {e2}")
+        # Get transcripts dates (their example)
+        start_date = dateutil_parser('2020-10-01').date() 
+        end_date = dateutil_parser('2020-12-26').date() 
+        
+        api_response = api_instance.get_transcripts_dates(
+            start_date=start_date, 
+            end_date=end_date, 
+            time_zone="America/New_York",
+            sort=["-storyDateTime"], 
+            pagination_limit=5
+        )
+        
+        results = pd.DataFrame(api_response.to_dict()['data'])
+        print(f"✓ Events: Retrieved {len(results)} transcript records")
+        print(results.head())
+
+except Exception as e:
+    print(f"✗ Events API failed: {e}")
 
 # Step 6: Cleanup
 print("\n4. Cleaning up...")
