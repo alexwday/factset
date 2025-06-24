@@ -30,6 +30,10 @@ conn.close()
 
 print(f"Certificate downloaded to: {temp_cert.name}")
 
+# Verify certificate file exists and has content
+cert_size = os.path.getsize(temp_cert.name)
+print(f"Certificate file size: {cert_size} bytes")
+
 # Test FactSet API
 url = "https://api.factset.com/content/factset-fundamentals/v2/income-statement"
 headers = {
@@ -43,6 +47,7 @@ body = {
     "fiscalPeriodEnd": "2023-12-31"
 }
 
+print(f"Making API request with SSL certificate: {temp_cert.name}")
 response = requests.post(url, json=body, headers=headers, verify=temp_cert.name)
 
 print(f"Status: {response.status_code}")
