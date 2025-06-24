@@ -2,6 +2,7 @@ import os
 import time
 import requests
 from dotenv import load_dotenv
+from pathlib import Path
 
 load_dotenv()
 
@@ -19,6 +20,15 @@ class FactSetAPIKeyClient:
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         })
+        
+        # SSL Certificate setup
+        cert_path = Path.home() / "Documents" / "cer" / "rbc-ca-bundle.cer"
+        if cert_path.exists():
+            self.session.verify = str(cert_path)
+            print(f"Using SSL certificate: {cert_path}")
+        else:
+            print(f"Warning: SSL certificate not found at {cert_path}")
+            print("Using default SSL verification")
         
         # Rate limiting: 10 requests per second
         self.last_request_time = 0

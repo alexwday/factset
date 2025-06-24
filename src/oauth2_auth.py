@@ -2,6 +2,7 @@ import os
 import time
 import requests
 from dotenv import load_dotenv
+from pathlib import Path
 
 load_dotenv()
 
@@ -22,6 +23,15 @@ class FactSetOAuth2Client:
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         })
+        
+        # SSL Certificate setup
+        cert_path = Path.home() / "Documents" / "cer" / "rbc-ca-bundle.cer"
+        if cert_path.exists():
+            self.session.verify = str(cert_path)
+            print(f"Using SSL certificate: {cert_path}")
+        else:
+            print(f"Warning: SSL certificate not found at {cert_path}")
+            print("Using default SSL verification")
     
     def _get_access_token(self):
         """Get access token using client credentials flow"""
@@ -36,7 +46,10 @@ class FactSetOAuth2Client:
             'scope': 'read'  # Adjust scope as needed
         }
         
-        response = requests.post(self.token_url, data=data)
+        # Use same SSL cert for token request
+        cert_path = Path.home() / "Documents" / "cer" / "rbc-ca-bundle.cer"
+        verify = str(cert_path) if cert_path.exists() else True
+        response = requests.post(self.token_url, data=data, verify=verify)
         response.raise_for_status()
         
         token_data = response.json()
