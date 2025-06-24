@@ -74,23 +74,24 @@ except ImportError as e:
     print("Please install: pip install fds.sdk.FactSetFundamentals")
     exit(1)
 
-# Step 4: Configure FactSet SDK with proxy and SSL
+# Step 4: Configure FactSet SDK with proxy and SSL (per official docs)
 print("\n2. Configuring FactSet SDK...")
 configuration = fds.sdk.FactSetFundamentals.Configuration(
     username=USERNAME,
-    password=API_KEY
+    password=API_KEY,
+    # Proxy configuration (official SDK docs)
+    proxy=HTTPS_PROXY,
+    proxy_headers=None,
+    # SSL configuration (official SDK docs)
+    ssl_ca_cert=temp_cert.name
 )
 
-# Configure proxy and SSL for the SDK
-configuration.proxy = HTTP_PROXY
-configuration.ssl_ca_cert = temp_cert.name
-configuration.verify_ssl = True
+# Enable debug logging to see what's happening
+import logging
+logging.basicConfig(level=logging.DEBUG)
+configuration.debug = True
 
-# Alternative: Set proxy via configuration
-if hasattr(configuration, 'proxy_headers'):
-    configuration.proxy_headers = None
-
-print("✓ SDK configuration ready with proxy and SSL")
+print("✓ SDK configuration ready with proxy and SSL (official method)")
 
 # Step 5: Test API calls (following their example pattern)
 print("\n3. Testing FactSet Fundamentals API...")
