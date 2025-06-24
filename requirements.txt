@@ -3,3 +3,5 @@ python-dotenv>=1.0.0
 pandas>=2.0.0
 openpyxl>=3.1.0
 pysmb>=1.2.9
+fds.sdk.utils
+fds.sdk.FactSetFundamentals
