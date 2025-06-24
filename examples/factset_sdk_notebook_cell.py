@@ -78,35 +78,46 @@ try:
     import fds.sdk.FactSetFundamentals
     from fds.sdk.FactSetFundamentals.api import income_statement_api
     from fds.sdk.FactSetFundamentals.models import *
+    from fds.sdk.utils.authentication import ConfidentialClient
     print("✓ FactSet SDK imported successfully")
 except ImportError as e:
     print(f"✗ SDK import failed: {e}")
-    print("Please install: pip install fds.sdk.FactSetFundamentals")
+    print("Please install: pip install fds.sdk.utils fds.sdk.FactSetFundamentals")
     exit(1)
 
-# Step 4: Configure FactSet SDK with proxy and SSL (per official docs)
-print("\n2. Configuring FactSet SDK...")
-configuration = fds.sdk.FactSetFundamentals.Configuration(
-    username=USERNAME,
-    password=API_KEY,
-    # Proxy configuration (official SDK docs)
+# Step 4: Create ConfidentialClient (per official docs)
+print("\n2. Configuring FactSet ConfidentialClient...")
+
+# Create a temporary config file for ConfidentialClient
+import json
+config_data = {
+    "username": USERNAME,
+    "password": API_KEY
+}
+config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+json.dump(config_data, config_file)
+config_file.close()
+
+# Create ConfidentialClient with proxy and SSL (official pattern)
+proxy_headers = {} if not PROXY_USER else None  # Custom headers if needed
+
+client = ConfidentialClient(
+    config_path=config_file.name,
     proxy=HTTPS_PROXY,
-    proxy_headers=None,
-    # SSL configuration (official SDK docs)
+    proxy_headers=proxy_headers,
+    verify_ssl=True,
     ssl_ca_cert=temp_cert.name
 )
 
-# Enable debug logging to see what's happening
-import logging
-logging.basicConfig(level=logging.DEBUG)
-configuration.debug = True
+print("✓ ConfidentialClient configured with proxy and SSL (official method)")
 
-print("✓ SDK configuration ready with proxy and SSL (official method)")
-
-# Step 5: Test FactSet Fundamentals API
+# Step 5: Test FactSet Fundamentals API using ConfidentialClient
 print("\n3. Testing FactSet Fundamentals API...")
 
 try:
+    # Get configuration from ConfidentialClient
+    configuration = client.get_api_configuration()
+    
     with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
         api_instance = income_statement_api.IncomeStatementApi(api_client)
         
@@ -130,6 +141,7 @@ except Exception as e:
     print(f"✗ Fundamentals API failed: {e}")
     print("Available methods:")
     try:
+        configuration = client.get_api_configuration()
         with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
             api_instance = income_statement_api.IncomeStatementApi(api_client)
             methods = [m for m in dir(api_instance) if not m.startswith('_')]
@@ -137,7 +149,7 @@ except Exception as e:
     except:
         pass
 
-# Step 6: Test Events & Transcripts API (their exact example)
+# Step 6: Test Events & Transcripts API using ConfidentialClient
 print("\n4. Testing Events & Transcripts API...")
 
 try:
@@ -145,15 +157,8 @@ try:
     from fds.sdk.EventsandTranscripts.api import transcripts_api
     from dateutil.parser import parse as dateutil_parser
     
-    # Configure Events SDK
-    events_config = fds.sdk.EventsandTranscripts.Configuration(
-        username=USERNAME,
-        password=API_KEY,
-        proxy=HTTPS_PROXY,
-        proxy_headers=None,
-        ssl_ca_cert=temp_cert.name
-    )
-    events_config.debug = True
+    # Use the same ConfidentialClient configuration for Events SDK
+    events_config = client.get_api_configuration()
     
     with fds.sdk.EventsandTranscripts.ApiClient(events_config) as api_client:
         api_instance = transcripts_api.TranscriptsApi(api_client)
@@ -177,11 +182,12 @@ try:
 except Exception as e:
     print(f"✗ Events API failed: {e}")
 
-# Step 6: Cleanup
-print("\n4. Cleaning up...")
+# Step 7: Cleanup
+print("\n5. Cleaning up...")
 try:
     os.unlink(temp_cert.name)
-    print("✓ Temporary certificate deleted")
+    os.unlink(config_file.name)
+    print("✓ Temporary files deleted")
 except:
     pass
 
@@ -190,5 +196,5 @@ for var in ['REQUESTS_CA_BUNDLE', 'SSL_CERT_FILE', 'CURL_CA_BUNDLE', 'PYTHONHTTP
     os.environ.pop(var, None)
 print("✓ Environment variables cleared")
 
-print("\nSDK test completed!")
-print("If successful, you can now use FactSet SDK in your workflows.")
+print("\nFactSet SDK test completed!")
+print("If successful, you can now use FactSet SDK with ConfidentialClient in your workflows.")
