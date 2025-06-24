@@ -21,6 +21,20 @@ class FactSetAPIKeyClient:
             'Accept': 'application/json'
         })
         
+        # Proxy configuration
+        http_proxy = os.getenv('HTTP_PROXY') or os.getenv('http_proxy')
+        https_proxy = os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
+        no_proxy = os.getenv('NO_PROXY') or os.getenv('no_proxy')
+        
+        if http_proxy or https_proxy:
+            proxies = {}
+            if http_proxy:
+                proxies['http'] = http_proxy
+            if https_proxy:
+                proxies['https'] = https_proxy
+            self.session.proxies.update(proxies)
+            print(f"Using proxy: {proxies}")
+            
         # SSL Certificate setup
         cert_path = Path.home() / "Documents" / "cer" / "rbc-ca-bundle.cer"
         if cert_path.exists():
