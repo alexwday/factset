@@ -11,6 +11,7 @@ from fds.sdk.EventsandTranscripts.model.company_event_request import CompanyEven
 from fds.sdk.EventsandTranscripts.model.company_event_request_data import CompanyEventRequestData
 from fds.sdk.EventsandTranscripts.model.company_event_request_data_date_time import CompanyEventRequestDataDateTime
 from fds.sdk.EventsandTranscripts.model.company_event_request_data_universe import CompanyEventRequestDataUniverse
+from dateutil.parser import parse as dateutil_parser
 import os
 from urllib.parse import quote
 from datetime import datetime, timedelta, date
@@ -85,6 +86,7 @@ MONTHS_AHEAD = 3  # Number of months to look ahead
 
 # Request Configuration
 REQUEST_DELAY = 1.0  # Seconds between requests to avoid rate limiting
+BATCH_SIZE = 10  # Process banks in batches of this size
 
 # =============================================================================
 # SETUP AND CONFIGURATION
@@ -166,11 +168,11 @@ def get_calendar_events(symbols, start_date, end_date, api_instance):
         print(f"\nFetching calendar events for {len(symbols)} banks...")
         print(f"Date range: {start_date.date()} to {end_date.date()}")
         
-        # Create request object with proper ISO 8601 format
+        # Create request object with proper ISO 8601 format using dateutil_parser
         request_data_dict = {
             "date_time": CompanyEventRequestDataDateTime(
-                start=start_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                end=end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+                start=dateutil_parser(start_date.strftime('%Y-%m-%dT00:00:00Z')),
+                end=dateutil_parser(end_date.strftime('%Y-%m-%dT23:59:59Z'))
             ),
             "universe": CompanyEventRequestDataUniverse(
                 symbols=symbols,
@@ -693,14 +695,29 @@ def main():
     print(f"\nDate range: {start_date.date()} to {end_date.date()}")
     
     # Get bank symbols
-    symbols = list(BANK_PRIMARY_IDS.keys())
+    all_symbols = list(BANK_PRIMARY_IDS.keys())
     
     try:
         with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
             api_instance = calendar_events_api.CalendarEventsApi(api_client)
             
-            # Fetch calendar events
-            events = get_calendar_events(symbols, start_date, end_date, api_instance)
+            # Process banks in batches
+            all_events = []
+            for i in range(0, len(all_symbols), BATCH_SIZE):
+                batch_symbols = all_symbols[i:i + BATCH_SIZE]
+                print(f"\nProcessing batch {i//BATCH_SIZE + 1}/{(len(all_symbols) + BATCH_SIZE - 1)//BATCH_SIZE}")
+                print(f"Banks in batch: {', '.join(batch_symbols[:3])}{'...' if len(batch_symbols) > 3 else ''}")
+                
+                # Fetch calendar events for this batch
+                batch_events = get_calendar_events(batch_symbols, start_date, end_date, api_instance)
+                all_events.extend(batch_events)
+                
+                # Delay between batches
+                if i + BATCH_SIZE < len(all_symbols):
+                    print(f"Waiting {REQUEST_DELAY} seconds before next batch...")
+                    time.sleep(REQUEST_DELAY)
+            
+            events = all_events
             
             if not events:
                 print("\nNo events found for the specified criteria")
