@@ -274,7 +274,7 @@ def generate_html_calendar(events, start_date, end_date):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bank Events Calendar - Interactive View</title>
+    <title>FactSet Bank Events Calendar - Professional View</title>
     <style>
         * {
             margin: 0;
@@ -282,51 +282,131 @@ def generate_html_calendar(events, start_date, end_date):
             box-sizing: border-box;
         }
         
+        :root {
+            --primary-blue: #1e3a8a;
+            --secondary-blue: #3b82f6;
+            --accent-blue: #60a5fa;
+            --light-blue: #dbeafe;
+            --text-dark: #1f2937;
+            --text-medium: #4b5563;
+            --text-light: #6b7280;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-tertiary: #f1f5f9;
+            --border-light: #e2e8f0;
+            --border-medium: #cbd5e1;
+            --success: #059669;
+            --warning: #d97706;
+            --error: #dc2626;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background-color: #f8f9fa;
-            color: #333;
-            line-height: 1.6;
+            font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-secondary);
+            color: var(--text-dark);
+            line-height: 1.5;
+            overflow-x: hidden;
         }
         
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
+        .app-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         
-        /* Header */
+        /* Sticky Header */
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--primary-blue);
             color: white;
-            padding: 15px 25px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 12px 0;
+            box-shadow: var(--shadow-md);
+            border-bottom: 3px solid var(--accent-blue);
+        }
+        
+        .header-content {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        
+        .header-title {
+            display: flex;
+            flex-direction: column;
+            min-width: 300px;
         }
         
         .header h1 {
-            font-size: 1.8em;
-            margin-bottom: 5px;
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 2px;
+            letter-spacing: -0.5px;
         }
         
         .header p {
-            opacity: 0.9;
-            font-size: 0.9em;
+            opacity: 0.85;
+            font-size: 13px;
+            font-weight: 400;
         }
         
-        /* Controls Section */
-        .controls {
-            background: white;
-            padding: 15px 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            margin-bottom: 20px;
-        }
-        
-        .controls-grid {
+        .header-controls {
             display: flex;
-            gap: 15px;
+            gap: 16px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .quick-stats {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 16px;
+            border-radius: 6px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .stat-item {
+            text-align: center;
+            min-width: 60px;
+        }
+        
+        .stat-value {
+            font-size: 18px;
+            font-weight: 700;
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: 11px;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Main Content Area */
+        .main-content {
+            flex: 1;
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 0 24px;
+            width: 100%;
+        }
+        
+        /* Controls Section - Now in Header */
+        .controls {
+            display: flex;
+            gap: 12px;
             align-items: center;
             flex-wrap: wrap;
         }
@@ -334,85 +414,212 @@ def generate_html_calendar(events, start_date, end_date):
         .control-group {
             display: flex;
             flex-direction: column;
-            min-width: 180px;
+            min-width: 140px;
         }
         
         .control-group label {
-            font-weight: 600;
-            margin-bottom: 5px;
-            color: #555;
-            font-size: 0.9em;
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .control-group select,
         .control-group input {
-            padding: 8px 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
-            font-size: 14px;
-            transition: all 0.3s ease;
-            min-width: 180px;
+            padding: 6px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            font-size: 13px;
+            background: rgba(255, 255, 255, 0.95);
+            color: var(--text-dark);
+            transition: all 0.2s ease;
+            min-width: 140px;
         }
         
         .control-group select:focus,
         .control-group input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.3);
+            background: white;
         }
         
-        /* Upcoming Earnings Banner */
-        .upcoming-earnings {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-            padding: 15px 20px;
+        /* Sidebar Layout */
+        .content-wrapper {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 24px;
+            padding: 24px 0;
+            min-height: calc(100vh - 120px);
+        }
+        
+        .sidebar {
+            background: var(--bg-primary);
             border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            box-shadow: var(--shadow-sm);
+            padding: 20px;
+            height: fit-content;
+            position: sticky;
+            top: 90px;
+        }
+        
+        .sidebar h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--border-light);
+        }
+        
+        .filter-section {
+            margin-bottom: 24px;
+        }
+        
+        .filter-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .filter-section label {
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-medium);
+            font-size: 13px;
+            display: block;
+        }
+        
+        .filter-section select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border-light);
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            color: var(--text-dark);
+            transition: all 0.2s ease;
+        }
+        
+        .filter-section select:focus {
+            outline: none;
+            border-color: var(--secondary-blue);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .main-calendar-area {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        /* Dashboard Cards */
+        .dashboard-section {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        
+        .upcoming-earnings {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: var(--shadow-sm);
         }
         
         .upcoming-earnings h3 {
-            margin-bottom: 10px;
-            font-size: 1.1em;
+            color: var(--text-dark);
+            margin-bottom: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .upcoming-events {
-            display: flex;
-            gap: 15px;
-            overflow-x: auto;
-            padding-bottom: 10px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            max-height: 120px;
+            overflow-y: auto;
         }
         
         .upcoming-events::-webkit-scrollbar {
-            height: 6px;
+            width: 6px;
         }
         
         .upcoming-events::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.1);
+            background: var(--bg-tertiary);
             border-radius: 3px;
         }
         
         .upcoming-events::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.3);
+            background: var(--border-medium);
             border-radius: 3px;
         }
         
         .upcoming-events::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.5);
+            background: var(--text-light);
         }
         
         .upcoming-event {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 8px 12px;
+            background: var(--light-blue);
+            border: 1px solid #bfdbfe;
+            padding: 12px;
             border-radius: 6px;
-            font-size: 0.9em;
-            min-width: 200px;
-            flex-shrink: 0;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .upcoming-event:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
         }
         
         .upcoming-event strong {
             display: block;
-            margin-bottom: 2px;
+            color: var(--primary-blue);
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        
+        .event-summary-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+        
+        .summary-item {
+            text-align: center;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+        }
+        
+        .summary-item .number {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--secondary-blue);
+            display: block;
+        }
+        
+        .summary-item .label {
+            font-size: 11px;
+            color: var(--text-medium);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         /* Month Navigation */
@@ -420,99 +627,173 @@ def generate_html_calendar(events, start_date, end_date):
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
+            background: var(--bg-primary);
+            padding: 16px 20px;
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-light);
         }
         
         .month-nav-button {
-            background: #667eea;
+            background: var(--secondary-blue);
             color: white;
             border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
+            padding: 10px 16px;
+            border-radius: 6px;
             cursor: pointer;
-            font-size: 16px;
-            transition: all 0.3s ease;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
         
-        .month-nav-button:hover {
-            background: #5a67d8;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        .month-nav-button:hover:not(:disabled) {
+            background: var(--primary-blue);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
         }
         
         .month-nav-button:disabled {
-            background: #cbd5e0;
+            background: var(--border-medium);
             cursor: not-allowed;
             transform: none;
+            color: var(--text-light);
         }
         
         .current-month {
-            font-size: 1.5em;
+            font-size: 20px;
             font-weight: 600;
-            color: #333;
+            color: var(--text-dark);
+            text-align: center;
+            flex: 1;
+        }
+        
+        .nav-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .view-toggle {
+            display: flex;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            padding: 2px;
+        }
+        
+        .view-toggle button {
+            padding: 6px 12px;
+            border: none;
+            background: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-medium);
+            transition: all 0.2s ease;
+        }
+        
+        .view-toggle button.active {
+            background: white;
+            color: var(--text-dark);
+            box-shadow: var(--shadow-sm);
         }
         
         /* Calendar */
         .calendar-wrapper {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            padding: 25px;
+            background: var(--bg-primary);
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-light);
+            overflow: hidden;
         }
         
         .calendar-grid {
             display: grid;
             grid-template-columns: repeat(7, 1fr);
-            gap: 2px;
+            gap: 1px;
+            background: var(--border-light);
         }
         
         .day-header {
             text-align: center;
             font-weight: 600;
-            padding: 15px 5px;
-            background-color: #f7fafc;
-            color: #4a5568;
-            font-size: 0.9em;
+            padding: 12px 8px;
+            background: var(--bg-tertiary);
+            color: var(--text-medium);
+            font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            border-bottom: 2px solid var(--border-medium);
         }
         
         .day-cell {
-            min-height: 120px;
-            border: 1px solid #e2e8f0;
+            min-height: 110px;
             padding: 8px;
-            background-color: #fff;
+            background: var(--bg-primary);
             position: relative;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
+            border: none;
         }
         
         .day-cell:hover {
-            background-color: #f7fafc;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            background: var(--bg-secondary);
+            transform: scale(1.02);
+            z-index: 10;
+            box-shadow: var(--shadow-md);
+            border-radius: 4px;
         }
         
         .day-number {
             font-weight: 600;
-            margin-bottom: 5px;
-            color: #4a5568;
+            margin-bottom: 6px;
+            color: var(--text-dark);
+            font-size: 14px;
+        }
+        
+        .today .day-number {
+            background: var(--secondary-blue);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
         }
         
         .event {
-            font-size: 0.8em;
-            padding: 4px 8px;
-            margin: 2px 0;
-            border-radius: 6px;
+            font-size: 10px;
+            padding: 3px 6px;
+            margin: 1px 0;
+            border-radius: 3px;
             cursor: pointer;
             overflow: hidden;
             white-space: nowrap;
             text-overflow: ellipsis;
             transition: all 0.2s ease;
             border: 1px solid transparent;
+            line-height: 1.2;
+            font-weight: 500;
         }
         
         .event:hover {
-            transform: translateX(2px);
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+            z-index: 5;
+        }
+        
+        .event strong {
+            font-weight: 600;
+        }
+        
+        .event-time {
+            opacity: 0.8;
+            font-size: 9px;
         }
         
         /* Event type colors */
@@ -578,18 +859,65 @@ def generate_html_calendar(events, start_date, end_date):
         }
         
         .empty-cell {
-            background-color: #f9fafb;
+            background: var(--bg-tertiary);
+            opacity: 0.5;
         }
         
         .more-events {
-            font-size: 0.75em;
-            color: #6b7280;
+            font-size: 9px;
+            color: var(--text-light);
             font-style: italic;
-            margin-top: 4px;
+            margin-top: 2px;
+            text-align: center;
+            padding: 2px;
+            background: var(--bg-secondary);
+            border-radius: 2px;
+            cursor: pointer;
+        }
+        
+        .more-events:hover {
+            background: var(--border-light);
+            color: var(--text-medium);
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 1200px) {
+            .content-wrapper {
+                grid-template-columns: 1fr;
+            }
+            
+            .sidebar {
+                position: static;
+                order: -1;
+            }
+            
+            .header-content {
+                flex-direction: column;
+                gap: 12px;
+            }
+            
+            .dashboard-section {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                padding: 0 16px;
+            }
+            
+            .day-cell {
+                min-height: 80px;
+            }
+            
+            .event {
+                font-size: 9px;
+                padding: 2px 4px;
+            }
         }
         
         
-        /* Modal */
+        /* Modern Modal */
         .modal {
             display: none;
             position: fixed;
@@ -598,139 +926,448 @@ def generate_html_calendar(events, start_date, end_date):
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(4px);
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
         
         .modal-content {
-            background-color: white;
-            margin: 5% auto;
-            padding: 30px;
-            border-radius: 16px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
-            overflow-y: auto;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-            animation: slideIn 0.3s ease;
+            background: var(--bg-primary);
+            margin: 3% auto;
+            border-radius: 12px;
+            width: 95%;
+            max-width: 700px;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+            animation: slideUpIn 0.4s ease;
+            border: 1px solid var(--border-light);
         }
         
-        @keyframes slideIn {
+        @keyframes slideUpIn {
             from {
-                transform: translateY(-50px);
+                transform: translateY(50px) scale(0.95);
                 opacity: 0;
             }
             to {
-                transform: translateY(0);
+                transform: translateY(0) scale(1);
                 opacity: 1;
             }
         }
         
+        .modal-header {
+            background: var(--primary-blue);
+            color: white;
+            padding: 20px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid var(--accent-blue);
+        }
+        
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+        
+        .modal-subtitle {
+            font-size: 13px;
+            opacity: 0.85;
+            margin: 2px 0 0 0;
+        }
+        
         .close {
-            color: #9ca3af;
-            float: right;
-            font-size: 32px;
-            font-weight: bold;
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 24px;
             cursor: pointer;
-            transition: color 0.2s ease;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            line-height: 1;
         }
         
         .close:hover {
-            color: #374151;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            transform: scale(1.1);
         }
         
-        .event-details h3 {
-            color: #1f2937;
-            margin-bottom: 20px;
-            font-size: 1.5em;
+        .modal-body {
+            padding: 24px;
+            max-height: calc(90vh - 120px);
+            overflow-y: auto;
         }
         
-        .event-details p {
-            margin: 10px 0;
-            color: #4b5563;
+        .event-details {
+            display: grid;
+            gap: 20px;
         }
         
-        .event-details strong {
-            color: #374151;
+        .detail-section {
+            background: var(--bg-secondary);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
+        }
+        
+        .detail-section h4 {
+            color: var(--text-dark);
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--border-light);
+        }
+        
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+        
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .detail-label {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--text-light);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        
+        .detail-value {
+            font-size: 14px;
+            color: var(--text-dark);
+            font-weight: 500;
         }
         
         .event-link {
-            color: #667eea;
+            color: var(--secondary-blue);
             text-decoration: none;
             font-weight: 500;
-            transition: color 0.2s ease;
+            transition: all 0.2s ease;
+            padding: 8px 12px;
+            background: var(--light-blue);
+            border-radius: 6px;
+            display: inline-block;
+            margin-top: 4px;
         }
         
         .event-link:hover {
-            color: #5a67d8;
-            text-decoration: underline;
+            background: var(--accent-blue);
+            color: white;
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .event-type-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .priority-high {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .priority-medium {
+            background: #fed7aa;
+            color: #ea580c;
+        }
+        
+        .priority-low {
+            background: #d1fae5;
+            color: #059669;
+        }
+        
+        /* Print Styles */
+        @media print {
+            * {
+                -webkit-print-color-adjust: exact !important;
+                color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            body {
+                background: white !important;
+                font-size: 12px;
+            }
+            
+            .header {
+                position: static !important;
+                background: var(--primary-blue) !important;
+                color: white !important;
+                page-break-inside: avoid;
+            }
+            
+            .sidebar {
+                display: none !important;
+            }
+            
+            .content-wrapper {
+                grid-template-columns: 1fr !important;
+            }
+            
+            .dashboard-section {
+                grid-template-columns: 1fr !important;
+                page-break-inside: avoid;
+            }
+            
+            .month-navigation {
+                page-break-inside: avoid;
+            }
+            
+            .calendar-wrapper {
+                page-break-inside: avoid;
+                box-shadow: none !important;
+                border: 2px solid var(--border-medium) !important;
+            }
+            
+            .day-cell {
+                border: 1px solid var(--border-medium) !important;
+                min-height: 80px !important;
+                page-break-inside: avoid;
+            }
+            
+            .event {
+                background: var(--bg-secondary) !important;
+                border: 1px solid var(--border-medium) !important;
+                font-size: 9px !important;
+            }
+            
+            .modal {
+                display: none !important;
+            }
+            
+            .view-toggle {
+                display: none !important;
+            }
+            
+            @page {
+                margin: 0.75in;
+                size: landscape;
+            }
+            
+            .print-header {
+                display: block;
+                text-align: center;
+                margin-bottom: 20px;
+                font-weight: bold;
+                font-size: 16px;
+            }
+            
+            .print-footer {
+                display: block;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                text-align: center;
+                font-size: 10px;
+                color: var(--text-light);
+                padding: 10px;
+                border-top: 1px solid var(--border-light);
+            }
+        }
+        
+        .print-header,
+        .print-footer {
+            display: none;
         }
         
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
+    <div class="app-container">
+        <!-- Sticky Header -->
         <div class="header">
-            <h1>Bank Events Calendar</h1>
-            <p>Track upcoming events for major US and Canadian banks - Generated {{GENERATED_DATE}}</p>
-        </div>
-        
-        <!-- Controls -->
-        <div class="controls">
-            <div class="controls-grid">
-                <!-- Region Filter -->
-                <div class="control-group">
-                    <label for="regionFilter">Region</label>
-                    <select id="regionFilter" onchange="applyFilters()">
-                        <option value="all">All Regions</option>
-                        <option value="US">United States</option>
-                        <option value="Canada">Canada</option>
-                    </select>
+            <div class="header-content">
+                <div class="header-title">
+                    <h1>FactSet Bank Events Calendar</h1>
+                    <p>Professional institutional calendar - Generated {{GENERATED_DATE}}</p>
                 </div>
                 
-                <!-- Bank Filter -->
-                <div class="control-group">
-                    <label for="bankFilter">Banks</label>
-                    <select id="bankFilter" onchange="applyFilters()">
-                        <option value="all">All Banks</option>
-                        <!-- Bank options will be dynamically added -->
-                    </select>
+                <div class="header-controls">
+                    <!-- Quick Stats -->
+                    <div class="quick-stats" id="quickStats">
+                        <div class="stat-item">
+                            <span class="stat-value" id="totalEvents">-</span>
+                            <span class="stat-label">Events</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="totalBanks">-</span>
+                            <span class="stat-label">Banks</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="upcomingCount">-</span>
+                            <span class="stat-label">Upcoming</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Filters -->
+                    <div class="controls">
+                        <div class="control-group">
+                            <label for="quickRegionFilter">Region</label>
+                            <select id="quickRegionFilter" onchange="applyFilters()">
+                                <option value="all">All Regions</option>
+                                <option value="US">United States</option>
+                                <option value="Canada">Canada</option>
+                            </select>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="quickEventFilter">Event Type</label>
+                            <select id="quickEventFilter" onchange="applyFilters()">
+                                <option value="all">All Types</option>
+                                <option value="Earnings">Earnings</option>
+                                <option value="Conference">Conference</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="content-wrapper">
+                <!-- Sidebar Filters -->
+                <div class="sidebar">
+                    <h3>Advanced Filters</h3>
+                    
+                    <div class="filter-section">
+                        <label for="regionFilter">Region</label>
+                        <select id="regionFilter" onchange="applyFilters()">
+                            <option value="all">All Regions</option>
+                            <option value="US">United States</option>
+                            <option value="Canada">Canada</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <label for="bankFilter">Banks</label>
+                        <select id="bankFilter" onchange="applyFilters()">
+                            <option value="all">All Banks</option>
+                            <!-- Bank options will be dynamically added -->
+                        </select>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <label for="eventTypeFilter">Event Types</label>
+                        <select id="eventTypeFilter" onchange="applyFilters()">
+                            <option value="all">All Event Types</option>
+                            <!-- Event type options will be dynamically added -->
+                        </select>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <label for="dateRangeFilter">Date Range</label>
+                        <select id="dateRangeFilter" onchange="applyFilters()">
+                            <option value="all">All Dates</option>
+                            <option value="thisWeek">This Week</option>
+                            <option value="nextWeek">Next Week</option>
+                            <option value="thisMonth">This Month</option>
+                            <option value="nextMonth">Next Month</option>
+                        </select>
+                    </div>
                 </div>
                 
-                <!-- Event Type Filter -->
-                <div class="control-group">
-                    <label for="eventTypeFilter">Event Types</label>
-                    <select id="eventTypeFilter" onchange="applyFilters()">
-                        <option value="all">All Event Types</option>
-                        <!-- Event type options will be dynamically added -->
-                    </select>
+                <!-- Main Calendar Area -->
+                <div class="main-calendar-area">
+                    <!-- Dashboard Section -->
+                    <div class="dashboard-section">
+                        <div class="upcoming-earnings">
+                            <h3>📊 Upcoming Key Events</h3>
+                            <div class="upcoming-events" id="upcomingEvents">
+                                <!-- Upcoming earnings will be dynamically added -->
+                            </div>
+                        </div>
+                        
+                        <div class="event-summary-card">
+                            <h3>Monthly Summary</h3>
+                            <div class="summary-grid" id="monthlySummary">
+                                <div class="summary-item">
+                                    <span class="number" id="monthlyEarnings">0</span>
+                                    <span class="label">Earnings</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="number" id="monthlyConferences">0</span>
+                                    <span class="label">Conferences</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="number" id="monthlyMeetings">0</span>
+                                    <span class="label">Meetings</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="number" id="monthlyOther">0</span>
+                                    <span class="label">Other</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Month Navigation -->
+                    <div class="month-navigation">
+                        <div class="nav-group">
+                            <button class="month-nav-button" onclick="previousMonth()" id="prevButton">
+                                ← Previous
+                            </button>
+                            <div class="view-toggle">
+                                <button class="active" onclick="setView('month')">Month</button>
+                                <button onclick="setView('week')">Week</button>
+                                <button onclick="setView('list')">List</button>
+                            </div>
+                        </div>
+                        
+                        <div class="current-month" id="currentMonth">January 2024</div>
+                        
+                        <div class="nav-group">
+                            <button class="month-nav-button" onclick="nextMonth()" id="nextButton">
+                                Next →
+                            </button>
+                            <button class="month-nav-button" onclick="goToToday()" id="todayButton">
+                                Today
+                            </button>
+                            <button class="month-nav-button" onclick="window.print()" title="Print Calendar">
+                                🖨️ Print
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Calendar -->
+                    <div class="calendar-wrapper">
+                        <div class="print-header">
+                            FactSet Bank Events Calendar - <span id="printMonth"></span>
+                        </div>
+                        <div class="calendar-grid" id="calendarGrid">
+                            <!-- Calendar will be dynamically generated -->
+                        </div>
+                        <div class="print-footer">
+                            Generated on {{GENERATED_DATE}} | FactSet Professional Calendar
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
-        
-        <!-- Upcoming Earnings Banner -->
-        <div class="upcoming-earnings">
-            <h3>🎯 Upcoming Earnings (scroll to see more →)</h3>
-            <div class="upcoming-events" id="upcomingEvents">
-                <!-- Upcoming earnings will be dynamically added -->
-            </div>
-        </div>
-        
-        <!-- Month Navigation -->
-        <div class="month-navigation">
-            <button class="month-nav-button" onclick="previousMonth()" id="prevButton">← Previous</button>
-            <div class="current-month" id="currentMonth">January 2024</div>
-            <button class="month-nav-button" onclick="nextMonth()" id="nextButton">Next →</button>
-        </div>
-        
-        <!-- Calendar -->
-        <div class="calendar-wrapper">
-            <div class="calendar-grid" id="calendarGrid">
-                <!-- Calendar will be dynamically generated -->
-            </div>
-        </div>
-        
     </div>
     
     <!-- Modal -->
@@ -750,14 +1387,88 @@ def generate_html_calendar(events, start_date, end_date):
         let selectedBank = 'all';
         let selectedEventType = 'all';
         let selectedRegion = 'all';
+        let selectedDateRange = 'all';
+        let currentView = 'month';
         
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             initializeBankDropdown();
             initializeEventTypeDropdown();
+            updateQuickStats();
             updateUpcomingEarnings();
+            updateMonthlySummary();
             renderCurrentMonth();
         });
+        
+        // Initialize quick stats
+        function updateQuickStats() {
+            const totalEvents = eventsData.length;
+            const totalBanks = Object.keys(bankInfo).length;
+            const now = new Date();
+            const upcomingEvents = eventsData.filter(event => 
+                new Date(event.event_date_time) >= now
+            ).length;
+            
+            document.getElementById('totalEvents').textContent = totalEvents;
+            document.getElementById('totalBanks').textContent = totalBanks;
+            document.getElementById('upcomingCount').textContent = upcomingEvents;
+        }
+        
+        // Update monthly summary
+        function updateMonthlySummary() {
+            if (!availableMonths[currentMonthIndex]) return;
+            
+            const month = availableMonths[currentMonthIndex];
+            const monthEvents = eventsData.filter(event => {
+                const eventDate = new Date(event.event_date_time);
+                return eventDate.getFullYear() === month.year &&
+                       eventDate.getMonth() === month.month - 1 &&
+                       isEventVisible(event);
+            });
+            
+            const earnings = monthEvents.filter(e => 
+                ['Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease'].includes(e.event_type)
+            ).length;
+            
+            const conferences = monthEvents.filter(e => 
+                e.event_type === 'Conference'
+            ).length;
+            
+            const meetings = monthEvents.filter(e => 
+                ['ShareholdersMeeting', 'AnalystsInvestorsMeeting'].includes(e.event_type)
+            ).length;
+            
+            const other = monthEvents.length - earnings - conferences - meetings;
+            
+            document.getElementById('monthlyEarnings').textContent = earnings;
+            document.getElementById('monthlyConferences').textContent = conferences;
+            document.getElementById('monthlyMeetings').textContent = meetings;
+            document.getElementById('monthlyOther').textContent = other;
+        }
+        
+        // Set view mode
+        function setView(view) {
+            currentView = view;
+            document.querySelectorAll('.view-toggle button').forEach(btn => 
+                btn.classList.remove('active')
+            );
+            event.target.classList.add('active');
+            renderCurrentMonth();
+        }
+        
+        // Go to today
+        function goToToday() {
+            const today = new Date();
+            const todayMonth = availableMonths.findIndex(month => 
+                month.year === today.getFullYear() && 
+                month.month === today.getMonth() + 1
+            );
+            
+            if (todayMonth !== -1) {
+                currentMonthIndex = todayMonth;
+                renderCurrentMonth();
+            }
+        }
         
         // Initialize bank dropdown
         function initializeBankDropdown() {
@@ -895,11 +1606,32 @@ def generate_html_calendar(events, start_date, end_date):
         
         // Apply all filters
         function applyFilters() {
-            selectedRegion = document.getElementById('regionFilter').value;
+            // Sync both sets of filter controls
+            const regionFilter = document.getElementById('regionFilter');
+            const quickRegionFilter = document.getElementById('quickRegionFilter');
+            const eventTypeFilter = document.getElementById('eventTypeFilter');
+            const quickEventFilter = document.getElementById('quickEventFilter');
+            
+            // Determine which filter was changed and sync the other
+            if (document.activeElement === quickRegionFilter) {
+                regionFilter.value = quickRegionFilter.value;
+            } else if (document.activeElement === regionFilter) {
+                quickRegionFilter.value = regionFilter.value;
+            }
+            
+            if (document.activeElement === quickEventFilter) {
+                eventTypeFilter.value = quickEventFilter.value;
+            } else if (document.activeElement === eventTypeFilter) {
+                quickEventFilter.value = eventTypeFilter.value;
+            }
+            
+            selectedRegion = regionFilter.value;
             selectedBank = document.getElementById('bankFilter').value;
-            selectedEventType = document.getElementById('eventTypeFilter').value;
+            selectedEventType = eventTypeFilter.value;
+            selectedDateRange = document.getElementById('dateRangeFilter')?.value || 'all';
             
             updateUpcomingEarnings();
+            updateMonthlySummary();
             renderCurrentMonth();
         }
         
@@ -908,6 +1640,7 @@ def generate_html_calendar(events, start_date, end_date):
             const ticker = event.ticker;
             const eventType = event.event_type;
             const region = bankInfo[ticker]?.region;
+            const eventDate = new Date(event.event_date_time);
             
             // Check if ticker exists in our bank info
             if (!bankInfo[ticker]) {
@@ -927,6 +1660,39 @@ def generate_html_calendar(events, start_date, end_date):
             // Check event type filter
             if (selectedEventType !== 'all' && eventType !== selectedEventType) {
                 return false;
+            }
+            
+            // Check date range filter
+            if (selectedDateRange !== 'all') {
+                const now = new Date();
+                const startOfWeek = new Date(now);
+                startOfWeek.setDate(now.getDate() - now.getDay());
+                const endOfWeek = new Date(startOfWeek);
+                endOfWeek.setDate(startOfWeek.getDate() + 6);
+                
+                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                
+                switch (selectedDateRange) {
+                    case 'thisWeek':
+                        if (eventDate < startOfWeek || eventDate > endOfWeek) return false;
+                        break;
+                    case 'nextWeek':
+                        const nextWeekStart = new Date(endOfWeek);
+                        nextWeekStart.setDate(endOfWeek.getDate() + 1);
+                        const nextWeekEnd = new Date(nextWeekStart);
+                        nextWeekEnd.setDate(nextWeekStart.getDate() + 6);
+                        if (eventDate < nextWeekStart || eventDate > nextWeekEnd) return false;
+                        break;
+                    case 'thisMonth':
+                        if (eventDate < startOfMonth || eventDate > endOfMonth) return false;
+                        break;
+                    case 'nextMonth':
+                        const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+                        const nextMonthEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+                        if (eventDate < nextMonthStart || eventDate > nextMonthEnd) return false;
+                        break;
+                }
             }
             
             return true;
@@ -955,6 +1721,7 @@ def generate_html_calendar(events, start_date, end_date):
             
             // Update navigation
             document.getElementById('currentMonth').textContent = `${month.name} ${year}`;
+            document.getElementById('printMonth').textContent = `${month.name} ${year}`;
             document.getElementById('prevButton').disabled = currentMonthIndex === 0;
             document.getElementById('nextButton').disabled = currentMonthIndex === availableMonths.length - 1;
             
@@ -1005,16 +1772,31 @@ def generate_html_calendar(events, start_date, end_date):
                 
                 // Filter and display events
                 const visibleEvents = dayEvents.filter(event => isEventVisible(event));
-                const maxDisplay = 3;
+                const maxDisplay = 4;
+                
+                // Check if this is today
+                const today = new Date();
+                if (today.getFullYear() === year && 
+                    today.getMonth() === monthNum - 1 && 
+                    today.getDate() === day) {
+                    cell.classList.add('today');
+                }
                 
                 visibleEvents.slice(0, maxDisplay).forEach(event => {
                     const eventEl = document.createElement('div');
                     const eventType = (event.event_type || '').toLowerCase().replace(/\s/g, '');
                     eventEl.className = `event ${eventType}`;
                     
-                    // Show ticker and abbreviated event type
+                    // Show ticker and abbreviated event type with time
+                    const eventTime = new Date(event.event_date_time);
+                    const timeStr = eventTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                     const shortEventType = getShortEventType(event.event_type);
-                    eventEl.innerHTML = `<strong>${event.ticker}</strong><br>${shortEventType}`;
+                    
+                    eventEl.innerHTML = `
+                        <strong>${event.ticker}</strong>
+                        <div>${shortEventType}</div>
+                        <div class="event-time">${timeStr}</div>
+                    `;
                     eventEl.onclick = () => showEventDetails(event.event_id);
                     cell.appendChild(eventEl);
                 });
@@ -1037,37 +1819,202 @@ def generate_html_calendar(events, start_date, end_date):
             if (!event) return;
             
             const modal = document.getElementById('eventModal');
-            const details = document.getElementById('eventDetails');
+            const bankData = bankInfo[event.ticker];
+            const eventDate = new Date(event.event_date_time);
             
-            details.innerHTML = `
-                <div class="event-details">
-                    <h3>${event.company_name || 'Unknown Company'}</h3>
-                    <p><strong>Ticker:</strong> ${event.ticker || 'N/A'}</p>
-                    <p><strong>Region:</strong> ${bankInfo[event.ticker]?.region || 'Unknown'}</p>
-                    <p><strong>Event Type:</strong> ${formatEventType(event.event_type) || 'N/A'}</p>
-                    <p><strong>Date & Time:</strong> ${new Date(event.event_date_time).toLocaleString()}</p>
-                    ${event.market_time_code ? `<p><strong>Market Time:</strong> ${event.market_time_code}</p>` : ''}
-                    ${event.description ? `<p><strong>Description:</strong> ${event.description}</p>` : ''}
-                    ${event.fiscal_year || event.fiscal_period ? `<p><strong>Fiscal Period:</strong> ${event.fiscal_year || ''} ${event.fiscal_period || ''}</p>` : ''}
-                    ${event.webcast_link ? `<p><strong>Webcast:</strong> <a href="${event.webcast_link}" target="_blank" class="event-link">Join Webcast</a></p>` : ''}
-                    ${event.ir_link ? `<p><strong>Investor Relations:</strong> <a href="${event.ir_link}" target="_blank" class="event-link">IR Page</a></p>` : ''}
-                    ${event.contact_name || event.contact_email || event.contact_phone ? '<h4>Contact Information:</h4>' : ''}
-                    ${event.contact_name ? `<p><strong>Name:</strong> ${event.contact_name}</p>` : ''}
-                    ${event.contact_email ? `<p><strong>Email:</strong> ${event.contact_email}</p>` : ''}
-                    ${event.contact_phone ? `<p><strong>Phone:</strong> ${event.contact_phone}</p>` : ''}
-                    ${event.report_id ? `<p><strong>Report ID:</strong> ${event.report_id}</p>` : ''}
-                    ${event.last_modified_date ? `<p><em>Last Modified: ${new Date(event.last_modified_date).toLocaleString()}</em></p>` : ''}
+            // Determine event priority based on type
+            const earningsTypes = ['Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease'];
+            const priority = earningsTypes.includes(event.event_type) ? 'high' : 
+                           event.event_type === 'Conference' ? 'medium' : 'low';
+            
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <div>
+                            <h3 class="modal-title">${event.company_name || bankData?.name || event.ticker}</h3>
+                            <p class="modal-subtitle">${formatEventType(event.event_type)} • ${eventDate.toLocaleDateString()}</p>
+                        </div>
+                        <button class="close">&times;</button>
+                    </div>
+                    
+                    <div class="modal-body">
+                        <div class="event-details">
+                            <!-- Key Information -->
+                            <div class="detail-section">
+                                <h4>Key Information</h4>
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <span class="detail-label">Company</span>
+                                        <span class="detail-value">${event.company_name || bankData?.name || 'Unknown'}</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-label">Ticker</span>
+                                        <span class="detail-value">${event.ticker}</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-label">Region</span>
+                                        <span class="detail-value">${bankData?.region || 'Unknown'}</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-label">Event Type</span>
+                                        <span class="detail-value">
+                                            <span class="event-type-badge priority-${priority}">
+                                                ${formatEventType(event.event_type)}
+                                            </span>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Date & Time -->
+                            <div class="detail-section">
+                                <h4>Date & Time</h4>
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <span class="detail-label">Date</span>
+                                        <span class="detail-value">${eventDate.toLocaleDateString('en-US', {
+                                            weekday: 'long',
+                                            year: 'numeric',
+                                            month: 'long',
+                                            day: 'numeric'
+                                        })}</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-label">Time</span>
+                                        <span class="detail-value">${eventDate.toLocaleTimeString('en-US', {
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            timeZoneName: 'short'
+                                        })}</span>
+                                    </div>
+                                    ${event.market_time_code ? `
+                                        <div class="detail-item">
+                                            <span class="detail-label">Market Time</span>
+                                            <span class="detail-value">${event.market_time_code}</span>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            
+                            ${event.description ? `
+                                <div class="detail-section">
+                                    <h4>Description</h4>
+                                    <p style="margin: 0; color: var(--text-medium); line-height: 1.5;">${event.description}</p>
+                                </div>
+                            ` : ''}
+                            
+                            ${event.fiscal_year || event.fiscal_period ? `
+                                <div class="detail-section">
+                                    <h4>Fiscal Information</h4>
+                                    <div class="detail-grid">
+                                        ${event.fiscal_year ? `
+                                            <div class="detail-item">
+                                                <span class="detail-label">Fiscal Year</span>
+                                                <span class="detail-value">${event.fiscal_year}</span>
+                                            </div>
+                                        ` : ''}
+                                        ${event.fiscal_period ? `
+                                            <div class="detail-item">
+                                                <span class="detail-label">Fiscal Period</span>
+                                                <span class="detail-value">${event.fiscal_period}</span>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            ${event.webcast_link || event.ir_link ? `
+                                <div class="detail-section">
+                                    <h4>Links & Resources</h4>
+                                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                        ${event.webcast_link ? `
+                                            <a href="${event.webcast_link}" target="_blank" class="event-link">📺 Join Webcast</a>
+                                        ` : ''}
+                                        ${event.ir_link ? `
+                                            <a href="${event.ir_link}" target="_blank" class="event-link">🔗 Investor Relations</a>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            ${event.contact_name || event.contact_email || event.contact_phone ? `
+                                <div class="detail-section">
+                                    <h4>Contact Information</h4>
+                                    <div class="detail-grid">
+                                        ${event.contact_name ? `
+                                            <div class="detail-item">
+                                                <span class="detail-label">Contact Name</span>
+                                                <span class="detail-value">${event.contact_name}</span>
+                                            </div>
+                                        ` : ''}
+                                        ${event.contact_email ? `
+                                            <div class="detail-item">
+                                                <span class="detail-label">Email</span>
+                                                <span class="detail-value">
+                                                    <a href="mailto:${event.contact_email}" class="event-link">${event.contact_email}</a>
+                                                </span>
+                                            </div>
+                                        ` : ''}
+                                        ${event.contact_phone ? `
+                                            <div class="detail-item">
+                                                <span class="detail-label">Phone</span>
+                                                <span class="detail-value">
+                                                    <a href="tel:${event.contact_phone}" class="event-link">${event.contact_phone}</a>
+                                                </span>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            ${event.report_id || event.last_modified_date ? `
+                                <div class="detail-section">
+                                    <h4>Metadata</h4>
+                                    <div class="detail-grid">
+                                        ${event.report_id ? `
+                                            <div class="detail-item">
+                                                <span class="detail-label">Report ID</span>
+                                                <span class="detail-value">${event.report_id}</span>
+                                            </div>
+                                        ` : ''}
+                                        ${event.last_modified_date ? `
+                                            <div class="detail-item">
+                                                <span class="detail-label">Last Modified</span>
+                                                <span class="detail-value">${new Date(event.last_modified_date).toLocaleString()}</span>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
                 </div>
             `;
+            
+            // Add event listeners
+            modal.querySelector('.close').onclick = () => {
+                modal.style.display = 'none';
+            };
             
             modal.style.display = 'block';
         }
         
         
-        // Modal controls
-        document.querySelector('.close').onclick = function() {
-            document.getElementById('eventModal').style.display = 'none';
-        }
+        // Modal controls - Updated to handle dynamic content
+        document.addEventListener('click', function(e) {
+            const modal = document.getElementById('eventModal');
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+        
+        // Keyboard support
+        document.addEventListener('keydown', function(e) {
+            const modal = document.getElementById('eventModal');
+            if (e.key === 'Escape' && modal.style.display === 'block') {
+                modal.style.display = 'none';
+            }
+        });
         
         window.onclick = function(event) {
             const modal = document.getElementById('eventModal');
