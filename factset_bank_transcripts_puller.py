@@ -32,8 +32,11 @@ TIME_ZONE = "America/New_York"
 START_DATE = "2024-05-01"
 END_DATE = "2024-05-31"
 
-# Categories Filter (Canadian and US Banks)
-CATEGORIES_FILTER = ["CN:CA", "CN:US", "IN:BANKS"]
+# Categories Filter (Banks only)
+CATEGORIES_FILTER = ["IN:BANKS"]
+
+# Event Type Filter (Earnings only)
+EVENT_TYPE = "Earnings"
 
 # Output Configuration
 OUTPUT_FILE = "bank_transcripts_combined.csv"
@@ -69,6 +72,31 @@ configuration.get_basic_auth_token()
 # UTILITY FUNCTIONS
 # =============================================================================
 
+def filter_transcripts_for_earnings(df):
+    """
+    Filter transcripts to only include earnings events
+    (Banks are already filtered by the API categories parameter)
+    
+    Args:
+        df (pd.DataFrame): DataFrame with transcript data
+    
+    Returns:
+        pd.DataFrame: Filtered DataFrame containing only earnings transcripts
+    """
+    if df.empty:
+        return df
+    
+    # Filter for earnings (event_type = Earnings)
+    earnings_mask = df['event_type'].apply(
+        lambda event_type: str(event_type).lower() == 'earnings' if event_type is not None 
+        else False
+    )
+    
+    # Apply filter
+    filtered_df = df[earnings_mask].copy()
+    
+    return filtered_df
+
 def generate_date_range(start_date_str, end_date_str):
     """
     Generate a list of dates between start_date and end_date (inclusive)
@@ -94,7 +122,7 @@ def generate_date_range(start_date_str, end_date_str):
 
 def get_transcripts_for_date(target_date, api_instance):
     """
-    Get transcripts for a specific date with bank category filtering
+    Get transcripts for a specific date with bank category filtering and earnings event type
     
     Args:
         target_date (datetime.date): Date to fetch transcripts for
@@ -107,7 +135,7 @@ def get_transcripts_for_date(target_date, api_instance):
         print(f"Fetching transcripts for {target_date}...")
         
         # Use get_transcripts_ids with categories filtering
-        # This endpoint supports categories parameter for filtering
+        # This endpoint supports both date and categories parameters
         response = api_instance.get_transcripts_ids(
             start_date=target_date,
             end_date=target_date,
@@ -118,17 +146,26 @@ def get_transcripts_for_date(target_date, api_instance):
         )
         
         if not response or not hasattr(response, 'data') or not response.data:
-            print(f"No bank transcripts found for {target_date}")
+            print(f"No transcripts found for {target_date}")
             return None
         
         # Convert response to DataFrame
         df = pd.DataFrame(response.to_dict()['data'])
         print(f"Found {len(df)} bank transcripts on {target_date}")
         
-        # Add date column for tracking
-        df['fetch_date'] = target_date
+        # Filter for earnings only (banks already filtered by API)
+        filtered_df = filter_transcripts_for_earnings(df)
         
-        return df
+        if filtered_df is None or filtered_df.empty:
+            print(f"No bank earnings transcripts found for {target_date} after filtering")
+            return None
+        
+        print(f"Found {len(filtered_df)} bank earnings transcripts on {target_date}")
+        
+        # Add date column for tracking
+        filtered_df['fetch_date'] = target_date
+        
+        return filtered_df
         
     except Exception as e:
         print(f"Error fetching transcripts for {target_date}: {str(e)}")
@@ -136,7 +173,7 @@ def get_transcripts_for_date(target_date, api_instance):
 
 def get_all_transcripts_for_date_range(start_date_str, end_date_str):
     """
-    Get all bank transcripts for a date range and combine them
+    Get all bank earnings transcripts for a date range, processing day by day
     
     Args:
         start_date_str (str): Start date in YYYY-MM-DD format
@@ -145,8 +182,8 @@ def get_all_transcripts_for_date_range(start_date_str, end_date_str):
     Returns:
         pd.DataFrame: Combined DataFrame with all transcripts
     """
-    print(f"Fetching bank transcripts from {start_date_str} to {end_date_str}")
-    print(f"Filtering for categories: {', '.join(CATEGORIES_FILTER)}")
+    print(f"Fetching bank earnings transcripts from {start_date_str} to {end_date_str}")
+    print(f"Filtering for categories: {', '.join(CATEGORIES_FILTER)} AND event_type: {EVENT_TYPE}")
     
     # Generate date range
     date_list = generate_date_range(start_date_str, end_date_str)
@@ -228,6 +265,7 @@ def main():
     print("\nConfiguration:")
     print(f"  Date Range: {START_DATE} to {END_DATE}")
     print(f"  Categories: {', '.join(CATEGORIES_FILTER)}")
+    print(f"  Event Type: {EVENT_TYPE}")
     print(f"  Output File: {OUTPUT_FILE}")
     print(f"  SSL Cert: {SSL_CERT_PATH}")
     print(f"  Proxy: {PROXY_URL}")
