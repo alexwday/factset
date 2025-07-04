@@ -299,55 +299,59 @@ def generate_html_calendar(events, start_date, end_date):
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 30px;
-            border-radius: 12px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 15px 25px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
         
         .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
+            font-size: 1.8em;
+            margin-bottom: 5px;
         }
         
         .header p {
             opacity: 0.9;
+            font-size: 0.9em;
         }
         
         /* Controls Section */
         .controls {
             background: white;
-            padding: 25px;
-            border-radius: 12px;
+            padding: 15px 20px;
+            border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
         
         .controls-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
         }
         
         .control-group {
             display: flex;
             flex-direction: column;
+            min-width: 180px;
         }
         
         .control-group label {
             font-weight: 600;
-            margin-bottom: 8px;
+            margin-bottom: 5px;
             color: #555;
+            font-size: 0.9em;
         }
         
         .control-group select,
         .control-group input {
-            padding: 10px;
+            padding: 8px 12px;
             border: 2px solid #e0e0e0;
-            border-radius: 8px;
+            border-radius: 6px;
             font-size: 14px;
             transition: all 0.3s ease;
+            min-width: 180px;
         }
         
         .control-group select:focus,
@@ -355,6 +359,39 @@ def generate_html_calendar(events, start_date, end_date):
             outline: none;
             border-color: #667eea;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        /* Upcoming Earnings Banner */
+        .upcoming-earnings {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .upcoming-earnings h3 {
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+        
+        .upcoming-events {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .upcoming-event {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+        
+        .upcoming-event strong {
+            display: block;
+            margin-bottom: 2px;
         }
         
         /* Month Navigation */
@@ -530,35 +567,6 @@ def generate_html_calendar(events, start_date, end_date):
             margin-top: 4px;
         }
         
-        /* Filter Pills */
-        .filter-pills {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .filter-pill {
-            background: #e5e7eb;
-            color: #374151;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            border: 2px solid transparent;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        
-        .filter-pill.active {
-            background: #667eea;
-            color: white;
-            border-color: #5a67d8;
-        }
-        
-        .filter-pill:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
         
         /* Modal */
         .modal {
@@ -637,98 +645,6 @@ def generate_html_calendar(events, start_date, end_date):
             text-decoration: underline;
         }
         
-        /* Stats Section */
-        .stats {
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            margin-top: 30px;
-        }
-        
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-        }
-        
-        .stat-card {
-            text-align: center;
-            padding: 20px;
-            background: #f7fafc;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-        }
-        
-        .stat-number {
-            font-size: 2em;
-            font-weight: 700;
-            color: #667eea;
-        }
-        
-        .stat-label {
-            color: #6b7280;
-            font-size: 0.9em;
-            margin-top: 5px;
-        }
-        
-        /* Multi-select dropdown */
-        .multi-select {
-            position: relative;
-        }
-        
-        .multi-select-toggle {
-            padding: 10px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            background: white;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .multi-select-dropdown {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: white;
-            border: 2px solid #e0e0e0;
-            border-top: none;
-            border-radius: 0 0 8px 8px;
-            max-height: 300px;
-            overflow-y: auto;
-            display: none;
-            z-index: 100;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        
-        .multi-select-dropdown.show {
-            display: block;
-        }
-        
-        .multi-select-option {
-            padding: 10px;
-            cursor: pointer;
-            transition: background 0.2s ease;
-            display: flex;
-            align-items: center;
-        }
-        
-        .multi-select-option:hover {
-            background: #f7fafc;
-        }
-        
-        .multi-select-option input {
-            margin-right: 10px;
-        }
-        
-        .select-all {
-            border-bottom: 1px solid #e0e0e0;
-            font-weight: 600;
-            background: #f7fafc;
-        }
     </style>
 </head>
 <body>
@@ -736,8 +652,7 @@ def generate_html_calendar(events, start_date, end_date):
         <!-- Header -->
         <div class="header">
             <h1>Bank Events Calendar</h1>
-            <p>Track upcoming events for major US and Canadian banks</p>
-            <p>Generated on: {{GENERATED_DATE}}</p>
+            <p>Track upcoming events for major US and Canadian banks - Generated {{GENERATED_DATE}}</p>
         </div>
         
         <!-- Controls -->
@@ -755,29 +670,29 @@ def generate_html_calendar(events, start_date, end_date):
                 
                 <!-- Bank Filter -->
                 <div class="control-group">
-                    <label>Banks</label>
-                    <div class="multi-select">
-                        <div class="multi-select-toggle" onclick="toggleBankDropdown()">
-                            <span id="bankFilterText">All Banks Selected</span>
-                            <span>▼</span>
-                        </div>
-                        <div id="bankDropdown" class="multi-select-dropdown">
-                            <div class="multi-select-option select-all" onclick="toggleAllBanks()">
-                                <input type="checkbox" id="selectAllBanks" checked>
-                                <label for="selectAllBanks">Select All</label>
-                            </div>
-                            <!-- Bank options will be dynamically added -->
-                        </div>
-                    </div>
+                    <label for="bankFilter">Banks</label>
+                    <select id="bankFilter" onchange="applyFilters()">
+                        <option value="all">All Banks</option>
+                        <!-- Bank options will be dynamically added -->
+                    </select>
                 </div>
                 
                 <!-- Event Type Filter -->
                 <div class="control-group">
-                    <label>Event Types</label>
-                    <div class="filter-pills" id="eventTypeFilters">
-                        <!-- Event type pills will be dynamically added -->
-                    </div>
+                    <label for="eventTypeFilter">Event Types</label>
+                    <select id="eventTypeFilter" onchange="applyFilters()">
+                        <option value="all">All Event Types</option>
+                        <!-- Event type options will be dynamically added -->
+                    </select>
                 </div>
+            </div>
+        </div>
+        
+        <!-- Upcoming Earnings Banner -->
+        <div class="upcoming-earnings">
+            <h3>🎯 Next Upcoming Earnings</h3>
+            <div class="upcoming-events" id="upcomingEvents">
+                <!-- Upcoming earnings will be dynamically added -->
             </div>
         </div>
         
@@ -795,33 +710,6 @@ def generate_html_calendar(events, start_date, end_date):
             </div>
         </div>
         
-        <!-- Stats -->
-        <div class="stats">
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number" id="totalEvents">0</div>
-                    <div class="stat-label">Total Events</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="visibleEvents">0</div>
-                    <div class="stat-label">Visible Events</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="selectedBanks">0</div>
-                    <div class="stat-label">Selected Banks</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="currentMonthEvents">0</div>
-                    <div class="stat-label">Events This Month</div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Debug Panel -->
-        <div style="background: white; padding: 20px; border-radius: 12px; margin-top: 20px; font-family: monospace; font-size: 12px;">
-            <h3>Debug Information</h3>
-            <div id="debugInfo">Loading...</div>
-        </div>
     </div>
     
     <!-- Modal -->
@@ -838,54 +726,41 @@ def generate_html_calendar(events, start_date, end_date):
         const bankInfo = {{BANK_INFO}};
         const availableMonths = {{AVAILABLE_MONTHS}};
         let currentMonthIndex = 0;
-        let selectedBanks = new Set(Object.keys(bankInfo));
-        let selectedEventTypes = new Set();
+        let selectedBank = 'all';
+        let selectedEventType = 'all';
         let selectedRegion = 'all';
         
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             initializeBankDropdown();
-            initializeEventTypeFilters();
+            initializeEventTypeDropdown();
+            updateUpcomingEarnings();
             renderCurrentMonth();
-            updateStats();
         });
         
         // Initialize bank dropdown
         function initializeBankDropdown() {
-            const dropdown = document.getElementById('bankDropdown');
+            const dropdown = document.getElementById('bankFilter');
             const banks = Object.entries(bankInfo).sort((a, b) => a[1].name.localeCompare(b[1].name));
             
             banks.forEach(([ticker, info]) => {
-                const option = document.createElement('div');
-                option.className = 'multi-select-option';
-                option.innerHTML = `
-                    <input type="checkbox" id="bank-${ticker}" value="${ticker}" checked onchange="toggleBank('${ticker}')">
-                    <label for="bank-${ticker}">${info.name} (${ticker})</label>
-                `;
+                const option = document.createElement('option');
+                option.value = ticker;
+                option.textContent = `${info.name} (${ticker})`;
                 dropdown.appendChild(option);
             });
         }
         
-        // Initialize event type filters
-        function initializeEventTypeFilters() {
-            const container = document.getElementById('eventTypeFilters');
+        // Initialize event type dropdown
+        function initializeEventTypeDropdown() {
+            const dropdown = document.getElementById('eventTypeFilter');
             const eventTypes = [...new Set(eventsData.map(e => e.event_type))].filter(Boolean).sort();
             
-            // Add "All" pill
-            const allPill = document.createElement('div');
-            allPill.className = 'filter-pill active';
-            allPill.textContent = 'All Events';
-            allPill.onclick = () => toggleEventType('all');
-            container.appendChild(allPill);
-            
-            // Add individual event type pills
             eventTypes.forEach(type => {
-                const pill = document.createElement('div');
-                pill.className = 'filter-pill';
-                pill.textContent = formatEventType(type);
-                pill.onclick = () => toggleEventType(type);
-                pill.id = `filter-${type}`;
-                container.appendChild(pill);
+                const option = document.createElement('option');
+                option.value = type;
+                option.textContent = formatEventType(type);
+                dropdown.appendChild(option);
             });
         }
         
@@ -908,127 +783,73 @@ def generate_html_calendar(events, start_date, end_date):
             return typeMap[type] || type;
         }
         
-        // Toggle bank selection
-        function toggleBank(ticker) {
-            if (selectedBanks.has(ticker)) {
-                selectedBanks.delete(ticker);
-            } else {
-                selectedBanks.add(ticker);
-            }
-            updateBankFilterText();
-            applyFilters();
+        // Get short event type for calendar display
+        function getShortEventType(type) {
+            const shortMap = {
+                'Earnings': 'Earnings',
+                'Conference': 'Conf',
+                'ShareholdersMeeting': 'SH Mtg',
+                'AnalystsInvestorsMeeting': 'Analyst',
+                'SalesRevenueCall': 'Sales',
+                'GuidanceCall': 'Guidance',
+                'SpecialSituation': 'Special',
+                'Split': 'Split',
+                'Dividend': 'Dividend',
+                'ConfirmedEarningsRelease': 'Earnings',
+                'ProjectedEarningsRelease': 'Earnings',
+                'SalesRevenueRelease': 'Sales'
+            };
+            return shortMap[type] || type;
         }
         
-        // Toggle all banks
-        function toggleAllBanks() {
-            const selectAll = document.getElementById('selectAllBanks');
-            const checkboxes = document.querySelectorAll('#bankDropdown input[type="checkbox"]:not(#selectAllBanks)');
+        // Update upcoming earnings banner
+        function updateUpcomingEarnings() {
+            const now = new Date();
+            const earningsTypes = ['Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease'];
             
-            if (selectAll.checked) {
-                selectedBanks = new Set(Object.keys(bankInfo));
-                checkboxes.forEach(cb => cb.checked = true);
-            } else {
-                selectedBanks.clear();
-                checkboxes.forEach(cb => cb.checked = false);
+            // Find upcoming earnings events
+            const upcomingEarnings = eventsData
+                .filter(event => {
+                    const eventDate = new Date(event.event_date_time);
+                    return eventDate >= now && earningsTypes.includes(event.event_type);
+                })
+                .sort((a, b) => new Date(a.event_date_time) - new Date(b.event_date_time))
+                .slice(0, 5); // Show next 5 upcoming earnings
+            
+            const container = document.getElementById('upcomingEvents');
+            container.innerHTML = '';
+            
+            if (upcomingEarnings.length === 0) {
+                container.innerHTML = '<div class="upcoming-event">No upcoming earnings events found</div>';
+                return;
             }
             
-            updateBankFilterText();
-            applyFilters();
-        }
-        
-        // Update bank filter text
-        function updateBankFilterText() {
-            const text = document.getElementById('bankFilterText');
-            const count = selectedBanks.size;
-            const total = Object.keys(bankInfo).length;
-            
-            if (count === 0) {
-                text.textContent = 'No Banks Selected';
-            } else if (count === total) {
-                text.textContent = 'All Banks Selected';
-            } else {
-                text.textContent = `${count} Banks Selected`;
-            }
-            
-            // Update select all checkbox
-            document.getElementById('selectAllBanks').checked = count === total;
-        }
-        
-        // Toggle bank dropdown
-        function toggleBankDropdown() {
-            const dropdown = document.getElementById('bankDropdown');
-            dropdown.classList.toggle('show');
-        }
-        
-        // Close dropdown when clicking outside
-        document.addEventListener('click', function(event) {
-            if (!event.target.closest('.multi-select')) {
-                document.getElementById('bankDropdown').classList.remove('show');
-            }
-        });
-        
-        // Toggle event type
-        function toggleEventType(type) {
-            const pills = document.querySelectorAll('.filter-pill');
-            
-            if (type === 'all') {
-                selectedEventTypes.clear();
-                pills.forEach(pill => {
-                    pill.classList.toggle('active', pill.textContent === 'All Events');
-                });
-            } else {
-                // Remove "All Events" selection
-                pills[0].classList.remove('active');
+            upcomingEarnings.forEach(event => {
+                const eventEl = document.createElement('div');
+                eventEl.className = 'upcoming-event';
+                eventEl.onclick = () => showEventDetails(event.event_id);
+                eventEl.style.cursor = 'pointer';
                 
-                if (selectedEventTypes.has(type)) {
-                    selectedEventTypes.delete(type);
-                } else {
-                    selectedEventTypes.add(type);
-                }
+                const eventDate = new Date(event.event_date_time);
+                const bankName = bankInfo[event.ticker]?.name || event.ticker;
                 
-                // Update pill states
-                pills.forEach(pill => {
-                    if (pill.id && pill.id.startsWith('filter-')) {
-                        const pillType = pill.id.replace('filter-', '');
-                        pill.classList.toggle('active', selectedEventTypes.has(pillType));
-                    }
-                });
+                eventEl.innerHTML = `
+                    <strong>${event.ticker}</strong>
+                    ${bankName}<br>
+                    ${eventDate.toLocaleDateString()} at ${eventDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                `;
                 
-                // If no types selected, select all
-                if (selectedEventTypes.size === 0) {
-                    pills[0].classList.add('active');
-                }
-            }
-            
-            applyFilters();
+                container.appendChild(eventEl);
+            });
         }
         
         // Apply all filters
         function applyFilters() {
-            const regionFilter = document.getElementById('regionFilter').value;
-            
-            // Filter banks by region first
-            let visibleBanks = new Set(selectedBanks);
-            if (regionFilter !== 'all') {
-                visibleBanks = new Set([...visibleBanks].filter(ticker => 
-                    bankInfo[ticker].region === regionFilter
-                ));
-            }
-            
-            // Update bank checkboxes based on region
-            document.querySelectorAll('#bankDropdown input[type="checkbox"]:not(#selectAllBanks)').forEach(cb => {
-                const ticker = cb.value;
-                if (regionFilter !== 'all' && bankInfo[ticker].region !== regionFilter) {
-                    cb.disabled = true;
-                    cb.parentElement.style.opacity = '0.5';
-                } else {
-                    cb.disabled = false;
-                    cb.parentElement.style.opacity = '1';
-                }
-            });
+            selectedRegion = document.getElementById('regionFilter').value;
+            selectedBank = document.getElementById('bankFilter').value;
+            selectedEventType = document.getElementById('eventTypeFilter').value;
             
             renderCurrentMonth();
-            updateStats();
         }
         
         // Check if event should be visible
@@ -1048,12 +869,12 @@ def generate_html_calendar(events, start_date, end_date):
             }
             
             // Check bank filter
-            if (!selectedBanks.has(ticker)) {
+            if (selectedBank !== 'all' && ticker !== selectedBank) {
                 return false;
             }
             
-            // Check event type filter - if no specific types selected, show all
-            if (selectedEventTypes.size > 0 && !selectedEventTypes.has(eventType)) {
+            // Check event type filter
+            if (selectedEventType !== 'all' && eventType !== selectedEventType) {
                 return false;
             }
             
@@ -1139,7 +960,10 @@ def generate_html_calendar(events, start_date, end_date):
                     const eventEl = document.createElement('div');
                     const eventType = (event.event_type || '').toLowerCase().replace(/\s/g, '');
                     eventEl.className = `event ${eventType}`;
-                    eventEl.textContent = event.ticker || 'Unknown';
+                    
+                    // Show ticker and abbreviated event type
+                    const shortEventType = getShortEventType(event.event_type);
+                    eventEl.innerHTML = `<strong>${event.ticker}</strong><br>${shortEventType}`;
                     eventEl.onclick = () => showEventDetails(event.event_id);
                     cell.appendChild(eventEl);
                 });
@@ -1154,7 +978,6 @@ def generate_html_calendar(events, start_date, end_date):
                 grid.appendChild(cell);
             }
             
-            updateStats();
         }
         
         // Show event details
@@ -1189,83 +1012,6 @@ def generate_html_calendar(events, start_date, end_date):
             modal.style.display = 'block';
         }
         
-        // Update statistics
-        function updateStats() {
-            const total = eventsData.length;
-            const visible = eventsData.filter(e => isEventVisible(e)).length;
-            const banksCount = selectedBanks.size;
-            
-            // Count current month events
-            const month = availableMonths[currentMonthIndex];
-            const monthEvents = eventsData.filter(event => {
-                const eventDate = new Date(event.event_date_time);
-                return eventDate.getFullYear() === month.year &&
-                       eventDate.getMonth() === month.month - 1 &&
-                       isEventVisible(event);
-            }).length;
-            
-            document.getElementById('totalEvents').textContent = total;
-            document.getElementById('visibleEvents').textContent = visible;
-            document.getElementById('selectedBanks').textContent = banksCount;
-            document.getElementById('currentMonthEvents').textContent = monthEvents;
-            
-            // Update debug information
-            updateDebugInfo();
-        }
-        
-        // Update debug information
-        function updateDebugInfo() {
-            const eventsByTicker = {};
-            const eventsByRegion = {};
-            const eventsByType = {};
-            
-            eventsData.forEach(event => {
-                const ticker = event.ticker;
-                const region = bankInfo[ticker]?.region || 'Unknown';
-                const eventType = event.event_type || 'Unknown';
-                
-                eventsByTicker[ticker] = (eventsByTicker[ticker] || 0) + 1;
-                eventsByRegion[region] = (eventsByRegion[region] || 0) + 1;
-                eventsByType[eventType] = (eventsByType[eventType] || 0) + 1;
-            });
-            
-            const visibleByTicker = {};
-            const visibleByRegion = {};
-            const visibleByType = {};
-            
-            eventsData.filter(e => isEventVisible(e)).forEach(event => {
-                const ticker = event.ticker;
-                const region = bankInfo[ticker]?.region || 'Unknown';
-                const eventType = event.event_type || 'Unknown';
-                
-                visibleByTicker[ticker] = (visibleByTicker[ticker] || 0) + 1;
-                visibleByRegion[region] = (visibleByRegion[region] || 0) + 1;
-                visibleByType[eventType] = (visibleByType[eventType] || 0) + 1;
-            });
-            
-            const debugInfo = document.getElementById('debugInfo');
-            debugInfo.innerHTML = `
-                <p><strong>Filter State:</strong></p>
-                <p>Selected Region: ${selectedRegion}</p>
-                <p>Selected Banks: ${selectedBanks.size}/${Object.keys(bankInfo).length}</p>
-                <p>Selected Event Types: ${selectedEventTypes.size} (${Array.from(selectedEventTypes).join(', ') || 'All'})</p>
-                
-                <p><strong>Events by Ticker (Total/Visible):</strong></p>
-                ${Object.keys(eventsByTicker).sort().map(ticker => 
-                    `<p>${ticker}: ${eventsByTicker[ticker]}/${visibleByTicker[ticker] || 0}</p>`
-                ).join('')}
-                
-                <p><strong>Events by Region (Total/Visible):</strong></p>
-                ${Object.keys(eventsByRegion).map(region => 
-                    `<p>${region}: ${eventsByRegion[region]}/${visibleByRegion[region] || 0}</p>`
-                ).join('')}
-                
-                <p><strong>Events by Type (Total/Visible):</strong></p>
-                ${Object.keys(eventsByType).map(type => 
-                    `<p>${type}: ${eventsByType[type]}/${visibleByType[type] || 0}</p>`
-                ).join('')}
-            `;
-        }
         
         // Modal controls
         document.querySelector('.close').onclick = function() {
