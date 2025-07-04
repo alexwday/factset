@@ -34,41 +34,41 @@ PROXY_URL = "oproxy.fg.rbc.com:8080"
 API_USERNAME = "x"
 API_PASSWORD = "x"
 
-# Major Canadian and US Banks Primary IDs
+# Major Canadian and US Banks Primary IDs with regions
 BANK_PRIMARY_IDS = {
     # Major Canadian Banks ("Big Six")
-    "RY-CA": "Royal Bank of Canada",
-    "TD-CA": "Toronto-Dominion Bank",
-    "BNS-CA": "Bank of Nova Scotia (Scotiabank)",
-    "BMO-CA": "Bank of Montreal",
-    "CM-CA": "Canadian Imperial Bank of Commerce (CIBC)",
-    "NA-CA": "National Bank of Canada",
+    "RY-CA": {"name": "Royal Bank of Canada", "region": "Canada"},
+    "TD-CA": {"name": "Toronto-Dominion Bank", "region": "Canada"},
+    "BNS-CA": {"name": "Bank of Nova Scotia (Scotiabank)", "region": "Canada"},
+    "BMO-CA": {"name": "Bank of Montreal", "region": "Canada"},
+    "CM-CA": {"name": "Canadian Imperial Bank of Commerce (CIBC)", "region": "Canada"},
+    "NA-CA": {"name": "National Bank of Canada", "region": "Canada"},
     
     # Major US Banks
-    "JPM-US": "JPMorgan Chase & Co.",
-    "BAC-US": "Bank of America Corporation",
-    "WFC-US": "Wells Fargo & Company",
-    "C-US": "Citigroup Inc.",
-    "USB-US": "U.S. Bancorp",
-    "PNC-US": "PNC Financial Services Group",
-    "TFC-US": "Truist Financial Corporation",
-    "COF-US": "Capital One Financial Corporation",
-    "MS-US": "Morgan Stanley",
-    "GS-US": "Goldman Sachs Group Inc.",
-    "BK-US": "The Bank of New York Mellon Corporation",
-    "STT-US": "State Street Corporation",
-    "AXP-US": "American Express Company",
-    "SCHW-US": "Charles Schwab Corporation",
-    "BLK-US": "BlackRock Inc.",
-    "ALLY-US": "Ally Financial Inc.",
-    "RF-US": "Regions Financial Corporation",
-    "KEY-US": "KeyCorp",
-    "CFG-US": "Citizens Financial Group Inc.",
-    "MTB-US": "M&T Bank Corporation",
-    "FITB-US": "Fifth Third Bancorp",
-    "HBAN-US": "Huntington Bancshares Incorporated",
-    "ZION-US": "Zions Bancorporation",
-    "CMA-US": "Comerica Incorporated",
+    "JPM-US": {"name": "JPMorgan Chase & Co.", "region": "US"},
+    "BAC-US": {"name": "Bank of America Corporation", "region": "US"},
+    "WFC-US": {"name": "Wells Fargo & Company", "region": "US"},
+    "C-US": {"name": "Citigroup Inc.", "region": "US"},
+    "USB-US": {"name": "U.S. Bancorp", "region": "US"},
+    "PNC-US": {"name": "PNC Financial Services Group", "region": "US"},
+    "TFC-US": {"name": "Truist Financial Corporation", "region": "US"},
+    "COF-US": {"name": "Capital One Financial Corporation", "region": "US"},
+    "MS-US": {"name": "Morgan Stanley", "region": "US"},
+    "GS-US": {"name": "Goldman Sachs Group Inc.", "region": "US"},
+    "BK-US": {"name": "The Bank of New York Mellon Corporation", "region": "US"},
+    "STT-US": {"name": "State Street Corporation", "region": "US"},
+    "AXP-US": {"name": "American Express Company", "region": "US"},
+    "SCHW-US": {"name": "Charles Schwab Corporation", "region": "US"},
+    "BLK-US": {"name": "BlackRock Inc.", "region": "US"},
+    "ALLY-US": {"name": "Ally Financial Inc.", "region": "US"},
+    "RF-US": {"name": "Regions Financial Corporation", "region": "US"},
+    "KEY-US": {"name": "KeyCorp", "region": "US"},
+    "CFG-US": {"name": "Citizens Financial Group Inc.", "region": "US"},
+    "MTB-US": {"name": "M&T Bank Corporation", "region": "US"},
+    "FITB-US": {"name": "Fifth Third Bancorp", "region": "US"},
+    "HBAN-US": {"name": "Huntington Bancshares Incorporated", "region": "US"},
+    "ZION-US": {"name": "Zions Bancorporation", "region": "US"},
+    "CMA-US": {"name": "Comerica Incorporated", "region": "US"},
 }
 
 # Industry codes we're interested in
@@ -253,6 +253,55 @@ def process_events_by_month(events):
 
 def generate_html_calendar(events, start_date, end_date):
     """
+    Generate modern interactive HTML calendar with filtering
+    
+    Args:
+        events: List of event dictionaries
+        start_date: Start datetime
+        end_date: End datetime
+    
+    Returns:
+        str: HTML content
+    """
+    # Read the template
+    template_path = "/Users/alexwday/Projects/factset/calendar_template.html"
+    
+    try:
+        with open(template_path, 'r', encoding='utf-8') as f:
+            template = f.read()
+    except FileNotFoundError:
+        # Fallback to old version if template not found
+        return generate_html_calendar_old(events, start_date, end_date)
+    
+    # Get available months
+    available_months = []
+    current = start_date
+    while current <= end_date:
+        available_months.append({
+            'year': current.year,
+            'month': current.month,
+            'name': calendar.month_name[current.month]
+        })
+        if current.month == 12:
+            current = current.replace(year=current.year+1, month=1)
+        else:
+            current = current.replace(month=current.month+1)
+    
+    # Prepare bank info for JavaScript
+    bank_info = {}
+    for ticker, info in BANK_PRIMARY_IDS.items():
+        bank_info[ticker] = info
+    
+    # Replace template variables
+    html = template.replace('{{GENERATED_DATE}}', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    html = html.replace('{{EVENTS_DATA}}', json.dumps(events, default=str))
+    html = html.replace('{{BANK_INFO}}', json.dumps(bank_info))
+    html = html.replace('{{AVAILABLE_MONTHS}}', json.dumps(available_months))
+    
+    return html
+
+def generate_html_calendar_old(events, start_date, end_date):
+    """
     Generate an interactive HTML calendar with events
     
     Args:
@@ -266,6 +315,20 @@ def generate_html_calendar(events, start_date, end_date):
     # Process events by date
     events_by_date = process_events_by_month(events)
     
+    # Get list of available months
+    available_months = []
+    current = start_date
+    while current <= end_date:
+        available_months.append({
+            'year': current.year,
+            'month': current.month,
+            'name': calendar.month_name[current.month]
+        })
+        if current.month == 12:
+            current = current.replace(year=current.year+1, month=1)
+        else:
+            current = current.replace(month=current.month+1)
+    
     # Start HTML
     html = """
 <!DOCTYPE html>
@@ -273,7 +336,7 @@ def generate_html_calendar(events, start_date, end_date):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bank Events Calendar</title>
+    <title>Bank Events Calendar - Interactive View</title>
     <style>
         body {
             font-family: Arial, sans-serif;
