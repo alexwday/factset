@@ -43,6 +43,45 @@ CATEGORIES_FILTER = INDUSTRY_FILTERS
 # Event Type Filter (Earnings only)
 EVENT_TYPE = "Earnings"
 
+# Optional Ticker-Country Filter
+# Major Canadian and US Banks - modify this list as needed
+# Leave empty list [] to disable this feature
+TICKER_COUNTRY_FLAGS = [
+    # Major Canadian Banks ("Big Six")
+    "RY-CA",    # Royal Bank of Canada
+    "TD-CA",    # Toronto-Dominion Bank
+    "BNS-CA",   # Bank of Nova Scotia (Scotiabank)
+    "BMO-CA",   # Bank of Montreal
+    "CM-CA",    # Canadian Imperial Bank of Commerce (CIBC)
+    "NA-CA",    # National Bank of Canada
+    
+    # Major US Banks
+    "JPM-US",   # JPMorgan Chase & Co.
+    "BAC-US",   # Bank of America Corporation
+    "WFC-US",   # Wells Fargo & Company
+    "C-US",     # Citigroup Inc.
+    "USB-US",   # U.S. Bancorp
+    "PNC-US",   # PNC Financial Services Group
+    "TFC-US",   # Truist Financial Corporation
+    "COF-US",   # Capital One Financial Corporation
+    "MS-US",    # Morgan Stanley
+    "GS-US",    # Goldman Sachs Group Inc.
+    "BK-US",    # The Bank of New York Mellon Corporation
+    "STT-US",   # State Street Corporation
+    "AXP-US",   # American Express Company
+    "SCHW-US",  # Charles Schwab Corporation
+    "BLK-US",   # BlackRock Inc.
+    "ALLY-US",  # Ally Financial Inc.
+    "RF-US",    # Regions Financial Corporation
+    "KEY-US",   # KeyCorp
+    "CFG-US",   # Citizens Financial Group Inc.
+    "MTB-US",   # M&T Bank Corporation
+    "FITB-US",  # Fifth Third Bancorp
+    "HBAN-US",  # Huntington Bancshares Incorporated
+    "ZION-US",  # Zions Bancorporation
+    "CMA-US",   # Comerica Incorporated
+]
+
 # Output Configuration
 OUTPUT_FILE = "industry_transcripts_combined.csv"
 SORT_ORDER = ["-storyDateTime"]
@@ -76,6 +115,81 @@ configuration.get_basic_auth_token()
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+
+def check_ticker_country_flags(row, ticker_list):
+    """
+    Check if any ticker-country codes are found in headline or all_ids
+    
+    Args:
+        row: DataFrame row
+        ticker_list (list): List of ticker-country codes to search for
+    
+    Returns:
+        tuple: (found_tickers, flag_status)
+    """
+    if not ticker_list:
+        return [], False
+    
+    found_tickers = []
+    
+    # Check headline
+    headline = str(row.get('headline', '')).upper()
+    
+    # Check all_ids (which may be a list or string)
+    all_ids = row.get('all_ids', [])
+    if isinstance(all_ids, list):
+        all_ids_str = ' '.join([str(id_item).upper() for id_item in all_ids])
+    else:
+        all_ids_str = str(all_ids).upper()
+    
+    # Search for each ticker-country code
+    for ticker in ticker_list:
+        ticker_upper = ticker.upper()
+        
+        # Check if ticker found in headline or all_ids
+        if ticker_upper in headline or ticker_upper in all_ids_str:
+            found_tickers.append(ticker)
+    
+    return found_tickers, len(found_tickers) > 0
+
+def add_ticker_country_flags(df, ticker_list):
+    """
+    Add ticker-country flag columns to the DataFrame
+    
+    Args:
+        df (pd.DataFrame): DataFrame with transcript data
+        ticker_list (list): List of ticker-country codes to flag
+    
+    Returns:
+        pd.DataFrame: DataFrame with added flag columns
+    """
+    if df.empty or not ticker_list:
+        if not ticker_list:
+            print("No ticker-country flags specified, skipping ticker flagging")
+        return df
+    
+    print(f"Adding ticker-country flags for: {', '.join(ticker_list)}")
+    
+    # Add columns for ticker flags
+    df_copy = df.copy()
+    
+    # Apply ticker checking to each row
+    ticker_results = df_copy.apply(lambda row: check_ticker_country_flags(row, ticker_list), axis=1)
+    
+    # Extract found tickers and flag status
+    df_copy['ticker_flags_found'] = [result[0] for result in ticker_results]
+    df_copy['has_ticker_flags'] = [result[1] for result in ticker_results]
+    
+    # Convert ticker_flags_found list to string for CSV compatibility
+    df_copy['ticker_flags_found'] = df_copy['ticker_flags_found'].apply(
+        lambda tickers: ', '.join(tickers) if tickers else ''
+    )
+    
+    # Count how many transcripts have ticker flags
+    flagged_count = df_copy['has_ticker_flags'].sum()
+    print(f"Found {flagged_count} transcripts containing specified ticker-country codes")
+    
+    return df_copy
 
 def filter_transcripts_for_earnings(df):
     """
@@ -167,6 +281,9 @@ def get_transcripts_for_date(target_date, api_instance):
         
         print(f"Found {len(filtered_df)} industry earnings transcripts on {target_date}")
         
+        # Add ticker-country flags if specified
+        filtered_df = add_ticker_country_flags(filtered_df, TICKER_COUNTRY_FLAGS)
+        
         # Add date column for tracking
         filtered_df['fetch_date'] = target_date
         
@@ -242,6 +359,21 @@ def save_transcripts_to_csv(df, output_file):
         print(f"Total transcripts: {len(df)}")
         if 'fetch_date' in df.columns:
             print(f"Date range: {df['fetch_date'].min()} to {df['fetch_date'].max()}")
+        
+        # Ticker flag summary
+        if 'has_ticker_flags' in df.columns:
+            flagged_count = df['has_ticker_flags'].sum()
+            print(f"Transcripts with ticker flags: {flagged_count} ({flagged_count/len(df)*100:.1f}%)")
+            
+            if flagged_count > 0:
+                # Show which tickers were found
+                all_found_tickers = []
+                for ticker_str in df['ticker_flags_found'].dropna():
+                    if ticker_str:
+                        all_found_tickers.extend(ticker_str.split(', '))
+                unique_found_tickers = list(set(all_found_tickers))
+                print(f"Ticker-country codes found: {', '.join(sorted(unique_found_tickers))}")
+        
         if 'categories' in df.columns:
             print("Categories found in data:")
             # Flatten categories lists and count unique values
@@ -271,6 +403,7 @@ def main():
     print(f"  Date Range: {START_DATE} to {END_DATE}")
     print(f"  Industries: {', '.join(INDUSTRY_FILTERS)}")
     print(f"  Event Type: {EVENT_TYPE}")
+    print(f"  Ticker-Country Flags: {', '.join(TICKER_COUNTRY_FLAGS) if TICKER_COUNTRY_FLAGS else 'None'}")
     print(f"  Output File: {OUTPUT_FILE}")
     print(f"  SSL Cert: {SSL_CERT_PATH}")
     print(f"  Proxy: {PROXY_URL}")
