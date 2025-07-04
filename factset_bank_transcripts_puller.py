@@ -43,44 +43,47 @@ CATEGORIES_FILTER = INDUSTRY_FILTERS
 # Event Type Filter (Earnings only)
 EVENT_TYPE = "Earnings"
 
+# Ticker-to-Bank Name Mapping
+TICKER_BANK_NAMES = {
+    # Major Canadian Banks ("Big Six")
+    "RY-CA": "Royal Bank of Canada",
+    "TD-CA": "Toronto-Dominion Bank",
+    "BNS-CA": "Bank of Nova Scotia (Scotiabank)",
+    "BMO-CA": "Bank of Montreal",
+    "CM-CA": "Canadian Imperial Bank of Commerce (CIBC)",
+    "NA-CA": "National Bank of Canada",
+    
+    # Major US Banks
+    "JPM-US": "JPMorgan Chase & Co.",
+    "BAC-US": "Bank of America Corporation",
+    "WFC-US": "Wells Fargo & Company",
+    "C-US": "Citigroup Inc.",
+    "USB-US": "U.S. Bancorp",
+    "PNC-US": "PNC Financial Services Group",
+    "TFC-US": "Truist Financial Corporation",
+    "COF-US": "Capital One Financial Corporation",
+    "MS-US": "Morgan Stanley",
+    "GS-US": "Goldman Sachs Group Inc.",
+    "BK-US": "The Bank of New York Mellon Corporation",
+    "STT-US": "State Street Corporation",
+    "AXP-US": "American Express Company",
+    "SCHW-US": "Charles Schwab Corporation",
+    "BLK-US": "BlackRock Inc.",
+    "ALLY-US": "Ally Financial Inc.",
+    "RF-US": "Regions Financial Corporation",
+    "KEY-US": "KeyCorp",
+    "CFG-US": "Citizens Financial Group Inc.",
+    "MTB-US": "M&T Bank Corporation",
+    "FITB-US": "Fifth Third Bancorp",
+    "HBAN-US": "Huntington Bancshares Incorporated",
+    "ZION-US": "Zions Bancorporation",
+    "CMA-US": "Comerica Incorporated",
+}
+
 # Optional Ticker-Country Filter
 # Major Canadian and US Banks - modify this list as needed
 # Leave empty list [] to disable this feature
-TICKER_COUNTRY_FLAGS = [
-    # Major Canadian Banks ("Big Six")
-    "RY-CA",    # Royal Bank of Canada
-    "TD-CA",    # Toronto-Dominion Bank
-    "BNS-CA",   # Bank of Nova Scotia (Scotiabank)
-    "BMO-CA",   # Bank of Montreal
-    "CM-CA",    # Canadian Imperial Bank of Commerce (CIBC)
-    "NA-CA",    # National Bank of Canada
-    
-    # Major US Banks
-    "JPM-US",   # JPMorgan Chase & Co.
-    "BAC-US",   # Bank of America Corporation
-    "WFC-US",   # Wells Fargo & Company
-    "C-US",     # Citigroup Inc.
-    "USB-US",   # U.S. Bancorp
-    "PNC-US",   # PNC Financial Services Group
-    "TFC-US",   # Truist Financial Corporation
-    "COF-US",   # Capital One Financial Corporation
-    "MS-US",    # Morgan Stanley
-    "GS-US",    # Goldman Sachs Group Inc.
-    "BK-US",    # The Bank of New York Mellon Corporation
-    "STT-US",   # State Street Corporation
-    "AXP-US",   # American Express Company
-    "SCHW-US",  # Charles Schwab Corporation
-    "BLK-US",   # BlackRock Inc.
-    "ALLY-US",  # Ally Financial Inc.
-    "RF-US",    # Regions Financial Corporation
-    "KEY-US",   # KeyCorp
-    "CFG-US",   # Citizens Financial Group Inc.
-    "MTB-US",   # M&T Bank Corporation
-    "FITB-US",  # Fifth Third Bancorp
-    "HBAN-US",  # Huntington Bancshares Incorporated
-    "ZION-US",  # Zions Bancorporation
-    "CMA-US",   # Comerica Incorporated
-]
+TICKER_COUNTRY_FLAGS = list(TICKER_BANK_NAMES.keys())
 
 # Output Configuration
 OUTPUT_FILE = "industry_transcripts_combined.csv"
@@ -116,9 +119,38 @@ configuration.get_basic_auth_token()
 # UTILITY FUNCTIONS
 # =============================================================================
 
+def get_country_from_categories(categories):
+    """
+    Determine country based on categories (CN:CA, CN:US, etc.)
+    
+    Args:
+        categories: List or string of categories
+    
+    Returns:
+        str: "Canada", "United States", or "Other"
+    """
+    if not categories:
+        return "Other"
+    
+    # Convert to list if it's a string
+    if isinstance(categories, str):
+        categories = [categories]
+    elif not isinstance(categories, list):
+        return "Other"
+    
+    # Check for country codes
+    for category in categories:
+        category_str = str(category).upper()
+        if "CN:CA" in category_str:
+            return "Canada"
+        elif "CN:US" in category_str:
+            return "United States"
+    
+    return "Other"
+
 def check_ticker_country_flags(row, ticker_list):
     """
-    Check if any ticker-country codes are found in headline or all_ids
+    Check if any ticker-country codes are found as exact matches in all_ids or primary_ids
     
     Args:
         row: DataFrame row
@@ -132,29 +164,39 @@ def check_ticker_country_flags(row, ticker_list):
     
     found_tickers = []
     
-    # Check headline
-    headline = str(row.get('headline', '')).upper()
+    # Collect all IDs to search (both all_ids and primary_ids)
+    ids_to_search = []
     
-    # Check all_ids (which may be a list or string)
+    # Get all_ids
     all_ids = row.get('all_ids', [])
     if isinstance(all_ids, list):
-        all_ids_str = ' '.join([str(id_item).upper() for id_item in all_ids])
-    else:
-        all_ids_str = str(all_ids).upper()
+        ids_to_search.extend([str(id_item).upper().strip() for id_item in all_ids])
+    elif all_ids is not None:
+        ids_to_search.append(str(all_ids).upper().strip())
     
-    # Search for each ticker-country code
+    # Get primary_ids
+    primary_ids = row.get('primary_ids', [])
+    if isinstance(primary_ids, list):
+        ids_to_search.extend([str(id_item).upper().strip() for id_item in primary_ids])
+    elif primary_ids is not None:
+        ids_to_search.append(str(primary_ids).upper().strip())
+    
+    # Remove duplicates and empty strings
+    ids_to_search = list(set([id_item for id_item in ids_to_search if id_item]))
+    
+    # Search for exact matches of each ticker-country code
     for ticker in ticker_list:
-        ticker_upper = ticker.upper()
+        ticker_upper = ticker.upper().strip()
         
-        # Check if ticker found in headline or all_ids
-        if ticker_upper in headline or ticker_upper in all_ids_str:
+        # Check for exact match in the IDs
+        if ticker_upper in ids_to_search:
             found_tickers.append(ticker)
     
     return found_tickers, len(found_tickers) > 0
 
 def add_ticker_country_flags(df, ticker_list):
     """
-    Add ticker-country flag columns to the DataFrame
+    Add ticker-country flag columns and country classification to the DataFrame
     
     Args:
         df (pd.DataFrame): DataFrame with transcript data
@@ -163,15 +205,27 @@ def add_ticker_country_flags(df, ticker_list):
     Returns:
         pd.DataFrame: DataFrame with added flag columns
     """
-    if df.empty or not ticker_list:
-        if not ticker_list:
-            print("No ticker-country flags specified, skipping ticker flagging")
+    if df.empty:
         return df
     
-    print(f"Adding ticker-country flags for: {', '.join(ticker_list)}")
-    
-    # Add columns for ticker flags
     df_copy = df.copy()
+    
+    # Add country classification based on categories
+    print("Adding country classification based on categories...")
+    df_copy['country_classification'] = df_copy.apply(
+        lambda row: get_country_from_categories(row.get('categories', [])), axis=1
+    )
+    
+    # Add ticker flagging if specified
+    if not ticker_list:
+        print("No ticker-country flags specified, skipping ticker flagging")
+        # Still add empty columns for consistency
+        df_copy['ticker_flags_found'] = ''
+        df_copy['bank_names_found'] = ''
+        df_copy['has_ticker_flags'] = False
+        return df_copy
+    
+    print(f"Adding ticker-country flags for {len(ticker_list)} banks...")
     
     # Apply ticker checking to each row
     ticker_results = df_copy.apply(lambda row: check_ticker_country_flags(row, ticker_list), axis=1)
@@ -180,14 +234,28 @@ def add_ticker_country_flags(df, ticker_list):
     df_copy['ticker_flags_found'] = [result[0] for result in ticker_results]
     df_copy['has_ticker_flags'] = [result[1] for result in ticker_results]
     
-    # Convert ticker_flags_found list to string for CSV compatibility
+    # Map tickers to bank names
+    df_copy['bank_names_found'] = df_copy['ticker_flags_found'].apply(
+        lambda tickers: [TICKER_BANK_NAMES.get(ticker, ticker) for ticker in tickers] if tickers else []
+    )
+    
+    # Convert lists to strings for CSV compatibility
     df_copy['ticker_flags_found'] = df_copy['ticker_flags_found'].apply(
         lambda tickers: ', '.join(tickers) if tickers else ''
+    )
+    df_copy['bank_names_found'] = df_copy['bank_names_found'].apply(
+        lambda names: ', '.join(names) if names else ''
     )
     
     # Count how many transcripts have ticker flags
     flagged_count = df_copy['has_ticker_flags'].sum()
     print(f"Found {flagged_count} transcripts containing specified ticker-country codes")
+    
+    # Count by country classification
+    country_counts = df_copy['country_classification'].value_counts()
+    print("Country classification breakdown:")
+    for country, count in country_counts.items():
+        print(f"  {country}: {count} transcripts")
     
     return df_copy
 
@@ -360,19 +428,30 @@ def save_transcripts_to_csv(df, output_file):
         if 'fetch_date' in df.columns:
             print(f"Date range: {df['fetch_date'].min()} to {df['fetch_date'].max()}")
         
+        # Country classification summary
+        if 'country_classification' in df.columns:
+            country_counts = df['country_classification'].value_counts()
+            print("Country classification breakdown:")
+            for country, count in country_counts.items():
+                print(f"  {country}: {count} transcripts ({count/len(df)*100:.1f}%)")
+        
         # Ticker flag summary
         if 'has_ticker_flags' in df.columns:
             flagged_count = df['has_ticker_flags'].sum()
-            print(f"Transcripts with ticker flags: {flagged_count} ({flagged_count/len(df)*100:.1f}%)")
+            print(f"Transcripts with bank mentions: {flagged_count} ({flagged_count/len(df)*100:.1f}%)")
             
             if flagged_count > 0:
-                # Show which tickers were found
-                all_found_tickers = []
-                for ticker_str in df['ticker_flags_found'].dropna():
-                    if ticker_str:
-                        all_found_tickers.extend(ticker_str.split(', '))
-                unique_found_tickers = list(set(all_found_tickers))
-                print(f"Ticker-country codes found: {', '.join(sorted(unique_found_tickers))}")
+                # Show which banks were found
+                all_found_banks = []
+                for bank_str in df['bank_names_found'].dropna():
+                    if bank_str:
+                        all_found_banks.extend(bank_str.split(', '))
+                unique_found_banks = list(set(all_found_banks))
+                print(f"Banks mentioned: {len(unique_found_banks)} unique banks")
+                for bank in sorted(unique_found_banks)[:10]:  # Show first 10
+                    print(f"  - {bank}")
+                if len(unique_found_banks) > 10:
+                    print(f"  ... and {len(unique_found_banks) - 10} more")
         
         if 'categories' in df.columns:
             print("Categories found in data:")
