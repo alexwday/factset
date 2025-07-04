@@ -366,33 +366,6 @@ def generate_html_calendar(events, start_date, end_date):
             flex-wrap: wrap;
         }
         
-        .quick-stats {
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 8px 16px;
-            border-radius: 6px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .stat-item {
-            text-align: center;
-            min-width: 60px;
-        }
-        
-        .stat-value {
-            font-size: 18px;
-            font-weight: 700;
-            display: block;
-        }
-        
-        .stat-label {
-            font-size: 11px;
-            opacity: 0.8;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
         
         /* Main Content Area */
         .main-content {
@@ -450,8 +423,8 @@ def generate_html_calendar(events, start_date, end_date):
         .content-wrapper {
             display: grid;
             grid-template-columns: 280px 1fr;
-            gap: 24px;
-            padding: 24px 0;
+            gap: 16px;
+            padding: 16px 0;
             min-height: calc(100vh - 120px);
         }
         
@@ -510,15 +483,12 @@ def generate_html_calendar(events, start_date, end_date):
         .main-calendar-area {
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 12px;
         }
         
         /* Dashboard Cards */
         .dashboard-section {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 20px;
-            margin-bottom: 24px;
+            margin-bottom: 16px;
         }
         
         .upcoming-earnings {
@@ -587,49 +557,15 @@ def generate_html_calendar(events, start_date, end_date):
             margin-bottom: 4px;
         }
         
-        .event-summary-card {
-            background: var(--bg-primary);
-            border: 1px solid var(--border-light);
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: var(--shadow-sm);
-        }
-        
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
-        }
-        
-        .summary-item {
-            text-align: center;
-            padding: 12px;
-            background: var(--bg-secondary);
-            border-radius: 6px;
-        }
-        
-        .summary-item .number {
-            font-size: 24px;
-            font-weight: 700;
-            color: var(--secondary-blue);
-            display: block;
-        }
-        
-        .summary-item .label {
-            font-size: 11px;
-            color: var(--text-medium);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
         
         /* Month Navigation */
         .month-navigation {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 24px;
+            margin-bottom: 12px;
             background: var(--bg-primary);
-            padding: 16px 20px;
+            padding: 12px 16px;
             border-radius: 8px;
             box-shadow: var(--shadow-sm);
             border: 1px solid var(--border-light);
@@ -677,30 +613,6 @@ def generate_html_calendar(events, start_date, end_date):
             gap: 12px;
         }
         
-        .view-toggle {
-            display: flex;
-            background: var(--bg-secondary);
-            border-radius: 6px;
-            padding: 2px;
-        }
-        
-        .view-toggle button {
-            padding: 6px 12px;
-            border: none;
-            background: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--text-medium);
-            transition: all 0.2s ease;
-        }
-        
-        .view-toggle button.active {
-            background: white;
-            color: var(--text-dark);
-            box-shadow: var(--shadow-sm);
-        }
         
         /* Calendar */
         .calendar-wrapper {
@@ -896,9 +808,6 @@ def generate_html_calendar(events, start_date, end_date):
                 gap: 12px;
             }
             
-            .dashboard-section {
-                grid-template-columns: 1fr;
-            }
         }
         
         @media (max-width: 768px) {
@@ -1158,9 +1067,6 @@ def generate_html_calendar(events, start_date, end_date):
                 display: none !important;
             }
             
-            .view-toggle {
-                display: none !important;
-            }
             
             @page {
                 margin: 0.75in;
@@ -1207,22 +1113,6 @@ def generate_html_calendar(events, start_date, end_date):
                 </div>
                 
                 <div class="header-controls">
-                    <!-- Quick Stats -->
-                    <div class="quick-stats" id="quickStats">
-                        <div class="stat-item">
-                            <span class="stat-value" id="totalEvents">-</span>
-                            <span class="stat-label">Events</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-value" id="totalBanks">-</span>
-                            <span class="stat-label">Banks</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-value" id="upcomingCount">-</span>
-                            <span class="stat-label">Upcoming</span>
-                        </div>
-                    </div>
-                    
                     <!-- Quick Filters -->
                     <div class="controls">
                         <div class="control-group">
@@ -1231,15 +1121,6 @@ def generate_html_calendar(events, start_date, end_date):
                                 <option value="all">All Regions</option>
                                 <option value="US">United States</option>
                                 <option value="Canada">Canada</option>
-                            </select>
-                        </div>
-                        
-                        <div class="control-group">
-                            <label for="quickEventFilter">Event Type</label>
-                            <select id="quickEventFilter" onchange="applyFilters()">
-                                <option value="all">All Types</option>
-                                <option value="Earnings">Earnings</option>
-                                <option value="Conference">Conference</option>
                             </select>
                         </div>
                     </div>
@@ -1279,16 +1160,6 @@ def generate_html_calendar(events, start_date, end_date):
                         </select>
                     </div>
                     
-                    <div class="filter-section">
-                        <label for="dateRangeFilter">Date Range</label>
-                        <select id="dateRangeFilter" onchange="applyFilters()">
-                            <option value="all">All Dates</option>
-                            <option value="thisWeek">This Week</option>
-                            <option value="nextWeek">Next Week</option>
-                            <option value="thisMonth">This Month</option>
-                            <option value="nextMonth">Next Month</option>
-                        </select>
-                    </div>
                 </div>
                 
                 <!-- Main Calendar Area -->
@@ -1301,28 +1172,6 @@ def generate_html_calendar(events, start_date, end_date):
                                 <!-- Upcoming earnings will be dynamically added -->
                             </div>
                         </div>
-                        
-                        <div class="event-summary-card">
-                            <h3>Monthly Summary</h3>
-                            <div class="summary-grid" id="monthlySummary">
-                                <div class="summary-item">
-                                    <span class="number" id="monthlyEarnings">0</span>
-                                    <span class="label">Earnings</span>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="number" id="monthlyConferences">0</span>
-                                    <span class="label">Conferences</span>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="number" id="monthlyMeetings">0</span>
-                                    <span class="label">Meetings</span>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="number" id="monthlyOther">0</span>
-                                    <span class="label">Other</span>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                     
                     <!-- Month Navigation -->
@@ -1331,11 +1180,6 @@ def generate_html_calendar(events, start_date, end_date):
                             <button class="month-nav-button" onclick="previousMonth()" id="prevButton">
                                 ← Previous
                             </button>
-                            <div class="view-toggle">
-                                <button class="active" onclick="setView('month')">Month</button>
-                                <button onclick="setView('week')">Week</button>
-                                <button onclick="setView('list')">List</button>
-                            </div>
                         </div>
                         
                         <div class="current-month" id="currentMonth">January 2024</div>
@@ -1343,12 +1187,6 @@ def generate_html_calendar(events, start_date, end_date):
                         <div class="nav-group">
                             <button class="month-nav-button" onclick="nextMonth()" id="nextButton">
                                 Next →
-                            </button>
-                            <button class="month-nav-button" onclick="goToToday()" id="todayButton">
-                                Today
-                            </button>
-                            <button class="month-nav-button" onclick="window.print()" title="Print Calendar">
-                                🖨️ Print
                             </button>
                         </div>
                     </div>
@@ -1394,81 +1232,11 @@ def generate_html_calendar(events, start_date, end_date):
         document.addEventListener('DOMContentLoaded', function() {
             initializeBankDropdown();
             initializeEventTypeDropdown();
-            updateQuickStats();
             updateUpcomingEarnings();
-            updateMonthlySummary();
             renderCurrentMonth();
         });
         
-        // Initialize quick stats
-        function updateQuickStats() {
-            const totalEvents = eventsData.length;
-            const totalBanks = Object.keys(bankInfo).length;
-            const now = new Date();
-            const upcomingEvents = eventsData.filter(event => 
-                new Date(event.event_date_time) >= now
-            ).length;
-            
-            document.getElementById('totalEvents').textContent = totalEvents;
-            document.getElementById('totalBanks').textContent = totalBanks;
-            document.getElementById('upcomingCount').textContent = upcomingEvents;
-        }
         
-        // Update monthly summary
-        function updateMonthlySummary() {
-            if (!availableMonths[currentMonthIndex]) return;
-            
-            const month = availableMonths[currentMonthIndex];
-            const monthEvents = eventsData.filter(event => {
-                const eventDate = new Date(event.event_date_time);
-                return eventDate.getFullYear() === month.year &&
-                       eventDate.getMonth() === month.month - 1 &&
-                       isEventVisible(event);
-            });
-            
-            const earnings = monthEvents.filter(e => 
-                ['Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease'].includes(e.event_type)
-            ).length;
-            
-            const conferences = monthEvents.filter(e => 
-                e.event_type === 'Conference'
-            ).length;
-            
-            const meetings = monthEvents.filter(e => 
-                ['ShareholdersMeeting', 'AnalystsInvestorsMeeting'].includes(e.event_type)
-            ).length;
-            
-            const other = monthEvents.length - earnings - conferences - meetings;
-            
-            document.getElementById('monthlyEarnings').textContent = earnings;
-            document.getElementById('monthlyConferences').textContent = conferences;
-            document.getElementById('monthlyMeetings').textContent = meetings;
-            document.getElementById('monthlyOther').textContent = other;
-        }
-        
-        // Set view mode
-        function setView(view) {
-            currentView = view;
-            document.querySelectorAll('.view-toggle button').forEach(btn => 
-                btn.classList.remove('active')
-            );
-            event.target.classList.add('active');
-            renderCurrentMonth();
-        }
-        
-        // Go to today
-        function goToToday() {
-            const today = new Date();
-            const todayMonth = availableMonths.findIndex(month => 
-                month.year === today.getFullYear() && 
-                month.month === today.getMonth() + 1
-            );
-            
-            if (todayMonth !== -1) {
-                currentMonthIndex = todayMonth;
-                renderCurrentMonth();
-            }
-        }
         
         // Initialize bank dropdown
         function initializeBankDropdown() {
@@ -1610,7 +1378,6 @@ def generate_html_calendar(events, start_date, end_date):
             const regionFilter = document.getElementById('regionFilter');
             const quickRegionFilter = document.getElementById('quickRegionFilter');
             const eventTypeFilter = document.getElementById('eventTypeFilter');
-            const quickEventFilter = document.getElementById('quickEventFilter');
             
             // Determine which filter was changed and sync the other
             if (document.activeElement === quickRegionFilter) {
@@ -1619,19 +1386,11 @@ def generate_html_calendar(events, start_date, end_date):
                 quickRegionFilter.value = regionFilter.value;
             }
             
-            if (document.activeElement === quickEventFilter) {
-                eventTypeFilter.value = quickEventFilter.value;
-            } else if (document.activeElement === eventTypeFilter) {
-                quickEventFilter.value = eventTypeFilter.value;
-            }
-            
             selectedRegion = regionFilter.value;
             selectedBank = document.getElementById('bankFilter').value;
             selectedEventType = eventTypeFilter.value;
-            selectedDateRange = document.getElementById('dateRangeFilter')?.value || 'all';
             
             updateUpcomingEarnings();
-            updateMonthlySummary();
             renderCurrentMonth();
         }
         
@@ -1640,7 +1399,6 @@ def generate_html_calendar(events, start_date, end_date):
             const ticker = event.ticker;
             const eventType = event.event_type;
             const region = bankInfo[ticker]?.region;
-            const eventDate = new Date(event.event_date_time);
             
             // Check if ticker exists in our bank info
             if (!bankInfo[ticker]) {
@@ -1660,39 +1418,6 @@ def generate_html_calendar(events, start_date, end_date):
             // Check event type filter
             if (selectedEventType !== 'all' && eventType !== selectedEventType) {
                 return false;
-            }
-            
-            // Check date range filter
-            if (selectedDateRange !== 'all') {
-                const now = new Date();
-                const startOfWeek = new Date(now);
-                startOfWeek.setDate(now.getDate() - now.getDay());
-                const endOfWeek = new Date(startOfWeek);
-                endOfWeek.setDate(startOfWeek.getDate() + 6);
-                
-                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-                const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                
-                switch (selectedDateRange) {
-                    case 'thisWeek':
-                        if (eventDate < startOfWeek || eventDate > endOfWeek) return false;
-                        break;
-                    case 'nextWeek':
-                        const nextWeekStart = new Date(endOfWeek);
-                        nextWeekStart.setDate(endOfWeek.getDate() + 1);
-                        const nextWeekEnd = new Date(nextWeekStart);
-                        nextWeekEnd.setDate(nextWeekStart.getDate() + 6);
-                        if (eventDate < nextWeekStart || eventDate > nextWeekEnd) return false;
-                        break;
-                    case 'thisMonth':
-                        if (eventDate < startOfMonth || eventDate > endOfMonth) return false;
-                        break;
-                    case 'nextMonth':
-                        const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-                        const nextMonthEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0);
-                        if (eventDate < nextMonthStart || eventDate > nextMonthEnd) return false;
-                        break;
-                }
             }
             
             return true;
