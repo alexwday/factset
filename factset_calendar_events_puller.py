@@ -811,6 +811,12 @@ def generate_html_calendar(events, start_date, end_date):
                 </div>
             </div>
         </div>
+        
+        <!-- Debug Panel -->
+        <div style="background: white; padding: 20px; border-radius: 12px; margin-top: 20px; font-family: monospace; font-size: 12px;">
+            <h3>Debug Information</h3>
+            <div id="debugInfo">Loading...</div>
+        </div>
     </div>
     
     <!-- Modal -->
@@ -833,6 +839,26 @@ def generate_html_calendar(events, start_date, end_date):
         
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
+            console.log('Total events loaded:', eventsData.length);
+            console.log('Bank info loaded:', Object.keys(bankInfo).length, 'banks');
+            console.log('Available months:', availableMonths.length);
+            
+            // Log sample events
+            if (eventsData.length > 0) {
+                console.log('Sample event:', eventsData[0]);
+            }
+            
+            // Log events by ticker
+            const eventsByTicker = {};
+            eventsData.forEach(event => {
+                const ticker = event.ticker;
+                if (!eventsByTicker[ticker]) {
+                    eventsByTicker[ticker] = 0;
+                }
+                eventsByTicker[ticker]++;
+            });
+            console.log('Events by ticker:', eventsByTicker);
+            
             initializeBankDropdown();
             initializeEventTypeFilters();
             renderCurrentMonth();
@@ -1026,21 +1052,42 @@ def generate_html_calendar(events, start_date, end_date):
             const eventType = event.event_type;
             const region = bankInfo[ticker]?.region;
             
+            // Debug logging
+            console.log('Checking event visibility:', {
+                ticker: ticker,
+                eventType: eventType,
+                region: region,
+                selectedRegion: selectedRegion,
+                isInSelectedBanks: selectedBanks.has(ticker),
+                selectedEventTypesSize: selectedEventTypes.size,
+                hasEventType: selectedEventTypes.has(eventType)
+            });
+            
+            // Check if ticker exists in our bank info
+            if (!bankInfo[ticker]) {
+                console.log('Ticker not in bankInfo:', ticker);
+                return false;
+            }
+            
             // Check region filter
             if (selectedRegion !== 'all' && region !== selectedRegion) {
+                console.log('Filtered out by region:', region, 'vs', selectedRegion);
                 return false;
             }
             
             // Check bank filter
             if (!selectedBanks.has(ticker)) {
+                console.log('Filtered out by bank selection:', ticker);
                 return false;
             }
             
-            // Check event type filter
+            // Check event type filter - if no specific types selected, show all
             if (selectedEventTypes.size > 0 && !selectedEventTypes.has(eventType)) {
+                console.log('Filtered out by event type:', eventType);
                 return false;
             }
             
+            console.log('Event visible:', ticker, eventType);
             return true;
         }
         
@@ -1110,13 +1157,22 @@ def generate_html_calendar(events, start_date, end_date):
                 // Get events for this day
                 const dayEvents = eventsData.filter(event => {
                     const eventDate = new Date(event.event_date_time);
-                    return eventDate.getFullYear() === year &&
+                    const matches = eventDate.getFullYear() === year &&
                            eventDate.getMonth() === monthNum - 1 &&
                            eventDate.getDate() === day;
+                    
+                    if (matches) {
+                        console.log('Found event for day', day, ':', event.ticker, event.event_date_time);
+                    }
+                    return matches;
                 });
+                
+                console.log(`Day ${day}: Found ${dayEvents.length} events before filtering`);
                 
                 // Filter and display events
                 const visibleEvents = dayEvents.filter(event => isEventVisible(event));
+                
+                console.log(`Day ${day}: ${visibleEvents.length} events visible after filtering`);
                 const maxDisplay = 3;
                 
                 visibleEvents.slice(0, maxDisplay).forEach(event => {
@@ -1192,6 +1248,63 @@ def generate_html_calendar(events, start_date, end_date):
             document.getElementById('visibleEvents').textContent = visible;
             document.getElementById('selectedBanks').textContent = banksCount;
             document.getElementById('currentMonthEvents').textContent = monthEvents;
+            
+            // Update debug information
+            updateDebugInfo();
+        }
+        
+        // Update debug information
+        function updateDebugInfo() {
+            const eventsByTicker = {};
+            const eventsByRegion = {};
+            const eventsByType = {};
+            
+            eventsData.forEach(event => {
+                const ticker = event.ticker;
+                const region = bankInfo[ticker]?.region || 'Unknown';
+                const eventType = event.event_type || 'Unknown';
+                
+                eventsByTicker[ticker] = (eventsByTicker[ticker] || 0) + 1;
+                eventsByRegion[region] = (eventsByRegion[region] || 0) + 1;
+                eventsByType[eventType] = (eventsByType[eventType] || 0) + 1;
+            });
+            
+            const visibleByTicker = {};
+            const visibleByRegion = {};
+            const visibleByType = {};
+            
+            eventsData.filter(e => isEventVisible(e)).forEach(event => {
+                const ticker = event.ticker;
+                const region = bankInfo[ticker]?.region || 'Unknown';
+                const eventType = event.event_type || 'Unknown';
+                
+                visibleByTicker[ticker] = (visibleByTicker[ticker] || 0) + 1;
+                visibleByRegion[region] = (visibleByRegion[region] || 0) + 1;
+                visibleByType[eventType] = (visibleByType[eventType] || 0) + 1;
+            });
+            
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.innerHTML = `
+                <p><strong>Filter State:</strong></p>
+                <p>Selected Region: ${selectedRegion}</p>
+                <p>Selected Banks: ${selectedBanks.size}/${Object.keys(bankInfo).length}</p>
+                <p>Selected Event Types: ${selectedEventTypes.size} (${Array.from(selectedEventTypes).join(', ') || 'All'})</p>
+                
+                <p><strong>Events by Ticker (Total/Visible):</strong></p>
+                ${Object.keys(eventsByTicker).sort().map(ticker => 
+                    `<p>${ticker}: ${eventsByTicker[ticker]}/${visibleByTicker[ticker] || 0}</p>`
+                ).join('')}
+                
+                <p><strong>Events by Region (Total/Visible):</strong></p>
+                ${Object.keys(eventsByRegion).map(region => 
+                    `<p>${region}: ${eventsByRegion[region]}/${visibleByRegion[region] || 0}</p>`
+                ).join('')}
+                
+                <p><strong>Events by Type (Total/Visible):</strong></p>
+                ${Object.keys(eventsByType).map(type => 
+                    `<p>${type}: ${eventsByType[type]}/${visibleByType[type] || 0}</p>`
+                ).join('')}
+            `;
         }
         
         // Modal controls
