@@ -1,7 +1,8 @@
 """
-FactSet Bank Transcripts Puller
-This script pulls transcripts for Canadian and US banks from FactSet Events and Transcripts API
+FactSet Industry Transcripts Puller
+This script pulls earnings transcripts for specified industries from FactSet Events and Transcripts API
 for a specified date range and combines them into a single CSV file.
+Currently configured for banks and financial services (IN:BANKS, IN:FNLSVC).
 """
 
 import pandas as pd
@@ -32,14 +33,18 @@ TIME_ZONE = "America/New_York"
 START_DATE = "2024-05-01"
 END_DATE = "2024-05-31"
 
-# Categories Filter (Banks only)
-CATEGORIES_FILTER = ["IN:BANKS"]
+# Categories Filter (Multiple Industries)
+# Add multiple industry codes as needed. Common codes include:
+# IN:BANKS (Banks), IN:FNLSVC (Financial Services), IN:INSUR (Insurance), etc.
+# Use the factset_categories_puller.py script to get a full list of available codes.
+INDUSTRY_FILTERS = ["IN:BANKS", "IN:FNLSVC"]  # Example: Banks and Financial Services
+CATEGORIES_FILTER = INDUSTRY_FILTERS
 
 # Event Type Filter (Earnings only)
 EVENT_TYPE = "Earnings"
 
 # Output Configuration
-OUTPUT_FILE = "bank_transcripts_combined.csv"
+OUTPUT_FILE = "industry_transcripts_combined.csv"
 SORT_ORDER = ["-storyDateTime"]
 PAGINATION_LIMIT = 1000
 PAGINATION_OFFSET = 0
@@ -75,7 +80,7 @@ configuration.get_basic_auth_token()
 def filter_transcripts_for_earnings(df):
     """
     Filter transcripts to only include earnings events
-    (Banks are already filtered by the API categories parameter)
+    (Industries are already filtered by the API categories parameter)
     
     Args:
         df (pd.DataFrame): DataFrame with transcript data
@@ -122,7 +127,7 @@ def generate_date_range(start_date_str, end_date_str):
 
 def get_transcripts_for_date(target_date, api_instance):
     """
-    Get transcripts for a specific date with bank category filtering and earnings event type
+    Get transcripts for a specific date with industry category filtering and earnings event type
     
     Args:
         target_date (datetime.date): Date to fetch transcripts for
@@ -151,16 +156,16 @@ def get_transcripts_for_date(target_date, api_instance):
         
         # Convert response to DataFrame
         df = pd.DataFrame(response.to_dict()['data'])
-        print(f"Found {len(df)} bank transcripts on {target_date}")
+        print(f"Found {len(df)} industry transcripts on {target_date}")
         
-        # Filter for earnings only (banks already filtered by API)
+        # Filter for earnings only (industries already filtered by API)
         filtered_df = filter_transcripts_for_earnings(df)
         
         if filtered_df is None or filtered_df.empty:
-            print(f"No bank earnings transcripts found for {target_date} after filtering")
+            print(f"No industry earnings transcripts found for {target_date} after filtering")
             return None
         
-        print(f"Found {len(filtered_df)} bank earnings transcripts on {target_date}")
+        print(f"Found {len(filtered_df)} industry earnings transcripts on {target_date}")
         
         # Add date column for tracking
         filtered_df['fetch_date'] = target_date
@@ -173,7 +178,7 @@ def get_transcripts_for_date(target_date, api_instance):
 
 def get_all_transcripts_for_date_range(start_date_str, end_date_str):
     """
-    Get all bank earnings transcripts for a date range, processing day by day
+    Get all industry earnings transcripts for a date range, processing day by day
     
     Args:
         start_date_str (str): Start date in YYYY-MM-DD format
@@ -182,8 +187,8 @@ def get_all_transcripts_for_date_range(start_date_str, end_date_str):
     Returns:
         pd.DataFrame: Combined DataFrame with all transcripts
     """
-    print(f"Fetching bank earnings transcripts from {start_date_str} to {end_date_str}")
-    print(f"Filtering for categories: {', '.join(CATEGORIES_FILTER)} AND event_type: {EVENT_TYPE}")
+    print(f"Fetching industry earnings transcripts from {start_date_str} to {end_date_str}")
+    print(f"Filtering for industries: {', '.join(INDUSTRY_FILTERS)} AND event_type: {EVENT_TYPE}")
     
     # Generate date range
     date_list = generate_date_range(start_date_str, end_date_str)
@@ -258,13 +263,13 @@ def main():
     Main function to orchestrate the transcript pulling process
     """
     print("=" * 60)
-    print("FactSet Bank Transcripts Puller")
+    print("FactSet Industry Transcripts Puller")
     print("=" * 60)
     
     # Display configuration
     print("\nConfiguration:")
     print(f"  Date Range: {START_DATE} to {END_DATE}")
-    print(f"  Categories: {', '.join(CATEGORIES_FILTER)}")
+    print(f"  Industries: {', '.join(INDUSTRY_FILTERS)}")
     print(f"  Event Type: {EVENT_TYPE}")
     print(f"  Output File: {OUTPUT_FILE}")
     print(f"  SSL Cert: {SSL_CERT_PATH}")
