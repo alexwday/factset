@@ -37,8 +37,9 @@ CANADIAN_BANKS = {
     "National Bank of Canada": "NA-CA"
 }
 
-# Search Configuration
-PRIMARY_ID_SEARCH = True  # Set to True to search only where bank is primary identifier
+# Search Configuration  
+# Set to True/False for primary_id parameter, or None to omit the parameter entirely
+PRIMARY_ID_SEARCH = None  # None=omit parameter, True=primary only, False=mentioned anywhere
 SORT_ORDER = ["-storyDateTime"]
 PAGINATION_LIMIT = 1000
 PAGINATION_OFFSET = 0
@@ -95,12 +96,15 @@ def get_transcripts_for_bank(bank_name, bank_id, api_instance):
         
         # Prepare parameters for API call
         api_params = {
-            'primary_id': PRIMARY_ID_SEARCH,
             'ids': [bank_id],
             'sort': SORT_ORDER,
             'pagination_limit': PAGINATION_LIMIT,
             'pagination_offset': PAGINATION_OFFSET
         }
+        
+        # Add primary_id parameter if enabled (ensuring it's a proper boolean)
+        if PRIMARY_ID_SEARCH is not None:
+            api_params['primary_id'] = bool(PRIMARY_ID_SEARCH)
         
         # Add date range if specified
         if START_DATE:
@@ -110,6 +114,9 @@ def get_transcripts_for_bank(bank_name, bank_id, api_instance):
         if END_DATE:
             from dateutil.parser import parse as dateutil_parser
             api_params['end_date'] = dateutil_parser(END_DATE).date()
+        
+        # Debug: Print the API parameters being sent
+        print(f"API parameters: {api_params}")
         
         # Make API call
         response = api_instance.get_transcripts_ids(**api_params)
