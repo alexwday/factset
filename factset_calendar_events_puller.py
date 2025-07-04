@@ -36,12 +36,17 @@ API_PASSWORD = "x"
 
 # Major Canadian and US Banks Primary IDs with regions
 BANK_PRIMARY_IDS = {
-    # Major Canadian Banks ("Big Six")
+    # Major Canadian Banks ("Big Six") - Include both CA and US listings
     "RY-CA": {"name": "Royal Bank of Canada", "region": "Canada"},
+    "RY-US": {"name": "Royal Bank of Canada", "region": "Canada"},
     "TD-CA": {"name": "Toronto-Dominion Bank", "region": "Canada"},
+    "TD-US": {"name": "Toronto-Dominion Bank", "region": "Canada"},
     "BNS-CA": {"name": "Bank of Nova Scotia (Scotiabank)", "region": "Canada"},
+    "BNS-US": {"name": "Bank of Nova Scotia (Scotiabank)", "region": "Canada"},
     "BMO-CA": {"name": "Bank of Montreal", "region": "Canada"},
+    "BMO-US": {"name": "Bank of Montreal", "region": "Canada"},
     "CM-CA": {"name": "Canadian Imperial Bank of Commerce (CIBC)", "region": "Canada"},
+    "CM-US": {"name": "Canadian Imperial Bank of Commerce (CIBC)", "region": "Canada"},
     "NA-CA": {"name": "National Bank of Canada", "region": "Canada"},
     
     # Major US Banks
@@ -839,26 +844,6 @@ def generate_html_calendar(events, start_date, end_date):
         
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('Total events loaded:', eventsData.length);
-            console.log('Bank info loaded:', Object.keys(bankInfo).length, 'banks');
-            console.log('Available months:', availableMonths.length);
-            
-            // Log sample events
-            if (eventsData.length > 0) {
-                console.log('Sample event:', eventsData[0]);
-            }
-            
-            // Log events by ticker
-            const eventsByTicker = {};
-            eventsData.forEach(event => {
-                const ticker = event.ticker;
-                if (!eventsByTicker[ticker]) {
-                    eventsByTicker[ticker] = 0;
-                }
-                eventsByTicker[ticker]++;
-            });
-            console.log('Events by ticker:', eventsByTicker);
-            
             initializeBankDropdown();
             initializeEventTypeFilters();
             renderCurrentMonth();
@@ -1052,42 +1037,26 @@ def generate_html_calendar(events, start_date, end_date):
             const eventType = event.event_type;
             const region = bankInfo[ticker]?.region;
             
-            // Debug logging
-            console.log('Checking event visibility:', {
-                ticker: ticker,
-                eventType: eventType,
-                region: region,
-                selectedRegion: selectedRegion,
-                isInSelectedBanks: selectedBanks.has(ticker),
-                selectedEventTypesSize: selectedEventTypes.size,
-                hasEventType: selectedEventTypes.has(eventType)
-            });
-            
             // Check if ticker exists in our bank info
             if (!bankInfo[ticker]) {
-                console.log('Ticker not in bankInfo:', ticker);
                 return false;
             }
             
             // Check region filter
             if (selectedRegion !== 'all' && region !== selectedRegion) {
-                console.log('Filtered out by region:', region, 'vs', selectedRegion);
                 return false;
             }
             
             // Check bank filter
             if (!selectedBanks.has(ticker)) {
-                console.log('Filtered out by bank selection:', ticker);
                 return false;
             }
             
             // Check event type filter - if no specific types selected, show all
             if (selectedEventTypes.size > 0 && !selectedEventTypes.has(eventType)) {
-                console.log('Filtered out by event type:', eventType);
                 return false;
             }
             
-            console.log('Event visible:', ticker, eventType);
             return true;
         }
         
@@ -1157,22 +1126,13 @@ def generate_html_calendar(events, start_date, end_date):
                 // Get events for this day
                 const dayEvents = eventsData.filter(event => {
                     const eventDate = new Date(event.event_date_time);
-                    const matches = eventDate.getFullYear() === year &&
+                    return eventDate.getFullYear() === year &&
                            eventDate.getMonth() === monthNum - 1 &&
                            eventDate.getDate() === day;
-                    
-                    if (matches) {
-                        console.log('Found event for day', day, ':', event.ticker, event.event_date_time);
-                    }
-                    return matches;
                 });
-                
-                console.log(`Day ${day}: Found ${dayEvents.length} events before filtering`);
                 
                 // Filter and display events
                 const visibleEvents = dayEvents.filter(event => isEventVisible(event));
-                
-                console.log(`Day ${day}: ${visibleEvents.length} events visible after filtering`);
                 const maxDisplay = 3;
                 
                 visibleEvents.slice(0, maxDisplay).forEach(event => {
