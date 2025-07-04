@@ -379,7 +379,26 @@ def generate_html_calendar(events, start_date, end_date):
         .upcoming-events {
             display: flex;
             gap: 15px;
-            flex-wrap: wrap;
+            overflow-x: auto;
+            padding-bottom: 10px;
+        }
+        
+        .upcoming-events::-webkit-scrollbar {
+            height: 6px;
+        }
+        
+        .upcoming-events::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+        
+        .upcoming-events::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+        }
+        
+        .upcoming-events::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
         }
         
         .upcoming-event {
@@ -387,6 +406,8 @@ def generate_html_calendar(events, start_date, end_date):
             padding: 8px 12px;
             border-radius: 6px;
             font-size: 0.9em;
+            min-width: 200px;
+            flex-shrink: 0;
         }
         
         .upcoming-event strong {
@@ -690,7 +711,7 @@ def generate_html_calendar(events, start_date, end_date):
         
         <!-- Upcoming Earnings Banner -->
         <div class="upcoming-earnings">
-            <h3>🎯 Next Upcoming Earnings</h3>
+            <h3>🎯 Upcoming Earnings (scroll to see more →)</h3>
             <div class="upcoming-events" id="upcomingEvents">
                 <!-- Upcoming earnings will be dynamically added -->
             </div>
@@ -807,20 +828,42 @@ def generate_html_calendar(events, start_date, end_date):
             const now = new Date();
             const earningsTypes = ['Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease'];
             
-            // Find upcoming earnings events
+            // Find upcoming earnings events with filters applied
             const upcomingEarnings = eventsData
                 .filter(event => {
                     const eventDate = new Date(event.event_date_time);
-                    return eventDate >= now && earningsTypes.includes(event.event_type);
+                    const ticker = event.ticker;
+                    const region = bankInfo[ticker]?.region;
+                    
+                    // Check if it's an upcoming earnings event
+                    if (!(eventDate >= now && earningsTypes.includes(event.event_type))) {
+                        return false;
+                    }
+                    
+                    // Check if ticker exists in our bank info
+                    if (!bankInfo[ticker]) {
+                        return false;
+                    }
+                    
+                    // Apply region filter
+                    if (selectedRegion !== 'all' && region !== selectedRegion) {
+                        return false;
+                    }
+                    
+                    // Apply bank filter
+                    if (selectedBank !== 'all' && ticker !== selectedBank) {
+                        return false;
+                    }
+                    
+                    return true;
                 })
-                .sort((a, b) => new Date(a.event_date_time) - new Date(b.event_date_time))
-                .slice(0, 5); // Show next 5 upcoming earnings
+                .sort((a, b) => new Date(a.event_date_time) - new Date(b.event_date_time));
             
             const container = document.getElementById('upcomingEvents');
             container.innerHTML = '';
             
             if (upcomingEarnings.length === 0) {
-                container.innerHTML = '<div class="upcoming-event">No upcoming earnings events found</div>';
+                container.innerHTML = '<div class="upcoming-event">No upcoming earnings events found for current filters</div>';
                 return;
             }
             
@@ -833,10 +876,17 @@ def generate_html_calendar(events, start_date, end_date):
                 const eventDate = new Date(event.event_date_time);
                 const bankName = bankInfo[event.ticker]?.name || event.ticker;
                 
+                // Calculate days until event
+                const daysUntil = Math.ceil((eventDate - now) / (1000 * 60 * 60 * 24));
+                const timeText = daysUntil === 0 ? 'Today' : 
+                                daysUntil === 1 ? 'Tomorrow' : 
+                                `${daysUntil} days`;
+                
                 eventEl.innerHTML = `
                     <strong>${event.ticker}</strong>
                     ${bankName}<br>
-                    ${eventDate.toLocaleDateString()} at ${eventDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    <small>${timeText} - ${eventDate.toLocaleDateString()}</small><br>
+                    ${eventDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                 `;
                 
                 container.appendChild(eventEl);
@@ -849,6 +899,7 @@ def generate_html_calendar(events, start_date, end_date):
             selectedBank = document.getElementById('bankFilter').value;
             selectedEventType = document.getElementById('eventTypeFilter').value;
             
+            updateUpcomingEarnings();
             renderCurrentMonth();
         }
         
