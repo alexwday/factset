@@ -38,8 +38,8 @@ CANADIAN_BANKS = {
 }
 
 # Search Configuration  
-# Set to True/False for primary_id parameter, or None to omit the parameter entirely
-PRIMARY_ID_SEARCH = None  # None=omit parameter, True=primary only, False=mentioned anywhere
+# Try different values for primary_id parameter: None, True, False, "true", "false"
+PRIMARY_ID_SEARCH = None  # None=omit, True/False=boolean, "true"/"false"=string
 SORT_ORDER = ["-storyDateTime"]
 PAGINATION_LIMIT = 1000
 PAGINATION_OFFSET = 0
@@ -102,9 +102,14 @@ def get_transcripts_for_bank(bank_name, bank_id, api_instance):
             'pagination_offset': PAGINATION_OFFSET
         }
         
-        # Add primary_id parameter if enabled (ensuring it's a proper boolean)
+        # Add primary_id parameter based on configuration
         if PRIMARY_ID_SEARCH is not None:
-            api_params['primary_id'] = bool(PRIMARY_ID_SEARCH)
+            if isinstance(PRIMARY_ID_SEARCH, str):
+                # Try string values
+                api_params['primary_id'] = PRIMARY_ID_SEARCH
+            else:
+                # Try boolean values
+                api_params['primary_id'] = bool(PRIMARY_ID_SEARCH)
         
         # Add date range if specified
         if START_DATE:
