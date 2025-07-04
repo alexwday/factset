@@ -73,8 +73,8 @@ BANK_PRIMARY_IDS = {
 # Industry codes we're interested in
 INDUSTRY_FILTERS = ["IN:BANKS", "IN:FNLSVC", "IN:SECS", "IN:INS"]
 
-# Event types to include
-EVENT_TYPES = ["Earnings", "Conference", "ShareholderMeeting", "AnalystMeeting", "InvestorDay"]
+# Event types to include - leaving empty to get ALL event types
+EVENT_TYPES = []  # Empty list means include all event types
 
 # Output Configuration
 OUTPUT_HTML_FILE = "bank_events_calendar.html"
@@ -167,17 +167,22 @@ def get_calendar_events(symbols, start_date, end_date, api_instance):
         print(f"Date range: {start_date.date()} to {end_date.date()}")
         
         # Create request object
-        request_data = CompanyEventRequestData(
-            date_time=CompanyEventRequestDataDateTime(
+        request_data_dict = {
+            "date_time": CompanyEventRequestDataDateTime(
                 start=start_date,
                 end=end_date
             ),
-            universe=CompanyEventRequestDataUniverse(
+            "universe": CompanyEventRequestDataUniverse(
                 symbols=symbols,
                 type="Tickers"
-            ),
-            event_types=EVENT_TYPES
-        )
+            )
+        }
+        
+        # Only add event_types if we have specific types to filter
+        if EVENT_TYPES:
+            request_data_dict["event_types"] = EVENT_TYPES
+            
+        request_data = CompanyEventRequestData(**request_data_dict)
         
         request = CompanyEventRequest(data=request_data)
         
@@ -337,20 +342,35 @@ def generate_html_calendar(events, start_date, end_date):
         .event:hover {
             background-color: #2980b9;
         }
-        .event.earnings {
+        .event.earnings,
+        .event.confirmedearningsrelease,
+        .event.projectedearningsrelease {
             background-color: #e74c3c;
         }
         .event.conference {
             background-color: #f39c12;
         }
-        .event.shareholdermeeting {
+        .event.shareholdersmeeting {
             background-color: #27ae60;
         }
-        .event.analystmeeting {
+        .event.analystsinvestorsmeeting {
             background-color: #9b59b6;
         }
-        .event.investorday {
+        .event.salesrevenuecall,
+        .event.salesrevenuerelease {
             background-color: #16a085;
+        }
+        .event.guidancecall {
+            background-color: #3498db;
+        }
+        .event.specialsituation {
+            background-color: #95a5a6;
+        }
+        .event.split {
+            background-color: #d35400;
+        }
+        .event.dividend {
+            background-color: #2ecc71;
         }
         .empty-cell {
             background-color: #f9f9f9;
@@ -430,7 +450,7 @@ def generate_html_calendar(events, start_date, end_date):
     <div class="legend">
         <div class="legend-item">
             <span class="legend-color" style="background-color: #e74c3c;"></span>
-            <span>Earnings</span>
+            <span>Earnings/Releases</span>
         </div>
         <div class="legend-item">
             <span class="legend-color" style="background-color: #f39c12;"></span>
@@ -438,15 +458,23 @@ def generate_html_calendar(events, start_date, end_date):
         </div>
         <div class="legend-item">
             <span class="legend-color" style="background-color: #27ae60;"></span>
-            <span>Shareholder Meeting</span>
+            <span>Shareholders Meeting</span>
         </div>
         <div class="legend-item">
             <span class="legend-color" style="background-color: #9b59b6;"></span>
-            <span>Analyst Meeting</span>
+            <span>Analysts/Investors Meeting</span>
         </div>
         <div class="legend-item">
             <span class="legend-color" style="background-color: #16a085;"></span>
-            <span>Investor Day</span>
+            <span>Sales/Revenue</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background-color: #3498db;"></span>
+            <span>Guidance</span>
+        </div>
+        <div class="legend-item">
+            <span class="legend-color" style="background-color: #2ecc71;"></span>
+            <span>Dividend</span>
         </div>
     </div>
     
