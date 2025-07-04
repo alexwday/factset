@@ -166,11 +166,11 @@ def get_calendar_events(symbols, start_date, end_date, api_instance):
         print(f"\nFetching calendar events for {len(symbols)} banks...")
         print(f"Date range: {start_date.date()} to {end_date.date()}")
         
-        # Create request object
+        # Create request object with proper ISO 8601 format
         request_data_dict = {
             "date_time": CompanyEventRequestDataDateTime(
-                start=start_date,
-                end=end_date
+                start=start_date.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                end=end_date.strftime('%Y-%m-%dT%H:%M:%SZ')
             ),
             "universe": CompanyEventRequestDataUniverse(
                 symbols=symbols,
