@@ -122,15 +122,16 @@ def main():
             
             print(f"\nFetching transcripts for {RBC_NAME} ({RBC_PRIMARY_ID})...")
             
-            # Get transcripts for RBC using exact same pattern as working script
+            # Get transcripts for RBC - remove sort to test
             api_params = {
                 'ids': [RBC_PRIMARY_ID],
-                'sort': SORT_ORDER,
                 'pagination_limit': PAGINATION_LIMIT,
                 'pagination_offset': PAGINATION_OFFSET
             }
             
             print(f"API parameters: {api_params}")
+            print(f"SORT_ORDER value: {SORT_ORDER}")
+            print(f"Sort parameter being sent: {api_params.get('sort')}")
             response = api_instance.get_transcripts_ids(**api_params)
             
             if not response or not hasattr(response, 'data') or not response.data:
