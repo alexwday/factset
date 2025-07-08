@@ -448,10 +448,14 @@ def main():
     
     # Show fiscal periods found
     if with_fiscal_info > 0:
-        fiscal_summary = enhanced_transcripts[enhanced_transcripts['has_fiscal_info'] == True].groupby(['fiscal_year', 'fiscal_period', 'bank_names']).size().reset_index(name='count')
+        # Convert bank_names lists to strings for grouping
+        fiscal_transcripts = enhanced_transcripts[enhanced_transcripts['has_fiscal_info'] == True].copy()
+        fiscal_transcripts['bank_names_str'] = fiscal_transcripts['bank_names'].apply(lambda x: ', '.join(x) if isinstance(x, list) else str(x))
+        
+        fiscal_summary = fiscal_transcripts.groupby(['fiscal_year', 'fiscal_period', 'bank_names_str']).size().reset_index(name='count')
         print(f"\nFiscal Periods Found:")
         for _, row in fiscal_summary.iterrows():
-            print(f"  {row['fiscal_year']} {row['fiscal_period']}: {row['bank_names']} ({row['count']} transcripts)")
+            print(f"  {row['fiscal_year']} {row['fiscal_period']}: {row['bank_names_str']} ({row['count']} transcripts)")
     
     # Save results
     enhanced_transcripts.to_csv(OUTPUT_FILE, index=False)
