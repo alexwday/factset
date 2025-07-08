@@ -47,6 +47,7 @@ CATEGORIES_FILTER = ["IN:BANKS", "IN:FNLSVC", "IN:INS", "IN:SECS"]
 
 # Event Type Filter (Earnings only)
 EVENT_TYPE = "Earnings"
+EVENT_TYPES = ["Earnings"]  # For calendar events API
 
 # Major Canadian and US Banks (from both reference scripts)
 BANK_PRIMARY_IDS = {
@@ -194,7 +195,8 @@ def get_calendar_events(symbols, start_date, end_date, api_instance):
         }
         
         # Only add event_types if we have specific types to filter
-        # In our case, we don't define EVENT_TYPES so it won't be added
+        if EVENT_TYPES:
+            request_data_dict["event_types"] = EVENT_TYPES
         
         request_data = CompanyEventRequestData(**request_data_dict)
         
