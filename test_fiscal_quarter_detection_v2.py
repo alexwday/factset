@@ -179,7 +179,7 @@ def get_calendar_events(symbols, start_date, end_date, api_instance):
     """
     try:
         print(f"  Fetching calendar events for {len(symbols)} symbols...")
-        print(f"  Date range: {start_date.date()} to {end_date.date()}")
+        print(f"  Date range: {start_date} to {end_date}")
         
         # Create request object with proper ISO 8601 format using dateutil_parser
         # EXACT same pattern as reference script
@@ -418,7 +418,15 @@ def main():
     # =============================================================================
     # STEP 3: CROSS-REFERENCE DATA
     # =============================================================================
-    enhanced_transcripts = cross_reference_fiscal_data(transcripts_df, all_events)
+    if all_events:
+        enhanced_transcripts = cross_reference_fiscal_data(transcripts_df, all_events)
+    else:
+        print("No calendar events found - adding empty fiscal info columns")
+        transcripts_df['fiscal_year'] = None
+        transcripts_df['fiscal_period'] = None
+        transcripts_df['has_fiscal_info'] = False
+        transcripts_df['match_method'] = None
+        enhanced_transcripts = transcripts_df
     
     # =============================================================================
     # STEP 4: GENERATE SUMMARY
