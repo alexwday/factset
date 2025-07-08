@@ -175,38 +175,51 @@ def get_transcripts_for_date(target_date, api_instance):
 
 def get_calendar_events(symbols, start_date, end_date, api_instance):
     """
-    Get calendar events for symbols - same pattern as factset_calendar_events_puller.py
+    Get calendar events for symbols - EXACT same pattern as factset_calendar_events_puller.py
     """
     try:
         print(f"  Fetching calendar events for {len(symbols)} symbols...")
+        print(f"  Date range: {start_date.date()} to {end_date.date()}")
         
-        # Build request - same pattern as calendar events script
-        request_data = CompanyEventRequestData(
-            date_time=CompanyEventRequestDataDateTime(
+        # Create request object with proper ISO 8601 format using dateutil_parser
+        # EXACT same pattern as reference script
+        request_data_dict = {
+            "date_time": CompanyEventRequestDataDateTime(
                 start=dateutil_parser(start_date.strftime('%Y-%m-%dT00:00:00Z')),
                 end=dateutil_parser(end_date.strftime('%Y-%m-%dT23:59:59Z'))
             ),
-            universe=CompanyEventRequestDataUniverse(
+            "universe": CompanyEventRequestDataUniverse(
                 symbols=symbols,
                 type="Tickers"
             )
-        )
+        }
         
+        # Only add event_types if we have specific types to filter
+        # This is the KEY difference - don't include event_types parameter
+        # EVENT_TYPES is empty in our case, so we don't add it
+        
+        request_data = CompanyEventRequestData(**request_data_dict)
         request = CompanyEventRequest(data=request_data)
+        
+        # Make API call
         response = api_instance.get_company_event(request)
         
-        if response.data:
-            # Convert to dictionary format - same pattern as reference script
-            events = []
-            for event in response.data:
-                event_dict = event.to_dict()
-                events.append(event_dict)
-            
-            print(f"    Found {len(events)} calendar events")
-            return events
-        else:
-            print(f"    No calendar events found")
+        if not response or not hasattr(response, 'data') or not response.data:
+            print("    No events found")
             return []
+        
+        events = response.data
+        print(f"    Found {len(events)} total events")
+        
+        # Convert events to dictionary format - same pattern as reference script
+        filtered_events = []
+        for event in events:
+            # Convert event object to dict for easier handling
+            event_dict = event.to_dict() if hasattr(event, 'to_dict') else event
+            filtered_events.append(event_dict)
+        
+        print(f"    Processed {len(filtered_events)} events")
+        return filtered_events
             
     except Exception as e:
         print(f"    Error fetching calendar events: {e}")
