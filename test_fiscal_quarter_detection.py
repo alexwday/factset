@@ -82,24 +82,43 @@ CATEGORIES_FILTER = ["IN:BANKS", "IN:FNLSVC", "IN:INS", "IN:SECS"]
 # Event Type Filter (Earnings only)
 EVENT_TYPE = "Earnings"
 
-# Date Range Configuration - Can be overridden when calling functions
-# Format: YYYY-MM-DD or use date objects
-DEFAULT_START_DATE = date.today()  # Today
-DEFAULT_END_DATE = date.today()    # Today (same day for single-day test)
+# =============================================================================
+# DATE RANGE CONFIGURATION
+# =============================================================================
+
+# Date Range Configuration - Modify these for your test
+# Format: YYYY-MM-DD strings or use date objects
+# For single day test: set both to the same date
+START_DATE = "2025-01-07"  # Change this to your desired start date
+END_DATE = "2025-01-07"    # Change this to your desired end date
+
+# Convert to date objects for internal use
+DEFAULT_START_DATE = dateutil_parser(START_DATE).date()
+DEFAULT_END_DATE = dateutil_parser(END_DATE).date()
+
+# =============================================================================
+# SETUP AND CONFIGURATION
+# =============================================================================
+
+# Set up SSL certificate environment variables
+os.environ["REQUESTS_CA_BUNDLE"] = SSL_CERT_PATH
+os.environ["SSL_CERT_FILE"] = SSL_CERT_PATH
+
+# Set up proxy authentication (same as reference scripts)
+user = PROXY_USER
+password = quote(PROXY_PASSWORD)
+
+# Configure FactSet API client (same pattern as reference scripts)
+configuration = fds.sdk.EventsandTranscripts.Configuration(
+    username=API_USERNAME,
+    password=API_PASSWORD,
+    proxy="http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL),
+    ssl_ca_cert=SSL_CERT_PATH
+)
+configuration.get_basic_auth_token()
 
 def setup_api_client():
     """Setup FactSet API client with proxy and SSL configuration."""
-    os.environ['HTTPS_PROXY'] = f'http://{PROXY_USER}:{PROXY_PASSWORD}@{PROXY_URL}'
-    os.environ['HTTP_PROXY'] = f'http://{PROXY_USER}:{PROXY_PASSWORD}@{PROXY_URL}'
-    
-    configuration = fds.sdk.EventsandTranscripts.Configuration(
-        username=API_USERNAME,
-        password=API_PASSWORD,
-        ssl_ca_cert=SSL_CERT_PATH,
-        proxy=PROXY_URL,
-        proxy_headers={'Proxy-Authorization': f'Basic {quote(f"{PROXY_USER}:{PROXY_PASSWORD}")}'}.get('Basic', None)
-    )
-    
     return fds.sdk.EventsandTranscripts.ApiClient(configuration)
 
 def get_transcripts_by_date_range(api_client, start_date=None, end_date=None):
