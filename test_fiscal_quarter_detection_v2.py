@@ -178,11 +178,10 @@ def get_calendar_events(symbols, start_date, end_date, api_instance):
     Get calendar events for symbols - EXACT same pattern as factset_calendar_events_puller.py
     """
     try:
-        print(f"  Fetching calendar events for {len(symbols)} symbols...")
-        print(f"  Date range: {start_date} to {end_date}")
+        print(f"\nFetching calendar events for {len(symbols)} banks...")
+        print(f"Date range: {start_date.date()} to {end_date.date()}")
         
         # Create request object with proper ISO 8601 format using dateutil_parser
-        # EXACT same pattern as reference script
         request_data_dict = {
             "date_time": CompanyEventRequestDataDateTime(
                 start=dateutil_parser(start_date.strftime('%Y-%m-%dT00:00:00Z')),
@@ -195,34 +194,37 @@ def get_calendar_events(symbols, start_date, end_date, api_instance):
         }
         
         # Only add event_types if we have specific types to filter
-        # This is the KEY difference - don't include event_types parameter
-        # EVENT_TYPES is empty in our case, so we don't add it
+        # In our case, we don't define EVENT_TYPES so it won't be added
         
         request_data = CompanyEventRequestData(**request_data_dict)
+        
         request = CompanyEventRequest(data=request_data)
         
         # Make API call
         response = api_instance.get_company_event(request)
         
         if not response or not hasattr(response, 'data') or not response.data:
-            print("    No events found")
+            print("No events found")
             return []
         
         events = response.data
-        print(f"    Found {len(events)} total events")
+        print(f"Found {len(events)} total events")
         
-        # Convert events to dictionary format - same pattern as reference script
+        # Filter by industry categories if available
         filtered_events = []
         for event in events:
             # Convert event object to dict for easier handling
             event_dict = event.to_dict() if hasattr(event, 'to_dict') else event
+            
+            # For now, include all events from our bank list
+            # You can add category filtering here if the response includes categories
             filtered_events.append(event_dict)
         
-        print(f"    Processed {len(filtered_events)} events")
+        print(f"Filtered to {len(filtered_events)} relevant events")
         return filtered_events
             
     except Exception as e:
-        print(f"    Error fetching calendar events: {e}")
+        print(f"Error fetching calendar events: {str(e)}")
         return []
 
 def cross_reference_fiscal_data(transcripts_df, calendar_events):
@@ -392,8 +394,9 @@ def main():
     all_symbols = list(BANK_PRIMARY_IDS.keys())
     
     # Calculate date range for calendar events (expand slightly)
-    start_date = dateutil_parser(START_DATE).date() - timedelta(days=2)
-    end_date = dateutil_parser(END_DATE).date() + timedelta(days=2)
+    # Convert to datetime objects (not date objects) to match reference script
+    start_date = dateutil_parser(START_DATE) - timedelta(days=2)
+    end_date = dateutil_parser(END_DATE) + timedelta(days=2)
     
     all_events = []
     
