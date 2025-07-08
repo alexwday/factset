@@ -448,14 +448,39 @@ def main():
     
     # Show fiscal periods found
     if with_fiscal_info > 0:
-        # Convert bank_names lists to strings for grouping
-        fiscal_transcripts = enhanced_transcripts[enhanced_transcripts['has_fiscal_info'] == True].copy()
-        fiscal_transcripts['bank_names_str'] = fiscal_transcripts['bank_names'].apply(lambda x: ', '.join(x) if isinstance(x, list) else str(x))
-        
-        fiscal_summary = fiscal_transcripts.groupby(['fiscal_year', 'fiscal_period', 'bank_names_str']).size().reset_index(name='count')
-        print(f"\nFiscal Periods Found:")
-        for _, row in fiscal_summary.iterrows():
-            print(f"  {row['fiscal_year']} {row['fiscal_period']}: {row['bank_names_str']} ({row['count']} transcripts)")
+        try:
+            # Debug: Check what's in the columns
+            print("\nDebugging fiscal summary creation...")
+            fiscal_transcripts = enhanced_transcripts[enhanced_transcripts['has_fiscal_info'] == True].copy()
+            print(f"Fiscal transcripts shape: {fiscal_transcripts.shape}")
+            print(f"Columns: {fiscal_transcripts.columns.tolist()}")
+            
+            # Check data types and sample values
+            print(f"fiscal_year type: {type(fiscal_transcripts['fiscal_year'].iloc[0])}")
+            print(f"fiscal_period type: {type(fiscal_transcripts['fiscal_period'].iloc[0])}")
+            print(f"bank_names type: {type(fiscal_transcripts['bank_names'].iloc[0])}")
+            print(f"Sample bank_names value: {fiscal_transcripts['bank_names'].iloc[0]}")
+            
+            # Convert bank_names lists to strings for grouping
+            fiscal_transcripts['bank_names_str'] = fiscal_transcripts['bank_names'].apply(lambda x: ', '.join(x) if isinstance(x, list) else str(x))
+            
+            # Try grouping with just fiscal_year and fiscal_period first
+            print("Attempting groupby...")
+            fiscal_summary = fiscal_transcripts.groupby(['fiscal_year', 'fiscal_period']).size().reset_index(name='count')
+            print(f"\nFiscal Periods Found:")
+            for _, row in fiscal_summary.iterrows():
+                # Get bank names for this fiscal period
+                matching_rows = fiscal_transcripts[(fiscal_transcripts['fiscal_year'] == row['fiscal_year']) & 
+                                                 (fiscal_transcripts['fiscal_period'] == row['fiscal_period'])]
+                bank_names = matching_rows['bank_names_str'].iloc[0] if len(matching_rows) > 0 else "Unknown"
+                print(f"  {row['fiscal_year']} {row['fiscal_period']}: {bank_names} ({row['count']} transcripts)")
+                
+        except Exception as e:
+            print(f"\nError creating fiscal summary: {e}")
+            print("Showing individual transcript fiscal info instead:")
+            fiscal_transcripts = enhanced_transcripts[enhanced_transcripts['has_fiscal_info'] == True]
+            for _, row in fiscal_transcripts.iterrows():
+                print(f"  {row['fiscal_year']} {row['fiscal_period']}: {row['bank_names']} - {row['report_id']}")
     
     # Save results
     enhanced_transcripts.to_csv(OUTPUT_FILE, index=False)
