@@ -32,7 +32,7 @@ RBC_PRIMARY_ID = "RY-CA"
 RBC_NAME = "Royal Bank of Canada"
 
 # Search Configuration
-SORT_ORDER = ["-event_date"]  # Sort by most recent first
+SORT_ORDER = ["-storyDateTime"]  # Sort by most recent first
 PAGINATION_LIMIT = 50  # Get last 50 transcripts to ensure we find earnings
 PAGINATION_OFFSET = 0
 
