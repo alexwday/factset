@@ -6,7 +6,7 @@ and retrieves fiscal year and quarter information from the calendar API.
 
 import pandas as pd
 import fds.sdk.EventsandTranscripts
-from fds.sdk.EventsandTranscripts.api import transcripts_api, calendar_api
+from fds.sdk.EventsandTranscripts.api import transcripts_api, calendar_events_api
 import os
 from urllib.parse import quote
 from datetime import datetime
@@ -110,58 +110,101 @@ def get_rbc_earnings_transcripts(api_instance):
         print(f"Error fetching transcripts: {str(e)}")
         return None
 
-def get_fiscal_info_for_events(event_ids, calendar_api_instance):
+def get_fiscal_info_for_events(earnings_df, calendar_api_instance):
     """
-    Get fiscal year and quarter information for given event IDs
+    Get fiscal year and quarter information by fetching calendar events for RBC
     
     Args:
-        event_ids: List of event IDs
-        calendar_api_instance: CalendarApi instance
+        earnings_df: DataFrame with transcript data including event dates
+        calendar_api_instance: CalendarEventsApi instance
     
     Returns:
         dict: Dictionary mapping event_id to fiscal info
     """
+    from fds.sdk.EventsandTranscripts.model.company_event_request import CompanyEventRequest
+    from fds.sdk.EventsandTranscripts.model.company_event_request_data import CompanyEventRequestData
+    from fds.sdk.EventsandTranscripts.model.company_event_request_data_date_time import CompanyEventRequestDataDateTime
+    from fds.sdk.EventsandTranscripts.model.company_event_request_data_universe import CompanyEventRequestDataUniverse
+    
     fiscal_info = {}
     
-    print(f"\nLooking up fiscal information for {len(event_ids)} events...")
+    # Get date range from earnings transcripts
+    if 'event_date' not in earnings_df.columns:
+        print("No event_date column found in transcripts")
+        return fiscal_info
     
-    for i, event_id in enumerate(event_ids):
-        try:
-            # Get event details from calendar API
-            response = calendar_api_instance.get_company_event(
-                company_event_id=event_id
-            )
+    # Convert event_date to datetime if needed
+    earnings_df['event_date'] = pd.to_datetime(earnings_df['event_date'])
+    
+    # Get min and max dates for the API request
+    min_date = earnings_df['event_date'].min()
+    max_date = earnings_df['event_date'].max()
+    
+    print(f"\nFetching calendar events for RBC from {min_date.date()} to {max_date.date()}...")
+    
+    try:
+        # Build request for calendar events
+        request_data = CompanyEventRequestData(
+            date_time=CompanyEventRequestDataDateTime(
+                start_date=min_date.strftime("%Y-%m-%d"),
+                end_date=max_date.strftime("%Y-%m-%d")
+            ),
+            universe=CompanyEventRequestDataUniverse(
+                symbols=[RBC_PRIMARY_ID],
+                type="Tickers"
+            ),
+            event_types=["Earnings"]  # Only get earnings events
+        )
+        
+        request = CompanyEventRequest(data=request_data)
+        
+        # Make API call
+        response = calendar_api_instance.get_company_event(request)
+        
+        if not response or not hasattr(response, 'data') or not response.data:
+            print("No calendar events found")
+            return fiscal_info
+        
+        # Process calendar events
+        print(f"Found {len(response.data)} calendar events")
+        
+        # Create a mapping of event dates to fiscal info
+        date_to_fiscal = {}
+        for event in response.data:
+            event_dict = event.to_dict() if hasattr(event, 'to_dict') else event
+            event_date = pd.to_datetime(event_dict.get('event_date')).date() if event_dict.get('event_date') else None
             
-            if response and hasattr(response, 'data') and response.data:
-                event_data = response.data
-                fiscal_info[event_id] = {
-                    'fiscal_year': getattr(event_data, 'fiscal_year', None),
-                    'fiscal_period': getattr(event_data, 'fiscal_period', None),
-                    'event_date': getattr(event_data, 'event_date', None),
-                    'event_type': getattr(event_data, 'event_type', None)
+            if event_date:
+                date_to_fiscal[event_date] = {
+                    'fiscal_year': event_dict.get('fiscal_year'),
+                    'fiscal_period': event_dict.get('fiscal_period'),
+                    'event_type': event_dict.get('event_type'),
+                    'calendar_event_id': event_dict.get('event_id')
                 }
-                print(f"  Event {event_id}: FY{fiscal_info[event_id]['fiscal_year']} {fiscal_info[event_id]['fiscal_period']}")
-            else:
-                print(f"  Event {event_id}: No fiscal data found")
+        
+        # Match transcripts to calendar events by date
+        matched_count = 0
+        for _, transcript in earnings_df.iterrows():
+            event_id = transcript.get('event_id')
+            transcript_date = pd.to_datetime(transcript.get('event_date')).date() if transcript.get('event_date') else None
+            
+            if event_id and transcript_date and transcript_date in date_to_fiscal:
+                fiscal_info[event_id] = date_to_fiscal[transcript_date]
+                fiscal_info[event_id]['event_date'] = transcript_date
+                matched_count += 1
+                print(f"  Matched transcript event {event_id} ({transcript_date}): FY{fiscal_info[event_id]['fiscal_year']} {fiscal_info[event_id]['fiscal_period']}")
+            elif event_id:
                 fiscal_info[event_id] = {
                     'fiscal_year': None,
                     'fiscal_period': None,
-                    'event_date': None,
+                    'event_date': transcript_date,
                     'event_type': None
                 }
-            
-            # Add delay to avoid rate limiting
-            if i < len(event_ids) - 1:
-                time.sleep(REQUEST_DELAY)
-                
-        except Exception as e:
-            print(f"  Event {event_id}: Error - {str(e)}")
-            fiscal_info[event_id] = {
-                'fiscal_year': None,
-                'fiscal_period': None,
-                'event_date': None,
-                'event_type': None
-            }
+        
+        print(f"Successfully matched {matched_count} out of {len(earnings_df)} transcripts with fiscal data")
+        
+    except Exception as e:
+        print(f"Error fetching calendar events: {str(e)}")
     
     return fiscal_info
 
@@ -230,7 +273,7 @@ def main():
         with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
             # Initialize API instances
             transcripts_api_instance = transcripts_api.TranscriptsApi(api_client)
-            calendar_api_instance = calendar_api.CalendarApi(api_client)
+            calendar_api_instance = calendar_events_api.CalendarEventsApi(api_client)
             
             # Step 1: Get RBC earnings transcripts
             earnings_df = get_rbc_earnings_transcripts(transcripts_api_instance)
@@ -239,16 +282,8 @@ def main():
                 print("No earnings transcripts found.")
                 return
             
-            # Step 2: Extract event IDs
-            if 'event_id' in earnings_df.columns:
-                event_ids = earnings_df['event_id'].dropna().unique().tolist()
-                print(f"\nFound {len(event_ids)} unique event IDs")
-            else:
-                print("No event_id column found in transcripts data")
-                return
-            
-            # Step 3: Get fiscal information from calendar API
-            fiscal_info = get_fiscal_info_for_events(event_ids, calendar_api_instance)
+            # Step 2: Get fiscal information from calendar API
+            fiscal_info = get_fiscal_info_for_events(earnings_df, calendar_api_instance)
             
             # Step 4: Merge fiscal information with transcript data
             fiscal_df = pd.DataFrame.from_dict(fiscal_info, orient='index')
