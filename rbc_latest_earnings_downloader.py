@@ -122,13 +122,16 @@ def main():
             
             print(f"\nFetching transcripts for {RBC_NAME} ({RBC_PRIMARY_ID})...")
             
-            # Get transcripts for RBC
-            response = api_instance.get_transcripts_ids(
-                ids=[RBC_PRIMARY_ID],
-                sort=SORT_ORDER,
-                pagination_limit=PAGINATION_LIMIT,
-                pagination_offset=PAGINATION_OFFSET
-            )
+            # Get transcripts for RBC using exact same pattern as working script
+            api_params = {
+                'ids': [RBC_PRIMARY_ID],
+                'sort': SORT_ORDER,
+                'pagination_limit': PAGINATION_LIMIT,
+                'pagination_offset': PAGINATION_OFFSET
+            }
+            
+            print(f"API parameters: {api_params}")
+            response = api_instance.get_transcripts_ids(**api_params)
             
             if not response or not hasattr(response, 'data') or not response.data:
                 print("No transcripts found for RBC")
@@ -137,6 +140,14 @@ def main():
             # Convert to DataFrame for easier handling
             df = pd.DataFrame(response.to_dict()['data'])
             print(f"Found {len(df)} total transcripts")
+            
+            # Sort by storyDateTime if available
+            if 'story_date_time' in df.columns:
+                df = df.sort_values('story_date_time', ascending=False)
+                print("Sorted by story_date_time")
+            elif 'event_date' in df.columns:
+                df = df.sort_values('event_date', ascending=False)
+                print("Sorted by event_date")
             
             # Filter for earnings transcripts only
             earnings_df = df
