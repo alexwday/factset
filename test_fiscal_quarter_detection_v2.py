@@ -248,6 +248,8 @@ def cross_reference_fiscal_data(transcripts_df, calendar_events):
     events_by_report_id = {}
     events_by_id_date = defaultdict(list)
     
+    print(f"\nAnalyzing {len(calendar_events)} calendar events for matching...")
+    
     for event in calendar_events:
         if event.get('event_id'):
             events_by_event_id[event['event_id']] = event
@@ -256,6 +258,8 @@ def cross_reference_fiscal_data(transcripts_df, calendar_events):
         if event.get('primary_id') and event.get('event_date'):
             key = f"{event['primary_id']}_{event['event_date']}"
             events_by_id_date[key].append(event)
+    
+    print(f"Created lookups: {len(events_by_event_id)} by event_id, {len(events_by_report_id)} by report_id, {len(events_by_id_date)} by id+date")
     
     # Add fiscal information columns
     transcripts_df['fiscal_year'] = None
@@ -297,7 +301,15 @@ def cross_reference_fiscal_data(transcripts_df, calendar_events):
             transcripts_df.at[idx, 'match_method'] = match_method
             matches_found += 1
     
-    print(f"Successfully matched {matches_found} out of {len(transcripts_df)} transcripts")
+    print(f"\nSuccessfully matched {matches_found} out of {len(transcripts_df)} transcripts")
+    
+    # Show matching summary
+    if matches_found > 0:
+        match_summary = transcripts_df.groupby('match_method').size()
+        print("\nMatching methods used:")
+        for method, count in match_summary.items():
+            if method is not None:
+                print(f"  {method}: {count} matches")
     
     return transcripts_df
 
@@ -388,12 +400,24 @@ def main():
         return
     
     # =============================================================================
-    # STEP 2: GET CALENDAR EVENTS (using calendar events puller pattern)
+    # STEP 2: GET CALENDAR EVENTS (targeted approach based on transcripts)
     # =============================================================================
     print("\n=== Step 2: Getting Calendar Events ===")
     
-    # Get all bank symbols
-    all_symbols = list(BANK_PRIMARY_IDS.keys())
+    # Extract unique symbols from transcripts to query only relevant calendar events
+    unique_symbols = set()
+    for _, row in transcripts_df.iterrows():
+        primary_ids = row.get('primary_ids', [])
+        if isinstance(primary_ids, list):
+            unique_symbols.update(primary_ids)
+        elif primary_ids:
+            unique_symbols.add(primary_ids)
+    
+    # Filter to only symbols we monitor
+    symbols_to_query = [sym for sym in unique_symbols if sym in BANK_PRIMARY_IDS]
+    
+    print(f"Found {len(unique_symbols)} unique symbols in transcripts")
+    print(f"Querying calendar events for {len(symbols_to_query)} monitored bank symbols: {symbols_to_query}")
     
     # Calculate date range for calendar events (expand slightly)
     # Convert to datetime objects (not date objects) to match reference script
@@ -402,21 +426,24 @@ def main():
     
     all_events = []
     
-    with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
-        api_instance = calendar_events_api.CalendarEventsApi(api_client)
-        
-        # Process banks in batches - same pattern as calendar events script
-        for i in range(0, len(all_symbols), BATCH_SIZE):
-            batch_symbols = all_symbols[i:i + BATCH_SIZE]
+    if symbols_to_query:
+        with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
+            api_instance = calendar_events_api.CalendarEventsApi(api_client)
             
-            print(f"Processing batch {i//BATCH_SIZE + 1}/{(len(all_symbols) + BATCH_SIZE - 1)//BATCH_SIZE}")
-            
-            batch_events = get_calendar_events(batch_symbols, start_date, end_date, api_instance)
-            all_events.extend(batch_events)
-            
-            # Rate limiting
-            if i + BATCH_SIZE < len(all_symbols):
-                time.sleep(REQUEST_DELAY)
+            # Process only the symbols that have transcripts
+            for i in range(0, len(symbols_to_query), BATCH_SIZE):
+                batch_symbols = symbols_to_query[i:i + BATCH_SIZE]
+                
+                print(f"Processing batch {i//BATCH_SIZE + 1}/{(len(symbols_to_query) + BATCH_SIZE - 1)//BATCH_SIZE}")
+                
+                batch_events = get_calendar_events(batch_symbols, start_date, end_date, api_instance)
+                all_events.extend(batch_events)
+                
+                # Rate limiting
+                if i + BATCH_SIZE < len(symbols_to_query):
+                    time.sleep(REQUEST_DELAY)
+    else:
+        print("No monitored bank symbols found in transcripts")
     
     print(f"\nTotal calendar events found: {len(all_events)}")
     
