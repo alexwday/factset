@@ -33,7 +33,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 # =============================================================================
 
 # SSL and Proxy Configuration
-SSL_CERT_PATH = "/Users/alexwday/path/to/ssl/certificate.cer"
+SSL_CERT_NAS_PATH = "ssl/certificate.cer"  # Path to SSL certificate on NAS
 PROXY_USER = "XXXXXXX"
 PROXY_PASSWORD = "XXXXXXX"
 PROXY_URL = "oproxy.fg.rbc.com:8080"
@@ -668,6 +668,32 @@ def generate_final_inventory(nas_conn):
     else:
         logger.error(f"Failed to save inventory to NAS: {inventory_file_path}")
 
+def setup_ssl_certificate(nas_conn):
+    """
+    Download SSL certificate from NAS and set up for use
+    """
+    try:
+        logger.info("Downloading SSL certificate from NAS...")
+        cert_data = nas_download_file(nas_conn, SSL_CERT_NAS_PATH)
+        if cert_data:
+            # Create temporary file for SSL certificate
+            temp_cert = tempfile.NamedTemporaryFile(mode='wb', suffix='.cer', delete=False)
+            temp_cert.write(cert_data)
+            temp_cert.close()
+            
+            # Update SSL paths
+            os.environ["REQUESTS_CA_BUNDLE"] = temp_cert.name
+            os.environ["SSL_CERT_FILE"] = temp_cert.name
+            
+            logger.info(f"✓ SSL certificate downloaded from NAS: {SSL_CERT_NAS_PATH}")
+            return temp_cert.name
+        else:
+            logger.error(f"✗ Failed to download SSL certificate from NAS: {SSL_CERT_NAS_PATH}")
+            return None
+    except Exception as e:
+        logger.error(f"✗ Error downloading SSL certificate from NAS: {e}")
+        return None
+
 def main():
     """
     Main function to orchestrate the transcript repository sync
@@ -676,12 +702,24 @@ def main():
     logger.info("EARNINGS TRANSCRIPT REPOSITORY SYNC v2")
     logger.info("=" * 80)
     
-    # Check SSL certificate
-    if not os.path.exists(SSL_CERT_PATH):
-        logger.error(f"SSL certificate not found at {SSL_CERT_PATH}")
+    temp_cert_path = None
+    
+    # Connect to NAS to get SSL certificate first
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        logger.error("Failed to connect to NAS - aborting sync")
         return
     
-    # Connect to NAS
+    # Download SSL certificate from NAS
+    temp_cert_path = setup_ssl_certificate(nas_conn)
+    if not temp_cert_path:
+        nas_conn.close()
+        return
+    
+    # Close initial connection and reconnect with SSL certificate
+    nas_conn.close()
+    
+    # Reconnect to NAS with SSL certificate now available
     nas_conn = get_nas_connection()
     if not nas_conn:
         logger.error("Failed to connect to NAS - aborting sync")
@@ -762,6 +800,14 @@ def main():
         if nas_conn:
             nas_conn.close()
             logger.info("NAS connection closed")
+        
+        # Clean up temporary SSL certificate
+        if temp_cert_path:
+            try:
+                os.unlink(temp_cert_path)
+                logger.info("Temporary SSL certificate cleaned up")
+            except:
+                pass
         
         # Clean up temporary log file
         try:
