@@ -107,22 +107,12 @@ RETRY_DELAY = 5.0  # Seconds between retries
 # SETUP AND CONFIGURATION
 # =============================================================================
 
-# Set up SSL certificate environment variables
-os.environ["REQUESTS_CA_BUNDLE"] = SSL_CERT_PATH
-os.environ["SSL_CERT_FILE"] = SSL_CERT_PATH
-
 # Set up proxy authentication
 user = PROXY_USER
 password = quote(PROXY_PASSWORD)
 
-# Configure FactSet API client
-configuration = fds.sdk.EventsandTranscripts.Configuration(
-    username=API_USERNAME,
-    password=API_PASSWORD,
-    proxy="http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL),
-    ssl_ca_cert=SSL_CERT_PATH
-)
-configuration.get_basic_auth_token()
+# Note: SSL certificate and FactSet API client configuration happens in main() 
+# after downloading the certificate from NAS
 
 # =============================================================================
 # NAS CONNECTION FUNCTIONS
@@ -748,6 +738,16 @@ def main():
     if not temp_cert_path:
         nas_conn.close()
         return
+    
+    # Configure FactSet API client now that SSL certificate is available
+    configuration = fds.sdk.EventsandTranscripts.Configuration(
+        username=API_USERNAME,
+        password=API_PASSWORD,
+        proxy="http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL),
+        ssl_ca_cert=temp_cert_path
+    )
+    configuration.get_basic_auth_token()
+    logger.info("✓ FactSet API client configured with SSL certificate from NAS")
     
     # Close initial connection and reconnect with SSL certificate
     nas_conn.close()
