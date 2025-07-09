@@ -17,6 +17,9 @@ import re
 import json
 from pathlib import Path
 import warnings
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Suppress pandas warnings
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
@@ -35,6 +38,16 @@ PROXY_URL = "oproxy.fg.rbc.com:8080"
 # API Configuration
 API_USERNAME = "x"
 API_PASSWORD = "x"
+
+# Email Configuration
+SMTP_SERVER = "your.smtp.server.com"  # Replace with your SMTP server
+SMTP_PORT = 25  # Replace with your SMTP port (587 for TLS, 465 for SSL, 25 for non-encrypted)
+EMAIL_FROM = "your.email@domain.com"  # Replace with sender email
+EMAIL_TO = ["recipient1@domain.com", "recipient2@domain.com"]  # Replace with recipient emails
+EMAIL_USERNAME = None  # Set to email username if authentication required, None if not
+EMAIL_PASSWORD = None  # Set to email password if authentication required, None if not
+USE_TLS = False  # Set to True if your server requires TLS/STARTTLS
+SEND_EMAIL_NOTIFICATIONS = True  # Set to False to disable email notifications
 
 # Repository Configuration
 REPOSITORY_ROOT = "transcript_repository"
@@ -252,13 +265,91 @@ def download_transcript_with_retry(transcript_link, output_path, transcript_id):
     
     return False
 
+def send_email_notification(download_summary, total_downloaded, execution_time):
+    """
+    Send email notification with download summary
+    """
+    if not SEND_EMAIL_NOTIFICATIONS:
+        logger.info("Email notifications disabled")
+        return
+    
+    try:
+        logger.info("Sending email notification...")
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_FROM
+        msg['To'] = ', '.join(EMAIL_TO)
+        msg['Subject'] = f"Earnings Transcript Sync Complete - {total_downloaded} New Transcripts"
+        
+        # Create email body
+        body = f"""
+Earnings Transcript Repository Sync Complete
+
+Execution Time: {execution_time}
+Total New Transcripts Downloaded: {total_downloaded}
+
+DOWNLOAD SUMMARY BY INSTITUTION:
+{'='*50}
+"""
+        
+        if download_summary:
+            for ticker, details in download_summary.items():
+                if details['total'] > 0:
+                    institution_name = MONITORED_INSTITUTIONS[ticker]['name']
+                    body += f"\n{institution_name} ({ticker}): {details['total']} new transcripts\n"
+                    
+                    for transcript_type, count in details['by_type'].items():
+                        if count > 0:
+                            body += f"  - {transcript_type}: {count}\n"
+        else:
+            body += "\nNo new transcripts downloaded.\n"
+        
+        body += f"""
+{'='*50}
+
+Repository Location: {Path(REPOSITORY_ROOT).absolute()}
+Sync Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+This is an automated message from the Earnings Transcript Sync system.
+"""
+        
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Connect to server and send email
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        
+        # Enable TLS if configured
+        if USE_TLS:
+            server.starttls()
+        
+        # Login only if credentials are provided
+        if EMAIL_USERNAME and EMAIL_PASSWORD:
+            server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+        
+        text = msg.as_string()
+        server.sendmail(EMAIL_FROM, EMAIL_TO, text)
+        server.quit()
+        
+        logger.info(f"✓ Email notification sent to {', '.join(EMAIL_TO)}")
+        
+    except Exception as e:
+        logger.error(f"✗ Failed to send email notification: {e}")
+
 def process_bank(ticker, institution_info, api_instance):
     """
     Process a single bank: query API, check local files, download new transcripts
+    Returns summary of downloads for email notification
     """
     logger.info(f"\n{'='*60}")
     logger.info(f"PROCESSING: {institution_info['name']} ({ticker})")
     logger.info(f"{'='*60}")
+    
+    # Initialize download tracking for this bank
+    bank_downloads = {
+        'total': 0,
+        'by_type': {transcript_type: 0 for transcript_type in TRANSCRIPT_TYPES}
+    }
     
     try:
         # Step 1: Query API for transcripts
@@ -355,15 +446,20 @@ def process_bank(ticker, institution_info, api_instance):
                 
                 logger.info(f"  ✓ Successfully downloaded {downloaded_count}/{len(new_transcripts)} {transcript_type} transcripts")
                 total_downloaded += downloaded_count
+                bank_downloads['by_type'][transcript_type] = downloaded_count
             else:
                 logger.info(f"  ✓ No new {transcript_type} transcripts to download")
         
+        bank_downloads['total'] = total_downloaded
         logger.info(f"\n✓ COMPLETED {ticker}: Downloaded {total_downloaded} new transcripts total")
+        
+        return bank_downloads
         
     except Exception as e:
         logger.error(f"✗ Error processing {ticker}: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
+        return bank_downloads  # Return empty downloads on error
 
 def generate_final_inventory():
     """
@@ -432,6 +528,8 @@ def main():
     start_time = datetime.now()
     total_institutions = len(MONITORED_INSTITUTIONS)
     processed_institutions = 0
+    download_summary = {}
+    total_downloaded = 0
     
     logger.info(f"Starting sync for {total_institutions} institutions")
     logger.info(f"Date range: {SYNC_START_DATE} to {datetime.now().date()}")
@@ -446,7 +544,9 @@ def main():
             for i, (ticker, institution_info) in enumerate(MONITORED_INSTITUTIONS.items(), 1):
                 logger.info(f"\nProcessing institution {i}/{total_institutions}")
                 
-                process_bank(ticker, institution_info, api_instance)
+                bank_downloads = process_bank(ticker, institution_info, api_instance)
+                download_summary[ticker] = bank_downloads
+                total_downloaded += bank_downloads['total']
                 processed_institutions += 1
                 
                 # Add delay between institutions
@@ -471,8 +571,12 @@ def main():
     logger.info("SYNC COMPLETE")
     logger.info(f"{'='*80}")
     logger.info(f"Processed {processed_institutions}/{total_institutions} institutions")
+    logger.info(f"Total new transcripts downloaded: {total_downloaded}")
     logger.info(f"Execution time: {execution_time}")
     logger.info(f"Repository location: {Path(REPOSITORY_ROOT).absolute()}")
+    
+    # Send email notification
+    send_email_notification(download_summary, total_downloaded, execution_time)
 
 if __name__ == "__main__":
     logger = setup_logging()
