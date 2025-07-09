@@ -41,12 +41,12 @@ API_PASSWORD = "x"
 
 # Email Configuration
 SMTP_SERVER = "your.smtp.server.com"  # Replace with your SMTP server
-SMTP_PORT = 25  # Replace with your SMTP port (587 for TLS, 465 for SSL, 25 for non-encrypted)
+SMTP_PORT = 587  # Replace with your SMTP port (587 for TLS, 465 for SSL, 25 for non-encrypted)
 EMAIL_FROM = "your.email@domain.com"  # Replace with sender email
 EMAIL_TO = ["recipient1@domain.com", "recipient2@domain.com"]  # Replace with recipient emails
-EMAIL_USERNAME = None  # Set to email username if authentication required, None if not
-EMAIL_PASSWORD = None  # Set to email password if authentication required, None if not
-USE_TLS = False  # Set to True if your server requires TLS/STARTTLS
+EMAIL_USERNAME = "your.email@domain.com"  # Set to your email username for authentication
+EMAIL_PASSWORD = "your_email_password"  # Set to your email password for authentication
+USE_TLS = True  # Set to True if your server requires TLS/STARTTLS (most corporate servers do)
 SEND_EMAIL_NOTIFICATIONS = True  # Set to False to disable email notifications
 
 # Repository Configuration
