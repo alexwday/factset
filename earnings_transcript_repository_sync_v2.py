@@ -376,9 +376,10 @@ def download_transcript_with_retry(nas_conn, transcript_link, nas_file_path, tra
             
             # Set up authentication and proxy
             auth = (configuration.username, configuration.password)
+            proxy_url = "http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL)
             proxies = {
-                'http': configuration.proxy,
-                'https': configuration.proxy
+                'http': proxy_url,
+                'https': proxy_url
             }
             
             # Download the transcript
