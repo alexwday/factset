@@ -16,6 +16,10 @@ import logging
 import re
 import json
 from pathlib import Path
+import warnings
+
+# Suppress pandas SettingWithCopyWarning
+warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 
 # =============================================================================
 # CONFIGURATION VARIABLES
@@ -280,10 +284,10 @@ def get_transcripts_for_institution(ticker, institution_info, api_instance):
         
         # Filter for earnings transcripts only
         if 'event_type' in df.columns:
-            earnings_df = df[df['event_type'].isin(EVENT_TYPES)]
+            earnings_df = df[df['event_type'].isin(EVENT_TYPES)].copy()
             logger.info(f"Found {len(earnings_df)} earnings transcripts for {ticker}")
         else:
-            earnings_df = df
+            earnings_df = df.copy()
             logger.info(f"Found {len(earnings_df)} transcripts for {ticker} (no event type filtering)")
         
         # Add institution metadata
