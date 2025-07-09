@@ -33,7 +33,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 # =============================================================================
 
 # SSL and Proxy Configuration
-SSL_CERT_NAS_PATH = "ssl/certificate.cer"  # Path to SSL certificate on NAS
+SSL_CERT_NAS_PATH = "Inputs/certificate/certificate.cer"  # Path to SSL certificate on NAS
 PROXY_USER = "XXXXXXX"
 PROXY_PASSWORD = "XXXXXXX"
 PROXY_URL = "oproxy.fg.rbc.com:8080"
@@ -295,9 +295,29 @@ def create_directory_structure(nas_conn):
     """
     logger.info("Creating directory structure on NAS...")
     
-    # Create main directories
+    # Create main folder structure
+    inputs_path = nas_path_join(NAS_BASE_PATH, "Inputs")
+    outputs_path = nas_path_join(NAS_BASE_PATH, "Outputs")
+    
+    nas_create_directory(nas_conn, inputs_path)
+    nas_create_directory(nas_conn, outputs_path)
+    
+    # Create Inputs subdirectories
+    certificate_path = nas_path_join(inputs_path, "certificate")
+    nas_create_directory(nas_conn, certificate_path)
+    
+    # Create Outputs subdirectories
+    data_path = nas_path_join(outputs_path, "data")
+    logs_path = nas_path_join(outputs_path, "logs")
+    listing_path = nas_path_join(outputs_path, "listing")
+    
+    nas_create_directory(nas_conn, data_path)
+    nas_create_directory(nas_conn, logs_path)
+    nas_create_directory(nas_conn, listing_path)
+    
+    # Create data subdirectories for each transcript type
     for transcript_type in TRANSCRIPT_TYPES:
-        type_path = nas_path_join(NAS_BASE_PATH, transcript_type.lower())
+        type_path = nas_path_join(data_path, transcript_type.lower())
         nas_create_directory(nas_conn, type_path)
         
         # Create subdirectories for each institution
@@ -305,11 +325,9 @@ def create_directory_structure(nas_conn):
             institution_path = nas_path_join(type_path, ticker)
             nas_create_directory(nas_conn, institution_path)
     
-    # Create logs directory
-    logs_path = nas_path_join(NAS_BASE_PATH, "logs")
-    nas_create_directory(nas_conn, logs_path)
-    
     logger.info(f"✓ Created directory structure on NAS: {NAS_BASE_PATH}")
+    logger.info(f"  - Inputs: {inputs_path}")
+    logger.info(f"  - Outputs: {outputs_path}")
 
 def create_filename(transcript_data, target_ticker=None):
     """
@@ -353,7 +371,7 @@ def get_existing_files(nas_conn, ticker, transcript_type):
     """
     Get list of existing transcript files for a specific ticker and type from NAS
     """
-    institution_path = nas_path_join(NAS_BASE_PATH, transcript_type.lower(), ticker)
+    institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", transcript_type.lower(), ticker)
     
     existing_files = nas_list_files(nas_conn, institution_path)
     return set(existing_files)
@@ -451,6 +469,10 @@ DOWNLOAD SUMMARY BY INSTITUTION:
 {'='*50}
 
 Repository Location: \\\\{NAS_SERVER_IP}\\{NAS_SHARE_NAME}\\{NAS_BASE_PATH}
+  - Transcript Data: \\\\{NAS_SERVER_IP}\\{NAS_SHARE_NAME}\\{NAS_BASE_PATH}\\Outputs\\data
+  - Logs: \\\\{NAS_SERVER_IP}\\{NAS_SHARE_NAME}\\{NAS_BASE_PATH}\\Outputs\\logs
+  - Inventory: \\\\{NAS_SERVER_IP}\\{NAS_SHARE_NAME}\\{NAS_BASE_PATH}\\Outputs\\listing
+
 Sync Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 This is an automated message from the Earnings Transcript Sync system.
@@ -601,7 +623,7 @@ def process_bank(ticker, institution_info, api_instance, nas_conn):
                         continue
                     
                     # Create NAS file path
-                    nas_file_path = nas_path_join(NAS_BASE_PATH, transcript_type.lower(), ticker, filename)
+                    nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", transcript_type.lower(), ticker, filename)
                     
                     if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], nas_file_path, filename):
                         downloaded_count += 1
@@ -640,7 +662,7 @@ def generate_final_inventory(nas_conn):
         inventory[transcript_type] = {}
         
         for ticker in MONITORED_INSTITUTIONS.keys():
-            institution_path = nas_path_join(NAS_BASE_PATH, transcript_type.lower(), ticker)
+            institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", transcript_type.lower(), ticker)
             files = nas_list_files(nas_conn, institution_path)
             inventory[transcript_type][ticker] = len(files)
     
@@ -658,15 +680,26 @@ def generate_final_inventory(nas_conn):
                 total_type += count
         logger.info(f"  Total {transcript_type}: {total_type} files")
     
-    # Save inventory to JSON on NAS
-    inventory_json = json.dumps(inventory, indent=2)
-    inventory_file_path = nas_path_join(NAS_BASE_PATH, "logs", f"inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
+    # Save individual inventory files by transcript type to listing folder
+    for transcript_type in TRANSCRIPT_TYPES:
+        inventory_json = json.dumps(inventory[transcript_type], indent=2)
+        inventory_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", f"{transcript_type.lower()}_listing.json")
+        
+        inventory_file_obj = io.BytesIO(inventory_json.encode('utf-8'))
+        if nas_upload_file(nas_conn, inventory_file_obj, inventory_file_path):
+            logger.info(f"  {transcript_type} listing saved: {inventory_file_path}")
+        else:
+            logger.error(f"  Failed to save {transcript_type} listing: {inventory_file_path}")
     
-    inventory_file_obj = io.BytesIO(inventory_json.encode('utf-8'))
-    if nas_upload_file(nas_conn, inventory_file_obj, inventory_file_path):
-        logger.info(f"\nInventory saved to NAS: {inventory_file_path}")
+    # Save complete inventory to listing folder
+    complete_inventory_json = json.dumps(inventory, indent=2)
+    complete_inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", f"complete_inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
+    
+    complete_inventory_obj = io.BytesIO(complete_inventory_json.encode('utf-8'))
+    if nas_upload_file(nas_conn, complete_inventory_obj, complete_inventory_path):
+        logger.info(f"\nComplete inventory saved: {complete_inventory_path}")
     else:
-        logger.error(f"Failed to save inventory to NAS: {inventory_file_path}")
+        logger.error(f"Failed to save complete inventory: {complete_inventory_path}")
 
 def setup_ssl_certificate(nas_conn):
     """
@@ -783,7 +816,7 @@ def main():
         
         # Upload log file to NAS
         try:
-            log_file_path = nas_path_join(NAS_BASE_PATH, "logs", f"sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+            log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "logs", f"sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
             with open(logger.temp_log_file, 'rb') as log_file:
                 if nas_upload_file(nas_conn, log_file, log_file_path):
                     logger.info(f"Log file uploaded to NAS: {log_file_path}")
