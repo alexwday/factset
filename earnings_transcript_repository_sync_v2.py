@@ -389,25 +389,27 @@ def process_bank(ticker, institution_info, api_instance):
         
         logger.info(f"  ✓ Found {len(all_transcripts)} total transcripts for {ticker}")
         
-        # Debug: Check if we're getting transcripts for other companies
+        # Filter to only transcripts where our ticker is the ONLY primary ID
         if all_transcripts:
-            unique_primary_ids = set()
+            original_count = len(all_transcripts)
+            filtered_transcripts = []
+            mixed_ownership_count = 0
+            
             for transcript in all_transcripts:
                 primary_ids = transcript.get('primary_ids', [])
-                if primary_ids:
-                    unique_primary_ids.update(primary_ids)
-            
-            if len(unique_primary_ids) > 1:
-                logger.warning(f"  ⚠️  Transcripts contain multiple primary IDs: {unique_primary_ids}")
-                # Filter to only transcripts where our ticker is the FIRST primary ID
-                filtered_transcripts = []
-                for transcript in all_transcripts:
-                    primary_ids = transcript.get('primary_ids', [])
-                    if primary_ids and primary_ids[0] == ticker:
-                        filtered_transcripts.append(transcript)
                 
-                logger.info(f"  ✓ Filtered to {len(filtered_transcripts)} transcripts where {ticker} is primary")
-                all_transcripts = filtered_transcripts
+                # Only keep transcripts where our ticker is the ONLY primary ID
+                if primary_ids == [ticker]:
+                    filtered_transcripts.append(transcript)
+                elif ticker in primary_ids:
+                    mixed_ownership_count += 1
+                    logger.debug(f"    Skipping mixed ownership transcript with primary_ids: {primary_ids}")
+            
+            if mixed_ownership_count > 0:
+                logger.info(f"  ✓ Filtered out {mixed_ownership_count} mixed ownership transcripts")
+            
+            logger.info(f"  ✓ Filtered to {len(filtered_transcripts)} transcripts where {ticker} is the sole primary company")
+            all_transcripts = filtered_transcripts
         
         # Filter for earnings transcripts
         earnings_transcripts = []
