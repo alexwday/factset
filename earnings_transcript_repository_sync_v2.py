@@ -20,6 +20,9 @@ import warnings
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import tempfile
+import io
+from smb.SMBConnection import SMBConnection
 
 # Suppress pandas warnings
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
@@ -49,8 +52,17 @@ EMAIL_PASSWORD = "your_email_password"  # Set to your email password for authent
 USE_TLS = True  # Set to True if your server requires TLS/STARTTLS (most corporate servers do)
 SEND_EMAIL_NOTIFICATIONS = True  # Set to False to disable email notifications
 
+# NAS Configuration
+NAS_USERNAME = "your_nas_username"  # NAS username
+NAS_PASSWORD = "your_nas_password"  # NAS password
+NAS_SERVER_IP = "192.168.1.100"  # NAS server IP address
+NAS_SERVER_NAME = "NAS-SERVER"  # NAS server name (for NTLM)
+NAS_SHARE_NAME = "shared_folder"  # Share name on NAS
+NAS_BASE_PATH = "transcript_repository"  # Base path within the share for our files
+NAS_PORT = 445  # SMB port (usually 445)
+CLIENT_MACHINE_NAME = "SYNC-CLIENT"  # Name of this client machine
+
 # Repository Configuration
-REPOSITORY_ROOT = "transcript_repository"
 SYNC_START_DATE = "2023-01-01"  # From 2023 to present
 
 # Monitored Financial Institutions
@@ -112,24 +124,152 @@ configuration = fds.sdk.EventsandTranscripts.Configuration(
 )
 configuration.get_basic_auth_token()
 
+# =============================================================================
+# NAS CONNECTION FUNCTIONS
+# =============================================================================
+
+def get_nas_connection():
+    """
+    Create and return an SMB connection to the NAS
+    """
+    try:
+        conn = SMBConnection(
+            username=NAS_USERNAME,
+            password=NAS_PASSWORD,
+            my_name=CLIENT_MACHINE_NAME,
+            remote_name=NAS_SERVER_NAME,
+            use_ntlm_v2=True,
+            is_direct_tcp=True
+        )
+        
+        # Connect to the NAS
+        if conn.connect(NAS_SERVER_IP, NAS_PORT):
+            logger.info(f"✓ Connected to NAS: {NAS_SERVER_IP}")
+            return conn
+        else:
+            logger.error(f"✗ Failed to connect to NAS: {NAS_SERVER_IP}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"✗ Error connecting to NAS: {e}")
+        return None
+
+def nas_path_join(*parts):
+    """
+    Join path parts for NAS paths (always use forward slashes)
+    """
+    return '/'.join(str(part) for part in parts if part)
+
+def nas_file_exists(conn, file_path):
+    """
+    Check if a file exists on the NAS
+    """
+    try:
+        # Try to get file attributes - if it succeeds, file exists
+        conn.getAttributes(NAS_SHARE_NAME, file_path)
+        return True
+    except:
+        return False
+
+def nas_create_directory(conn, dir_path):
+    """
+    Create directory on NAS (creates parent directories as needed)
+    """
+    try:
+        # Try to create the directory
+        conn.createDirectory(NAS_SHARE_NAME, dir_path)
+        logger.debug(f"Created NAS directory: {dir_path}")
+        return True
+    except Exception as e:
+        # Directory might already exist, check if it exists
+        if nas_file_exists(conn, dir_path):
+            return True
+        else:
+            # Try to create parent directories first
+            parent_dir = '/'.join(dir_path.split('/')[:-1])
+            if parent_dir and parent_dir != dir_path:
+                nas_create_directory(conn, parent_dir)
+                try:
+                    conn.createDirectory(NAS_SHARE_NAME, dir_path)
+                    logger.debug(f"Created NAS directory: {dir_path}")
+                    return True
+                except:
+                    logger.error(f"Failed to create NAS directory: {dir_path}")
+                    return False
+            return False
+
+def nas_upload_file(conn, local_file_obj, nas_file_path):
+    """
+    Upload a file object to NAS
+    """
+    try:
+        # Ensure parent directory exists
+        parent_dir = '/'.join(nas_file_path.split('/')[:-1])
+        if parent_dir:
+            nas_create_directory(conn, parent_dir)
+        
+        # Upload the file
+        conn.storeFile(NAS_SHARE_NAME, nas_file_path, local_file_obj)
+        logger.debug(f"Uploaded file to NAS: {nas_file_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to upload file to NAS {nas_file_path}: {e}")
+        return False
+
+def nas_download_file(conn, nas_file_path):
+    """
+    Download a file from NAS and return as bytes
+    """
+    try:
+        file_obj = io.BytesIO()
+        conn.retrieveFile(NAS_SHARE_NAME, nas_file_path, file_obj)
+        file_obj.seek(0)
+        return file_obj.read()
+    except Exception as e:
+        logger.error(f"Failed to download file from NAS {nas_file_path}: {e}")
+        return None
+
+def nas_list_files(conn, directory_path, pattern="*.xml"):
+    """
+    List files in a NAS directory matching a pattern
+    """
+    try:
+        files = conn.listPath(NAS_SHARE_NAME, directory_path)
+        matching_files = []
+        
+        for file_info in files:
+            if not file_info.isDirectory and file_info.filename.endswith('.xml'):
+                matching_files.append(file_info.filename)
+        
+        return matching_files
+    except Exception as e:
+        logger.debug(f"Directory doesn't exist or is empty: {directory_path}")
+        return []
+
 # Set up logging
 def setup_logging():
-    """Set up logging configuration"""
-    log_dir = Path(REPOSITORY_ROOT) / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    
-    log_file = log_dir / f"sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+    """Set up logging configuration (now uses temporary local file + NAS upload)"""
+    # Create temporary log file locally
+    temp_log_file = tempfile.NamedTemporaryFile(
+        mode='w+', 
+        suffix='.log', 
+        prefix=f'sync_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
+        delete=False
+    )
     
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_file),
+            logging.FileHandler(temp_log_file.name),
             logging.StreamHandler()
         ]
     )
     
-    return logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)
+    logger.temp_log_file = temp_log_file.name  # Store for later upload
+    
+    return logger
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -149,26 +289,27 @@ def sanitize_for_filename(text):
     clean_text = re.sub(r'[-\s]+', '_', clean_text)
     return clean_text.strip('_')
 
-def create_directory_structure():
+def create_directory_structure(nas_conn):
     """
-    Create the directory structure for the transcript repository
+    Create the directory structure for the transcript repository on NAS
     """
-    base_path = Path(REPOSITORY_ROOT)
+    logger.info("Creating directory structure on NAS...")
     
     # Create main directories
     for transcript_type in TRANSCRIPT_TYPES:
-        type_dir = base_path / transcript_type.lower()
-        type_dir.mkdir(parents=True, exist_ok=True)
+        type_path = nas_path_join(NAS_BASE_PATH, transcript_type.lower())
+        nas_create_directory(nas_conn, type_path)
         
         # Create subdirectories for each institution
         for ticker in MONITORED_INSTITUTIONS.keys():
-            institution_dir = type_dir / ticker
-            institution_dir.mkdir(parents=True, exist_ok=True)
+            institution_path = nas_path_join(type_path, ticker)
+            nas_create_directory(nas_conn, institution_path)
     
     # Create logs directory
-    (base_path / "logs").mkdir(parents=True, exist_ok=True)
+    logs_path = nas_path_join(NAS_BASE_PATH, "logs")
+    nas_create_directory(nas_conn, logs_path)
     
-    logger.info(f"Created directory structure at {base_path}")
+    logger.info(f"✓ Created directory structure on NAS: {NAS_BASE_PATH}")
 
 def create_filename(transcript_data, target_ticker=None):
     """
@@ -208,24 +349,18 @@ def create_filename(transcript_data, target_ticker=None):
         # Fallback filename
         return f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
 
-def get_existing_files(ticker, transcript_type):
+def get_existing_files(nas_conn, ticker, transcript_type):
     """
-    Get list of existing transcript files for a specific ticker and type
+    Get list of existing transcript files for a specific ticker and type from NAS
     """
-    institution_dir = Path(REPOSITORY_ROOT) / transcript_type.lower() / ticker
+    institution_path = nas_path_join(NAS_BASE_PATH, transcript_type.lower(), ticker)
     
-    if not institution_dir.exists():
-        return set()
-    
-    existing_files = set()
-    for file_path in institution_dir.glob("*.xml"):
-        existing_files.add(file_path.name)
-    
-    return existing_files
+    existing_files = nas_list_files(nas_conn, institution_path)
+    return set(existing_files)
 
-def download_transcript_with_retry(transcript_link, output_path, transcript_id):
+def download_transcript_with_retry(nas_conn, transcript_link, nas_file_path, transcript_id):
     """
-    Download transcript with retry logic
+    Download transcript with retry logic and upload to NAS
     """
     for attempt in range(MAX_RETRIES):
         try:
@@ -249,14 +384,17 @@ def download_transcript_with_retry(transcript_link, output_path, transcript_id):
             
             response.raise_for_status()
             
-            # Save to file
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, 'wb') as f:
-                f.write(response.content)
+            # Create file object from response content
+            file_obj = io.BytesIO(response.content)
+            file_size = len(response.content)
             
-            file_size = output_path.stat().st_size
-            logger.info(f"  ✓ Downloaded {transcript_id} ({file_size:,} bytes)")
-            return True
+            # Upload to NAS
+            if nas_upload_file(nas_conn, file_obj, nas_file_path):
+                logger.info(f"  ✓ Downloaded and uploaded {transcript_id} ({file_size:,} bytes)")
+                return True
+            else:
+                logger.error(f"  ✗ Failed to upload {transcript_id} to NAS")
+                return False
             
         except Exception as e:
             logger.warning(f"  ✗ Download attempt {attempt + 1} failed for {transcript_id}: {e}")
@@ -312,7 +450,7 @@ DOWNLOAD SUMMARY BY INSTITUTION:
         body += f"""
 {'='*50}
 
-Repository Location: {Path(REPOSITORY_ROOT).absolute()}
+Repository Location: \\\\{NAS_SERVER_IP}\\{NAS_SHARE_NAME}\\{NAS_BASE_PATH}
 Sync Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 This is an automated message from the Earnings Transcript Sync system.
@@ -340,9 +478,9 @@ This is an automated message from the Earnings Transcript Sync system.
     except Exception as e:
         logger.error(f"✗ Failed to send email notification: {e}")
 
-def process_bank(ticker, institution_info, api_instance):
+def process_bank(ticker, institution_info, api_instance, nas_conn):
     """
-    Process a single bank: query API, check local files, download new transcripts
+    Process a single bank: query API, check NAS files, download new transcripts
     Returns summary of downloads for email notification
     """
     logger.info(f"\n{'='*60}")
@@ -439,8 +577,8 @@ def process_bank(ticker, institution_info, api_instance):
             
             logger.info(f"  Found {len(type_transcripts)} {transcript_type} transcripts")
             
-            # Step 3: Check existing files
-            existing_files = get_existing_files(ticker, transcript_type)
+            # Step 3: Check existing files on NAS
+            existing_files = get_existing_files(nas_conn, ticker, transcript_type)
             logger.info(f"  Found {len(existing_files)} existing {transcript_type} files for {ticker}")
             
             # Step 4: Identify new transcripts
@@ -452,7 +590,7 @@ def process_bank(ticker, institution_info, api_instance):
             
             logger.info(f"  Found {len(new_transcripts)} new {transcript_type} transcripts to download")
             
-            # Step 5: Download new transcripts
+            # Step 5: Download new transcripts and upload to NAS
             if new_transcripts:
                 logger.info(f"  Downloading {len(new_transcripts)} new {transcript_type} transcripts...")
                 downloaded_count = 0
@@ -462,9 +600,10 @@ def process_bank(ticker, institution_info, api_instance):
                         logger.warning(f"    No download link for {filename}")
                         continue
                     
-                    output_path = Path(REPOSITORY_ROOT) / transcript_type.lower() / ticker / filename
+                    # Create NAS file path
+                    nas_file_path = nas_path_join(NAS_BASE_PATH, transcript_type.lower(), ticker, filename)
                     
-                    if download_transcript_with_retry(transcript['transcripts_link'], output_path, filename):
+                    if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], nas_file_path, filename):
                         downloaded_count += 1
                         
                     # Add delay between downloads
@@ -487,30 +626,22 @@ def process_bank(ticker, institution_info, api_instance):
         logger.error(f"Traceback: {traceback.format_exc()}")
         return bank_downloads  # Return empty downloads on error
 
-def generate_final_inventory():
+def generate_final_inventory(nas_conn):
     """
-    Generate final inventory of all downloaded files
+    Generate final inventory of all downloaded files from NAS
     """
     logger.info(f"\n{'='*60}")
-    logger.info("GENERATING FINAL INVENTORY")
+    logger.info("GENERATING FINAL INVENTORY FROM NAS")
     logger.info(f"{'='*60}")
     
     inventory = {}
     
     for transcript_type in TRANSCRIPT_TYPES:
         inventory[transcript_type] = {}
-        type_dir = Path(REPOSITORY_ROOT) / transcript_type.lower()
         
-        if not type_dir.exists():
-            continue
-            
         for ticker in MONITORED_INSTITUTIONS.keys():
-            ticker_dir = type_dir / ticker
-            if not ticker_dir.exists():
-                inventory[transcript_type][ticker] = 0
-                continue
-                
-            files = list(ticker_dir.glob("*.xml"))
+            institution_path = nas_path_join(NAS_BASE_PATH, transcript_type.lower(), ticker)
+            files = nas_list_files(nas_conn, institution_path)
             inventory[transcript_type][ticker] = len(files)
     
     # Log summary
@@ -527,12 +658,15 @@ def generate_final_inventory():
                 total_type += count
         logger.info(f"  Total {transcript_type}: {total_type} files")
     
-    # Save inventory to JSON
-    inventory_file = Path(REPOSITORY_ROOT) / "logs" / f"inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json"
-    with open(inventory_file, 'w') as f:
-        json.dump(inventory, f, indent=2)
+    # Save inventory to JSON on NAS
+    inventory_json = json.dumps(inventory, indent=2)
+    inventory_file_path = nas_path_join(NAS_BASE_PATH, "logs", f"inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
     
-    logger.info(f"\nInventory saved to: {inventory_file}")
+    inventory_file_obj = io.BytesIO(inventory_json.encode('utf-8'))
+    if nas_upload_file(nas_conn, inventory_file_obj, inventory_file_path):
+        logger.info(f"\nInventory saved to NAS: {inventory_file_path}")
+    else:
+        logger.error(f"Failed to save inventory to NAS: {inventory_file_path}")
 
 def main():
     """
@@ -547,62 +681,93 @@ def main():
         logger.error(f"SSL certificate not found at {SSL_CERT_PATH}")
         return
     
-    # Create directory structure
-    create_directory_structure()
-    
-    # Track overall progress
-    start_time = datetime.now()
-    total_institutions = len(MONITORED_INSTITUTIONS)
-    processed_institutions = 0
-    download_summary = {}
-    total_downloaded = 0
-    
-    logger.info(f"Starting sync for {total_institutions} institutions")
-    logger.info(f"Date range: {SYNC_START_DATE} to {datetime.now().date()}")
-    logger.info(f"Industry categories: {INDUSTRY_CATEGORIES}")
-    logger.info(f"Transcript types: {TRANSCRIPT_TYPES}")
+    # Connect to NAS
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        logger.error("Failed to connect to NAS - aborting sync")
+        return
     
     try:
-        with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
-            api_instance = transcripts_api.TranscriptsApi(api_client)
-            
-            # Process each institution
-            for i, (ticker, institution_info) in enumerate(MONITORED_INSTITUTIONS.items(), 1):
-                logger.info(f"\nProcessing institution {i}/{total_institutions}")
+        # Create directory structure on NAS
+        create_directory_structure(nas_conn)
+        
+        # Track overall progress
+        start_time = datetime.now()
+        total_institutions = len(MONITORED_INSTITUTIONS)
+        processed_institutions = 0
+        download_summary = {}
+        total_downloaded = 0
+        
+        logger.info(f"Starting sync for {total_institutions} institutions")
+        logger.info(f"Date range: {SYNC_START_DATE} to {datetime.now().date()}")
+        logger.info(f"Industry categories: {INDUSTRY_CATEGORIES}")
+        logger.info(f"Transcript types: {TRANSCRIPT_TYPES}")
+        logger.info(f"NAS Location: \\\\{NAS_SERVER_IP}\\{NAS_SHARE_NAME}\\{NAS_BASE_PATH}")
+        
+        try:
+            with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
+                api_instance = transcripts_api.TranscriptsApi(api_client)
                 
-                bank_downloads = process_bank(ticker, institution_info, api_instance)
-                download_summary[ticker] = bank_downloads
-                total_downloaded += bank_downloads['total']
-                processed_institutions += 1
-                
-                # Add delay between institutions
-                if i < total_institutions:
-                    logger.info(f"Waiting {REQUEST_DELAY} seconds before next institution...")
-                    time.sleep(REQUEST_DELAY)
-    
-    except Exception as e:
-        logger.error(f"Critical error during sync: {e}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise
-    
-    # Generate final inventory
-    generate_final_inventory()
-    
-    # Final summary
-    end_time = datetime.now()
-    execution_time = end_time - start_time
-    
-    logger.info(f"\n{'='*80}")
-    logger.info("SYNC COMPLETE")
-    logger.info(f"{'='*80}")
-    logger.info(f"Processed {processed_institutions}/{total_institutions} institutions")
-    logger.info(f"Total new transcripts downloaded: {total_downloaded}")
-    logger.info(f"Execution time: {execution_time}")
-    logger.info(f"Repository location: {Path(REPOSITORY_ROOT).absolute()}")
-    
-    # Send email notification
-    send_email_notification(download_summary, total_downloaded, execution_time)
+                # Process each institution
+                for i, (ticker, institution_info) in enumerate(MONITORED_INSTITUTIONS.items(), 1):
+                    logger.info(f"\nProcessing institution {i}/{total_institutions}")
+                    
+                    bank_downloads = process_bank(ticker, institution_info, api_instance, nas_conn)
+                    download_summary[ticker] = bank_downloads
+                    total_downloaded += bank_downloads['total']
+                    processed_institutions += 1
+                    
+                    # Add delay between institutions
+                    if i < total_institutions:
+                        logger.info(f"Waiting {REQUEST_DELAY} seconds before next institution...")
+                        time.sleep(REQUEST_DELAY)
+        
+        except Exception as e:
+            logger.error(f"Critical error during sync: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+        
+        # Generate final inventory on NAS
+        generate_final_inventory(nas_conn)
+        
+        # Final summary
+        end_time = datetime.now()
+        execution_time = end_time - start_time
+        
+        logger.info(f"\n{'='*80}")
+        logger.info("SYNC COMPLETE")
+        logger.info(f"{'='*80}")
+        logger.info(f"Processed {processed_institutions}/{total_institutions} institutions")
+        logger.info(f"Total new transcripts downloaded: {total_downloaded}")
+        logger.info(f"Execution time: {execution_time}")
+        logger.info(f"Repository location: \\\\{NAS_SERVER_IP}\\{NAS_SHARE_NAME}\\{NAS_BASE_PATH}")
+        
+        # Upload log file to NAS
+        try:
+            log_file_path = nas_path_join(NAS_BASE_PATH, "logs", f"sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+            with open(logger.temp_log_file, 'rb') as log_file:
+                if nas_upload_file(nas_conn, log_file, log_file_path):
+                    logger.info(f"Log file uploaded to NAS: {log_file_path}")
+                else:
+                    logger.error(f"Failed to upload log file to NAS")
+        except Exception as e:
+            logger.error(f"Error uploading log file: {e}")
+        
+        # Send email notification
+        send_email_notification(download_summary, total_downloaded, execution_time)
+        
+    finally:
+        # Clean up NAS connection
+        if nas_conn:
+            nas_conn.close()
+            logger.info("NAS connection closed")
+        
+        # Clean up temporary log file
+        try:
+            os.unlink(logger.temp_log_file)
+        except:
+            pass
 
 if __name__ == "__main__":
     logger = setup_logging()
