@@ -36,7 +36,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 SSL_CERT_NAS_PATH = "Inputs/certificate/certificate.cer"  # Path to SSL certificate on NAS
 PROXY_USER = "XXXXXXX"
 PROXY_PASSWORD = "XXXXXXX"
-PROXY_URL = "oproxy.fg.rbc.com:8080"
+PROXY_URL = "proxy.fg.rbc.com:8080"
 
 # API Configuration
 API_USERNAME = "x"
@@ -375,17 +375,19 @@ def download_transcript_with_retry(nas_conn, transcript_link, nas_file_path, tra
             logger.info(f"  Downloading {transcript_id} (attempt {attempt + 1}/{MAX_RETRIES})")
             
             # Set up authentication and proxy
-            auth = (configuration.username, configuration.password)
-            proxy_url = "http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL)
+            headers = {
+                'Accept': 'application/json',
+                'Authorization': configuration.get_basic_auth_token(),
+            }
             proxies = {
-                'http': proxy_url,
-                'https': proxy_url
+                'https': "http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL),
+                'http': "http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL)
             }
             
             # Download the transcript
             response = requests.get(
                 transcript_link,
-                auth=auth,
+                headers=headers,
                 proxies=proxies,
                 verify=configuration.ssl_ca_cert,
                 timeout=30
