@@ -170,14 +170,18 @@ def create_directory_structure():
     
     logger.info(f"Created directory structure at {base_path}")
 
-def create_filename(transcript_data):
+def create_filename(transcript_data, target_ticker=None):
     """
     Create standardized filename from transcript data
     Format: {primary_id}_{event_date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml
     """
     try:
         # Extract and sanitize components
-        primary_id = sanitize_for_filename(transcript_data.get('primary_ids', ['unknown'])[0] if transcript_data.get('primary_ids') else 'unknown')
+        # Use target_ticker if provided, otherwise use first primary_id
+        if target_ticker:
+            primary_id = sanitize_for_filename(target_ticker)
+        else:
+            primary_id = sanitize_for_filename(transcript_data.get('primary_ids', ['unknown'])[0] if transcript_data.get('primary_ids') else 'unknown')
         
         # Handle event_date
         event_date = transcript_data.get('event_date')
@@ -385,6 +389,26 @@ def process_bank(ticker, institution_info, api_instance):
         
         logger.info(f"  ✓ Found {len(all_transcripts)} total transcripts for {ticker}")
         
+        # Debug: Check if we're getting transcripts for other companies
+        if all_transcripts:
+            unique_primary_ids = set()
+            for transcript in all_transcripts:
+                primary_ids = transcript.get('primary_ids', [])
+                if primary_ids:
+                    unique_primary_ids.update(primary_ids)
+            
+            if len(unique_primary_ids) > 1:
+                logger.warning(f"  ⚠️  Transcripts contain multiple primary IDs: {unique_primary_ids}")
+                # Filter to only transcripts where our ticker is the FIRST primary ID
+                filtered_transcripts = []
+                for transcript in all_transcripts:
+                    primary_ids = transcript.get('primary_ids', [])
+                    if primary_ids and primary_ids[0] == ticker:
+                        filtered_transcripts.append(transcript)
+                
+                logger.info(f"  ✓ Filtered to {len(filtered_transcripts)} transcripts where {ticker} is primary")
+                all_transcripts = filtered_transcripts
+        
         # Filter for earnings transcripts
         earnings_transcripts = []
         for transcript in all_transcripts:
@@ -420,7 +444,7 @@ def process_bank(ticker, institution_info, api_instance):
             # Step 4: Identify new transcripts
             new_transcripts = []
             for transcript in type_transcripts:
-                filename = create_filename(transcript)
+                filename = create_filename(transcript, target_ticker=ticker)
                 if filename not in existing_files:
                     new_transcripts.append((transcript, filename))
             
