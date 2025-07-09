@@ -65,12 +65,12 @@ configuration.get_basic_auth_token()
 # MAIN FUNCTIONS
 # =============================================================================
 
-def download_transcript(transcript_link, output_path):
+def download_file(file_link, output_path, file_type="file"):
     """
-    Download transcript XML file from the provided link
+    Download file from the provided link
     """
     try:
-        print(f"\nDownloading transcript to: {output_path}")
+        print(f"\nDownloading {file_type} to: {output_path}")
         
         # Set up authentication and proxy for direct download
         auth = (configuration.username, configuration.password)
@@ -79,9 +79,9 @@ def download_transcript(transcript_link, output_path):
             'https': configuration.proxy
         }
         
-        # Download the XML file
+        # Download the file
         response = requests.get(
-            transcript_link,
+            file_link,
             auth=auth,
             proxies=proxies,
             verify=configuration.ssl_ca_cert,
@@ -95,12 +95,58 @@ def download_transcript(transcript_link, output_path):
             f.write(response.content)
         
         file_size = os.path.getsize(output_path)
-        print(f"Successfully downloaded transcript ({file_size:,} bytes)")
+        print(f"Successfully downloaded {file_type} ({file_size:,} bytes)")
         return True
         
     except Exception as e:
-        print(f"Error downloading transcript: {str(e)}")
+        print(f"Error downloading {file_type}: {str(e)}")
         return False
+
+def get_slides_for_event(event_id, event_date, api_instance):
+    """
+    Get investor slides for a specific event
+    """
+    try:
+        print(f"\nSearching for slides for event {event_id}...")
+        
+        # Use event date as start/end date for slides search
+        if pd.isna(event_date):
+            print("No event date available, cannot search for slides")
+            return None
+            
+        event_date_obj = pd.to_datetime(event_date).date()
+        
+        # Search for slides on the event date
+        response = api_instance.get_transcripts_investor_slides(
+            start_date=event_date_obj,
+            end_date=event_date_obj,
+            ids=[RBC_PRIMARY_ID]
+        )
+        
+        if not response or not hasattr(response, 'data') or not response.data:
+            print("No slides found for this event")
+            return None
+        
+        # Convert to DataFrame for easier handling
+        slides_df = pd.DataFrame(response.to_dict()['data'])
+        
+        # Try to find slides matching the event_id
+        matching_slides = slides_df[slides_df['event_id'] == event_id]
+        
+        if not matching_slides.empty:
+            print(f"Found {len(matching_slides)} matching slides for event {event_id}")
+            return matching_slides.iloc[0]
+        else:
+            print(f"No slides found matching event {event_id}")
+            # Return the first slide from the same date as a fallback
+            if not slides_df.empty:
+                print(f"Found {len(slides_df)} slides from the same date")
+                return slides_df.iloc[0]
+            return None
+            
+    except Exception as e:
+        print(f"Error fetching slides: {str(e)}")
+        return None
 
 def main():
     """
@@ -189,13 +235,57 @@ def main():
             latest_path = os.path.join(OUTPUT_DIR, OUTPUT_FILE)
             
             # Download the transcript
-            if download_transcript(latest_transcript['transcripts_link'], output_path):
+            transcript_downloaded = False
+            if download_file(latest_transcript['transcripts_link'], output_path, "transcript"):
                 # Copy to "latest" file
                 import shutil
                 shutil.copy2(output_path, latest_path)
-                print(f"\nAlso saved as: {latest_path}")
-                print(f"\nTranscript saved successfully!")
-                print(f"You can now review the XML file at: {output_path}")
+                print(f"Also saved as: {latest_path}")
+                transcript_downloaded = True
+            
+            # Try to get slides for the same event
+            event_id = latest_transcript.get('event_id')
+            event_date = latest_transcript.get('event_date')
+            
+            slides_downloaded = False
+            if event_id and event_date:
+                slides_info = get_slides_for_event(event_id, event_date, api_instance)
+                
+                if slides_info and 'slides_link' in slides_info and pd.notna(slides_info['slides_link']):
+                    # Create slides filename using the same event_date logic
+                    slides_date = event_date
+                    if pd.notna(slides_date):
+                        slides_date = pd.to_datetime(slides_date).strftime('%Y-%m-%d')
+                    slides_filename = f"RBC_earnings_slides_{slides_date}.pdf"
+                    slides_path = os.path.join(OUTPUT_DIR, slides_filename)
+                    
+                    # Also save as "latest" slides
+                    latest_slides_path = os.path.join(OUTPUT_DIR, "latest_rbc_earnings_slides.pdf")
+                    
+                    if download_file(slides_info['slides_link'], slides_path, "slides"):
+                        shutil.copy2(slides_path, latest_slides_path)
+                        print(f"Also saved as: {latest_slides_path}")
+                        slides_downloaded = True
+            
+            # Summary
+            print(f"\n{'='*60}")
+            print("DOWNLOAD SUMMARY")
+            print(f"{'='*60}")
+            if transcript_downloaded:
+                print(f"✓ Transcript downloaded: {output_path}")
+            if slides_downloaded:
+                print(f"✓ Slides downloaded: {slides_path}")
+            
+            if not transcript_downloaded and not slides_downloaded:
+                print("✗ No files downloaded")
+            elif transcript_downloaded and not slides_downloaded:
+                print("✓ Transcript downloaded (no slides available)")
+            elif not transcript_downloaded and slides_downloaded:
+                print("✓ Slides downloaded (transcript failed)")
+            else:
+                print("✓ Both transcript and slides downloaded successfully!")
+                
+            print(f"Files saved in: {OUTPUT_DIR}")
             
     except Exception as e:
         print(f"\nERROR: {str(e)}")
