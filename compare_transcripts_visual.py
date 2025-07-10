@@ -763,40 +763,41 @@ class SentenceAligner:
         return self._sort_alignments_by_position(alignments, pdf_sentences, html_sentences)
     
     def _ordered_sequence_alignment(self, pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
-        """Optimized ordered sequence alignment using dynamic programming approach."""
-        # Use a sliding window approach that maintains order
+        """Two-phase ordered sequence alignment that maintains order and handles sentence splits."""
+        print(f"    - Using two-phase ordered alignment algorithm...")
+        start_time = time.time()
+        
+        # Phase 1: Initial 1:1 and 1:many/many:1 matching
+        initial_alignments = self._phase1_initial_matching(pdf_sentences, html_sentences)
+        
+        # Phase 2: Improve low-confidence matches by combining adjacent sentences
+        final_alignments = self._phase2_improve_matches(initial_alignments, pdf_sentences, html_sentences)
+        
+        elapsed = time.time() - start_time
+        print(f"    - Two-phase alignment completed in {elapsed:.2f}s, {len(final_alignments)} alignments")
+        
+        return final_alignments
+    
+    def _phase1_initial_matching(self, pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
+        """Phase 1: Sequential matching with lookahead, maintaining strict order."""
         alignments = []
         pdf_idx = 0
         html_idx = 0
         
-        print(f"    - Using optimized ordered alignment algorithm...")
-        start_time = time.time()
+        print(f"    - Phase 1: Initial matching with lookahead...")
         
         while pdf_idx < len(pdf_sentences) and html_idx < len(html_sentences):
             pdf_sent = pdf_sentences[pdf_idx]
             
-            # Look ahead window for HTML matches (limited to maintain performance)
-            best_match = None
-            best_similarity = 0.0
-            best_offset = 0
-            lookahead_limit = min(10, len(html_sentences) - html_idx)  # Limit lookahead
+            # Try 1:1 matching first
+            best_match = self._find_best_sequential_match(
+                pdf_sent, html_sentences, html_idx, max_lookahead=5
+            )
             
-            for offset in range(lookahead_limit):
-                html_sent = html_sentences[html_idx + offset]
-                similarity = self._calculate_robust_similarity_cached(pdf_sent, html_sent)
-                
-                if similarity > best_similarity and similarity >= 0.6:
-                    best_similarity = similarity
-                    best_match = html_sent
-                    best_offset = offset
-                    
-                    # Early termination for excellent matches
-                    if similarity >= 0.9:
-                        break
-            
-            if best_match and best_similarity >= 0.6:
-                # Handle any skipped HTML sentences as inserts
-                for skip_idx in range(best_offset):
+            if best_match['similarity'] >= 0.6:
+                # Good 1:1 match found
+                # Add any skipped HTML sentences as inserts (maintaining order)
+                for skip_idx in range(best_match['offset']):
                     alignments.append(SentenceAlignment(
                         diff_type=DiffType.INSERT,
                         pdf_sentences=[],
@@ -804,28 +805,62 @@ class SentenceAligner:
                         similarity=0.0
                     ))
                 
-                # Add the matched sentence
-                match_type = DiffType.EQUAL if best_similarity >= 0.9 else DiffType.REPLACE
+                # Add the matched pair
+                match_type = DiffType.EQUAL if best_match['similarity'] >= 0.9 else DiffType.REPLACE
                 alignments.append(SentenceAlignment(
                     diff_type=match_type,
                     pdf_sentences=[pdf_sent],
-                    html_sentences=[best_match],
-                    similarity=best_similarity
+                    html_sentences=[best_match['sentence']],
+                    similarity=best_match['similarity']
                 ))
                 
                 pdf_idx += 1
-                html_idx += best_offset + 1
+                html_idx += best_match['offset'] + 1
             else:
-                # No good match found - PDF sentence is a deletion
-                alignments.append(SentenceAlignment(
-                    diff_type=DiffType.DELETE,
-                    pdf_sentences=[pdf_sent],
-                    html_sentences=[],
-                    similarity=0.0
-                ))
-                pdf_idx += 1
+                # Try 1:many matching (PDF sentence might match combined HTML sentences)
+                combined_match = self._try_one_to_many_match(
+                    pdf_sent, html_sentences, html_idx, max_combine=3
+                )
+                
+                if combined_match['similarity'] >= 0.6:
+                    # PDF sentence matches multiple HTML sentences
+                    alignments.append(SentenceAlignment(
+                        diff_type=DiffType.REPLACE,
+                        pdf_sentences=[pdf_sent],
+                        html_sentences=combined_match['sentences'],
+                        similarity=combined_match['similarity']
+                    ))
+                    
+                    pdf_idx += 1
+                    html_idx += combined_match['count']
+                else:
+                    # Try many:1 matching (multiple PDF sentences might match one HTML)
+                    many_to_one_match = self._try_many_to_one_match(
+                        pdf_sentences, pdf_idx, html_sentences[html_idx] if html_idx < len(html_sentences) else "", max_combine=3
+                    )
+                    
+                    if many_to_one_match['similarity'] >= 0.6:
+                        # Multiple PDF sentences match one HTML sentence
+                        alignments.append(SentenceAlignment(
+                            diff_type=DiffType.REPLACE,
+                            pdf_sentences=many_to_one_match['sentences'],
+                            html_sentences=[html_sentences[html_idx]],
+                            similarity=many_to_one_match['similarity']
+                        ))
+                        
+                        pdf_idx += many_to_one_match['count']
+                        html_idx += 1
+                    else:
+                        # No good match - PDF sentence is deleted
+                        alignments.append(SentenceAlignment(
+                            diff_type=DiffType.DELETE,
+                            pdf_sentences=[pdf_sent],
+                            html_sentences=[],
+                            similarity=0.0
+                        ))
+                        pdf_idx += 1
         
-        # Handle remaining sentences
+        # Handle remaining sentences in order
         while pdf_idx < len(pdf_sentences):
             alignments.append(SentenceAlignment(
                 diff_type=DiffType.DELETE,
@@ -844,10 +879,164 @@ class SentenceAligner:
             ))
             html_idx += 1
         
-        elapsed = time.time() - start_time
-        print(f"    - Ordered alignment completed in {elapsed:.2f}s, {len(alignments)} alignments")
-        
         return alignments
+    
+    def _find_best_sequential_match(self, pdf_sent: str, html_sentences: List[str], 
+                                   start_idx: int, max_lookahead: int = 5) -> dict:
+        """Find best matching HTML sentence within lookahead window."""
+        best_match = {'similarity': 0.0, 'sentence': '', 'offset': 0}
+        
+        lookahead_limit = min(max_lookahead, len(html_sentences) - start_idx)
+        
+        for offset in range(lookahead_limit):
+            html_sent = html_sentences[start_idx + offset]
+            similarity = self._calculate_robust_similarity_cached(pdf_sent, html_sent)
+            
+            if similarity > best_match['similarity']:
+                best_match = {
+                    'similarity': similarity,
+                    'sentence': html_sent,
+                    'offset': offset
+                }
+                
+                # Early termination for excellent matches
+                if similarity >= 0.9:
+                    break
+        
+        return best_match
+    
+    def _try_one_to_many_match(self, pdf_sent: str, html_sentences: List[str], 
+                              start_idx: int, max_combine: int = 3) -> dict:
+        """Try matching one PDF sentence to multiple combined HTML sentences."""
+        best_match = {'similarity': 0.0, 'sentences': [], 'count': 0}
+        
+        for combine_count in range(2, min(max_combine + 1, len(html_sentences) - start_idx + 1)):
+            combined_html_sentences = html_sentences[start_idx:start_idx + combine_count]
+            combined_text = ' '.join(combined_html_sentences)
+            
+            similarity = self._calculate_robust_similarity_cached(pdf_sent, combined_text)
+            
+            if similarity > best_match['similarity']:
+                best_match = {
+                    'similarity': similarity,
+                    'sentences': combined_html_sentences,
+                    'count': combine_count
+                }
+        
+        return best_match
+    
+    def _try_many_to_one_match(self, pdf_sentences: List[str], start_idx: int, 
+                              html_sent: str, max_combine: int = 3) -> dict:
+        """Try matching multiple PDF sentences to one HTML sentence."""
+        best_match = {'similarity': 0.0, 'sentences': [], 'count': 0}
+        
+        for combine_count in range(2, min(max_combine + 1, len(pdf_sentences) - start_idx + 1)):
+            combined_pdf_sentences = pdf_sentences[start_idx:start_idx + combine_count]
+            combined_text = ' '.join(combined_pdf_sentences)
+            
+            similarity = self._calculate_robust_similarity_cached(combined_text, html_sent)
+            
+            if similarity > best_match['similarity']:
+                best_match = {
+                    'similarity': similarity,
+                    'sentences': combined_pdf_sentences,
+                    'count': combine_count
+                }
+        
+        return best_match
+    
+    def _phase2_improve_matches(self, alignments: List[SentenceAlignment], 
+                               pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
+        """Phase 2: Improve low-confidence matches by checking adjacent sentence combinations."""
+        print(f"    - Phase 2: Improving {len(alignments)} alignments...")
+        
+        improved_alignments = []
+        i = 0
+        
+        while i < len(alignments):
+            current = alignments[i]
+            
+            # Only try to improve low-confidence REPLACE matches
+            if (current.diff_type == DiffType.REPLACE and 
+                current.similarity < 0.8 and 
+                len(current.pdf_sentences) == 1 and 
+                len(current.html_sentences) == 1):
+                
+                # Try combining with previous alignment if it's also low confidence
+                if (i > 0 and 
+                    alignments[i-1].diff_type == DiffType.REPLACE and
+                    alignments[i-1].similarity < 0.8):
+                    
+                    improved_prev = self._try_improve_by_combining(
+                        alignments[i-1], current, direction='forward'
+                    )
+                    
+                    if improved_prev and improved_prev.similarity > max(alignments[i-1].similarity, current.similarity) + 0.1:
+                        # Replace previous two alignments with improved one
+                        improved_alignments[-1] = improved_prev  # Replace the last added (previous)
+                        i += 1  # Skip current since it's now combined
+                        continue
+                
+                # Try combining with next alignment if it exists and is low confidence
+                if (i + 1 < len(alignments) and 
+                    alignments[i+1].diff_type == DiffType.REPLACE and
+                    alignments[i+1].similarity < 0.8):
+                    
+                    improved_next = self._try_improve_by_combining(
+                        current, alignments[i+1], direction='forward'
+                    )
+                    
+                    if improved_next and improved_next.similarity > max(current.similarity, alignments[i+1].similarity) + 0.1:
+                        # Add improved alignment and skip next
+                        improved_alignments.append(improved_next)
+                        i += 2  # Skip both current and next
+                        continue
+            
+            # No improvement found, keep original alignment
+            improved_alignments.append(current)
+            i += 1
+        
+        return improved_alignments
+    
+    def _try_improve_by_combining(self, align1: SentenceAlignment, align2: SentenceAlignment, 
+                                 direction: str) -> Optional[SentenceAlignment]:
+        """Try to improve alignment by combining two adjacent alignments."""
+        combined_pdf = align1.pdf_sentences + align2.pdf_sentences
+        combined_html = align1.html_sentences + align2.html_sentences
+        
+        # Try different combination patterns
+        combinations = [
+            # Combine all PDF sentences with all HTML sentences
+            (combined_pdf, combined_html),
+            # Try PDF1 with HTML1+HTML2 
+            (align1.pdf_sentences, combined_html) if align1.pdf_sentences else None,
+            # Try PDF1+PDF2 with HTML1
+            (combined_pdf, align1.html_sentences) if align1.html_sentences else None,
+        ]
+        
+        best_improvement = None
+        best_similarity = 0.0
+        
+        for combo in combinations:
+            if combo is None:
+                continue
+                
+            pdf_text = ' '.join(combo[0]) if combo[0] else ''
+            html_text = ' '.join(combo[1]) if combo[1] else ''
+            
+            if pdf_text and html_text:
+                similarity = self._calculate_robust_similarity_cached(pdf_text, html_text)
+                
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_improvement = SentenceAlignment(
+                        diff_type=DiffType.EQUAL if similarity >= 0.9 else DiffType.REPLACE,
+                        pdf_sentences=combo[0],
+                        html_sentences=combo[1],
+                        similarity=similarity
+                    )
+        
+        return best_improvement
     
     def _calculate_robust_similarity_cached(self, pdf_sent: str, html_sent: str) -> float:
         """Cached version of robust similarity calculation."""
