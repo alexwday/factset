@@ -57,12 +57,19 @@ Required environment variables:
 - `NAS_BASE_PATH` - Base path within NAS share
 - `CLIENT_MACHINE_NAME` - Client machine name for SMB
 
-### 3. Run Scripts
+### 3. Setup NAS Configuration
+
+**IMPORTANT**: Before running any scripts, you must place the shared configuration file on your NAS:
+
+1. Upload `config.json` to your NAS at the path: `{NAS_BASE_PATH}/Inputs/config/config.json`
+2. Ensure the SSL certificate is available at: `{NAS_BASE_PATH}/Inputs/certificate/certificate.cer`
+
+### 4. Run Scripts
 
 Each stage is a standalone Python script:
 
 ```bash
-# Stage 0: Bulk historical sync (optional)
+# Stage 0: Bulk historical sync (implemented)
 python stage_0_bulk_refresh/0_transcript_bulk_sync.py
 
 # Stage 1: Daily incremental sync (planned)
@@ -73,6 +80,96 @@ python stage_2_processing/2_transcript_processing.py
 ```
 
 **Current Status**: Stage 0 is fully implemented and ready for use. Stages 1 and 2 are planned for future development.
+
+## Testing from Work Environment
+
+### Prerequisites
+
+1. **Python Environment**:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+2. **Environment Configuration**:
+   ```bash
+   # Copy and configure environment file
+   cp .env.example .env
+   # Edit .env with your actual credentials
+   ```
+
+3. **NAS Setup**:
+   - Ensure `config.json` is uploaded to `{NAS_BASE_PATH}/Inputs/config/config.json`
+   - Verify SSL certificate exists at `{NAS_BASE_PATH}/Inputs/certificate/certificate.cer`
+   - Test NAS connectivity from your work computer
+
+### Environment Variables Required
+
+Complete your `.env` file with these values:
+
+```env
+# FactSet API Configuration
+API_USERNAME=your_factset_username
+API_PASSWORD=your_factset_api_password
+
+# Proxy Configuration (Corporate Network)
+PROXY_USER=your_proxy_username
+PROXY_PASSWORD=your_proxy_password
+PROXY_URL=oproxy.fg.rbc.com:8080
+
+# NAS Configuration
+NAS_USERNAME=your_nas_username
+NAS_PASSWORD=your_nas_password
+NAS_SERVER_IP=192.168.1.100
+NAS_SERVER_NAME=NAS-SERVER
+NAS_SHARE_NAME=shared_folder
+NAS_BASE_PATH=transcript_repository
+NAS_PORT=445
+CONFIG_PATH=Inputs/config/config.json
+CLIENT_MACHINE_NAME=SYNC-CLIENT
+```
+
+### Testing Stage 0
+
+1. **Validate Configuration**:
+   ```bash
+   # Test script syntax
+   python -m py_compile stage_0_bulk_refresh/0_transcript_bulk_sync.py
+   ```
+
+2. **Dry Run Check**:
+   - Script will connect to NAS and load config before starting
+   - Monitor initial log output for connection issues
+   - Script will fail fast if config file not found on NAS
+
+3. **Execute Full Sync**:
+   ```bash
+   python stage_0_bulk_refresh/0_transcript_bulk_sync.py
+   ```
+
+4. **Monitor Progress**:
+   - Watch console output for real-time progress
+   - Check NAS directory structure creation
+   - Verify transcript downloads in `{NAS_BASE_PATH}/Outputs/data/`
+   - Review logs in `{NAS_BASE_PATH}/Outputs/logs/`
+
+### Expected Behavior
+
+- **Connection**: Script connects to NAS and downloads `config.json`
+- **Authentication**: Configures FactSet API with proxy settings
+- **Directory Setup**: Creates full directory structure on NAS
+- **Processing**: Downloads transcripts for all 15 monitored institutions
+- **Output**: Generates inventory files and execution logs
+- **Error Handling**: Retries failed downloads, logs all errors
+
+### Troubleshooting
+
+1. **"Config file not found"**: Upload `config.json` to NAS at correct path
+2. **SSL Certificate Error**: Verify certificate file exists on NAS
+3. **Proxy Authentication**: Check proxy credentials and URL format
+4. **NAS Connection Failed**: Verify NAS credentials and network access
+5. **API Authentication**: Confirm FactSet API credentials are valid
 
 ## Pipeline Stages
 

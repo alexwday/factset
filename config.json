@@ -1,4 +1,5 @@
 {
+  "ssl_cert_nas_path": "Inputs/certificate/certificate.cer",
   "monitored_institutions": {
     "RY-CA": {
       "name": "Royal Bank of Canada",

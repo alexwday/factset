@@ -40,53 +40,24 @@ NAS_SERVER_IP = os.getenv('NAS_SERVER_IP')
 NAS_SERVER_NAME = os.getenv('NAS_SERVER_NAME')
 NAS_SHARE_NAME = os.getenv('NAS_SHARE_NAME')
 NAS_BASE_PATH = os.getenv('NAS_BASE_PATH')
+NAS_PORT = int(os.getenv('NAS_PORT', 445))
+CONFIG_PATH = os.getenv('CONFIG_PATH')
 CLIENT_MACHINE_NAME = os.getenv('CLIENT_MACHINE_NAME')
 
 # Validate required environment variables
 required_env_vars = [
     'API_USERNAME', 'API_PASSWORD', 'PROXY_USER', 'PROXY_PASSWORD', 'PROXY_URL',
     'NAS_USERNAME', 'NAS_PASSWORD', 'NAS_SERVER_IP', 'NAS_SERVER_NAME',
-    'NAS_SHARE_NAME', 'NAS_BASE_PATH', 'CLIENT_MACHINE_NAME'
+    'NAS_SHARE_NAME', 'NAS_BASE_PATH', 'CONFIG_PATH', 'CLIENT_MACHINE_NAME'
 ]
 
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
-# Constants
-SSL_CERT_NAS_PATH = "Inputs/certificate/certificate.cer"
-CONFIG_PATH = "Inputs/config/config.json"
-NAS_PORT = 445
+# Constants will be loaded from config
 
-# Default configuration (will be overridden by NAS config)
-DEFAULT_CONFIG = {
-    "sync_start_date": "2023-01-01",
-    "monitored_institutions": {
-        "RY-CA": {"name": "Royal Bank of Canada", "region": "CA", "type": "Bank"},
-        "TD-CA": {"name": "Toronto-Dominion Bank", "region": "CA", "type": "Bank"},
-        "BNS-CA": {"name": "Bank of Nova Scotia", "region": "CA", "type": "Bank"},
-        "BMO-CA": {"name": "Bank of Montreal", "region": "CA", "type": "Bank"},
-        "CM-CA": {"name": "Canadian Imperial Bank of Commerce", "region": "CA", "type": "Bank"},
-        "NA-CA": {"name": "National Bank of Canada", "region": "CA", "type": "Bank"},
-        "JPM-US": {"name": "JPMorgan Chase & Co.", "region": "US", "type": "Bank"},
-        "BAC-US": {"name": "Bank of America Corporation", "region": "US", "type": "Bank"},
-        "WFC-US": {"name": "Wells Fargo & Company", "region": "US", "type": "Bank"},
-        "C-US": {"name": "Citigroup Inc.", "region": "US", "type": "Bank"},
-        "GS-US": {"name": "Goldman Sachs Group Inc.", "region": "US", "type": "Bank"},
-        "MS-US": {"name": "Morgan Stanley", "region": "US", "type": "Bank"},
-        "MFC-CA": {"name": "Manulife Financial Corporation", "region": "CA", "type": "Insurance"},
-        "SLF-CA": {"name": "Sun Life Financial Inc.", "region": "CA", "type": "Insurance"},
-        "UNH-US": {"name": "UnitedHealth Group Incorporated", "region": "US", "type": "Insurance"},
-    },
-    "industry_categories": ["IN:BANKS", "IN:FNLSVC", "IN:INS", "IN:SECS"],
-    "transcript_types": ["Corrected", "Raw", "NearRealTime"],
-    "sort_order": ["-storyDateTime"],
-    "pagination_limit": 1000,
-    "pagination_offset": 0,
-    "request_delay": 2.0,
-    "max_retries": 3,
-    "retry_delay": 5.0
-}
+# No default config - script must load from NAS
 
 # Global variables for configuration
 config = {}
@@ -148,12 +119,15 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict[str, Any]:
             logger.info("Successfully loaded shared configuration from NAS")
             return stage_config
         else:
-            logger.warning("Config file not found on NAS, using default configuration")
-            return DEFAULT_CONFIG
+            logger.error("Config file not found on NAS - script cannot proceed")
+            raise FileNotFoundError(f"Configuration file not found at {CONFIG_PATH}")
             
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in config file: {e}")
+        raise
     except Exception as e:
-        logger.warning(f"Error loading config from NAS: {e}, using default configuration")
-        return DEFAULT_CONFIG
+        logger.error(f"Error loading config from NAS: {e}")
+        raise
 
 def nas_path_join(*parts: str) -> str:
     """Join path parts for NAS paths using forward slashes."""
@@ -486,7 +460,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     """Download SSL certificate from NAS and set up for use."""
     try:
         logger.info("Downloading SSL certificate from NAS...")
-        cert_data = nas_download_file(nas_conn, SSL_CERT_NAS_PATH)
+        cert_data = nas_download_file(nas_conn, config['ssl_cert_nas_path'])
         if cert_data:
             temp_cert = tempfile.NamedTemporaryFile(mode='wb', suffix='.cer', delete=False)
             temp_cert.write(cert_data)
@@ -504,17 +478,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
         logger.error(f"Error downloading SSL certificate from NAS: {e}")
         return None
 
-def create_default_config_on_nas(nas_conn: SMBConnection) -> None:
-    """Create default configuration file on NAS if it doesn't exist."""
-    try:
-        if not nas_file_exists(nas_conn, CONFIG_PATH):
-            logger.info("Creating default configuration on NAS...")
-            config_json = json.dumps(DEFAULT_CONFIG, indent=2)
-            config_file_obj = io.BytesIO(config_json.encode('utf-8'))
-            nas_upload_file(nas_conn, config_file_obj, CONFIG_PATH)
-            logger.info("Default configuration created on NAS")
-    except Exception as e:
-        logger.warning(f"Failed to create default config on NAS: {e}")
+# No automatic config creation - config must be manually placed on NAS
 
 def main() -> None:
     """Main function to orchestrate the Stage 0 bulk transcript sync."""
@@ -530,9 +494,6 @@ def main() -> None:
     if not nas_conn:
         logger.error("Failed to connect to NAS - aborting sync")
         return
-    
-    # Create default config if needed
-    create_default_config_on_nas(nas_conn)
     
     # Load shared configuration from NAS
     config = load_stage_config(nas_conn)
