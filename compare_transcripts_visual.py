@@ -57,8 +57,26 @@ class DiffType(Enum):
 
 
 @dataclass
+class IndexedSentence:
+    """Represents a sentence with its original position index."""
+    index: int
+    text: str
+    is_matched: bool = False
+    match_group_id: Optional[str] = None
+
+@dataclass
+class SentenceMatch:
+    """Represents a match between indexed sentences."""
+    match_id: str
+    pdf_sentences: List[IndexedSentence]
+    html_sentences: List[IndexedSentence]
+    match_type: str  # 'exact', 'fuzzy', 'partial', 'manual'
+    similarity: float = 0.0
+    confidence: str = 'high'  # 'high', 'medium', 'low'
+
+@dataclass
 class SentenceAlignment:
-    """Represents an aligned sentence pair or diff."""
+    """Legacy class - kept for compatibility."""
     diff_type: DiffType
     pdf_sentences: List[str]
     html_sentences: List[str]
@@ -632,12 +650,14 @@ class SlidingWindowMatcher:
 
 
 class SentenceAligner:
-    """Align sentences between PDF and HTML using robust sequential matching."""
+    """Fresh approach: Index-based sentence alignment with positional fuzzy matching."""
     
-    def __init__(self, similarity_threshold: float = 0.6):
+    def __init__(self, similarity_threshold: float = 0.7):
         self.similarity_threshold = similarity_threshold
-        self.similarity_cache = {}  # Cache for sentence similarity calculations
-        self.max_cache_size = 5000  # Smaller cache for sentence-level operations
+        self.similarity_cache = {}
+        self.max_cache_size = 5000
+        self.matches = []  # List of SentenceMatch objects
+        self.match_counter = 0
     
     def extract_sentences(self, text_lines: List[str]) -> List[str]:
         """Extract sentences from text lines."""
@@ -674,167 +694,356 @@ class SentenceAligner:
         return False
     
     def align_sentences(self, pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
-        """Align sentences using robust sequential matching that prevents duplication."""
-        print("    - Using robust sequential sentence alignment...")
+        """Fresh approach: Index-based alignment with fuzzy positional matching."""
+        print("    - Using fresh index-based sentence alignment...")
         
-        # Use single-pass sequential alignment that maintains order and prevents duplication
-        alignments = self._sequential_alignment(pdf_sentences, html_sentences)
+        # Reset state
+        self.matches = []
+        self.match_counter = 0
         
-        print(f"    - Created {len(alignments)} final alignments")
+        # Step 1: Create indexed sentences
+        pdf_indexed = self._create_indexed_sentences(pdf_sentences, 'PDF')
+        html_indexed = self._create_indexed_sentences(html_sentences, 'HTML')
+        
+        print(f"    - Indexed {len(pdf_indexed)} PDF and {len(html_indexed)} HTML sentences")
+        
+        # Step 2: Find direct matches first
+        self._find_direct_matches(pdf_indexed, html_indexed)
+        
+        # Step 3: Find fuzzy positional matches (start/middle/end)
+        self._find_positional_matches(pdf_indexed, html_indexed)
+        
+        # Step 4: Assemble multi-sentence matches
+        self._assemble_multi_sentence_matches(pdf_indexed, html_indexed)
+        
+        # Step 5: Convert to legacy format for compatibility
+        alignments = self._convert_to_legacy_format(pdf_indexed, html_indexed)
+        
+        # Store indexed data for interactive UI
+        self._last_pdf_indexed = pdf_indexed
+        self._last_html_indexed = html_indexed
+        
+        print(f"    - Created {len(self.matches)} matches, {len(alignments)} final alignments")
         return alignments
     
-    def _sequential_alignment(self, pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
-        """Robust sequential alignment that maintains order and prevents duplication."""
-        alignments = []
-        pdf_idx = 0
-        html_idx = 0
+    def _create_indexed_sentences(self, sentences: List[str], source: str) -> List[IndexedSentence]:
+        """Create indexed sentences with original positions."""
+        indexed = []
+        for i, sentence in enumerate(sentences):
+            indexed.append(IndexedSentence(
+                index=i,
+                text=sentence.strip(),
+                is_matched=False,
+                match_group_id=None
+            ))
+        return indexed
+    
+    def _find_direct_matches(self, pdf_indexed: List[IndexedSentence], html_indexed: List[IndexedSentence]):
+        """Step 2: Find nearly identical sentences first."""
+        print("    - Finding direct matches...")
+        matched_count = 0
         
-        print(f"    - Processing {len(pdf_sentences):,} PDF sentences and {len(html_sentences):,} HTML sentences...")
+        for pdf_sent in pdf_indexed:
+            if pdf_sent.is_matched:
+                continue
+                
+            for html_sent in html_indexed:
+                if html_sent.is_matched:
+                    continue
+                
+                similarity = self._calculate_sentence_similarity(pdf_sent.text, html_sent.text)
+                
+                if similarity >= 0.9:  # Very high threshold for direct matches
+                    match_id = f"direct_{self.match_counter}"
+                    self.match_counter += 1
+                    
+                    # Mark as matched
+                    pdf_sent.is_matched = True
+                    pdf_sent.match_group_id = match_id
+                    html_sent.is_matched = True
+                    html_sent.match_group_id = match_id
+                    
+                    # Create match
+                    self.matches.append(SentenceMatch(
+                        match_id=match_id,
+                        pdf_sentences=[pdf_sent],
+                        html_sentences=[html_sent],
+                        match_type='exact',
+                        similarity=similarity,
+                        confidence='high'
+                    ))
+                    
+                    matched_count += 1
+                    break
         
-        while pdf_idx < len(pdf_sentences) and html_idx < len(html_sentences):
-            # Progress tracking
-            progress = (pdf_idx + html_idx) / (len(pdf_sentences) + len(html_sentences)) * 100
-            if (pdf_idx + html_idx) % max(1, (len(pdf_sentences) + len(html_sentences)) // 20) == 0:
-                print(f"\r      Progress: {progress:.1f}% (PDF: {pdf_idx}/{len(pdf_sentences)}, HTML: {html_idx}/{len(html_sentences)})", end="", flush=True)
+        print(f"      Found {matched_count} direct matches")
+    
+    def _find_positional_matches(self, pdf_indexed: List[IndexedSentence], html_indexed: List[IndexedSentence]):
+        """Step 3: Find fuzzy matches at sentence start/middle/end."""
+        print("    - Finding positional matches...")
+        matched_count = 0
+        
+        # Try to match unmatched sentences to parts of other sentences
+        for pdf_sent in pdf_indexed:
+            if pdf_sent.is_matched:
+                continue
+                
+            best_match = None
+            best_similarity = 0.0
+            best_position = None
             
-            # Try different alignment strategies
-            best_alignment = self._find_best_alignment(pdf_sentences, html_sentences, pdf_idx, html_idx)
+            for html_sent in html_indexed:
+                if html_sent.is_matched:
+                    continue
+                
+                # Check if PDF sentence matches start, middle, or end of HTML sentence
+                position, similarity = self._check_positional_match(pdf_sent.text, html_sent.text)
+                
+                if similarity > best_similarity and similarity >= self.similarity_threshold:
+                    best_match = html_sent
+                    best_similarity = similarity
+                    best_position = position
             
-            if best_alignment:
-                alignments.append(best_alignment['alignment'])
-                pdf_idx += best_alignment['pdf_advance']
-                html_idx += best_alignment['html_advance']
-            else:
-                # No good match found - advance PDF and mark as deleted
-                alignments.append(SentenceAlignment(
-                    diff_type=DiffType.DELETE,
-                    pdf_sentences=[pdf_sentences[pdf_idx]],
-                    html_sentences=[],
-                    similarity=0.0
+            if best_match:
+                match_id = f"positional_{self.match_counter}"
+                self.match_counter += 1
+                
+                # Mark as matched
+                pdf_sent.is_matched = True
+                pdf_sent.match_group_id = match_id
+                best_match.is_matched = True
+                best_match.match_group_id = match_id
+                
+                # Create match
+                self.matches.append(SentenceMatch(
+                    match_id=match_id,
+                    pdf_sentences=[pdf_sent],
+                    html_sentences=[best_match],
+                    match_type=f'fuzzy_{best_position}',
+                    similarity=best_similarity,
+                    confidence='medium' if best_similarity >= 0.8 else 'low'
                 ))
-                pdf_idx += 1
+                
+                matched_count += 1
         
-        print()  # New line after progress
+        print(f"      Found {matched_count} positional matches")
+    
+    def _check_positional_match(self, pdf_text: str, html_text: str) -> tuple:
+        """Check if PDF sentence matches start, middle, or end of HTML sentence."""
+        pdf_clean = self._normalize_sentence_robust(pdf_text)
+        html_clean = self._normalize_sentence_robust(html_text)
         
-        # Handle remaining sentences in order
-        while pdf_idx < len(pdf_sentences):
-            alignments.append(SentenceAlignment(
-                diff_type=DiffType.DELETE,
-                pdf_sentences=[pdf_sentences[pdf_idx]],
-                html_sentences=[],
-                similarity=0.0
-            ))
-            pdf_idx += 1
+        pdf_words = pdf_clean.split()
+        html_words = html_clean.split()
         
-        while html_idx < len(html_sentences):
-            alignments.append(SentenceAlignment(
-                diff_type=DiffType.INSERT,
-                pdf_sentences=[],
-                html_sentences=[html_sentences[html_idx]],
-                similarity=0.0
-            ))
-            html_idx += 1
+        if not pdf_words or not html_words:
+            return 'none', 0.0
+        
+        # Check start match
+        start_similarity = self._calculate_overlap_similarity(pdf_words, html_words[:len(pdf_words)])
+        
+        # Check end match
+        end_similarity = self._calculate_overlap_similarity(pdf_words, html_words[-len(pdf_words):])
+        
+        # Check middle match (sliding window)
+        middle_similarity = 0.0
+        if len(html_words) > len(pdf_words):
+            for i in range(len(html_words) - len(pdf_words) + 1):
+                window = html_words[i:i + len(pdf_words)]
+                similarity = self._calculate_overlap_similarity(pdf_words, window)
+                middle_similarity = max(middle_similarity, similarity)
+        
+        # Return best match
+        best_similarity = max(start_similarity, end_similarity, middle_similarity)
+        
+        if best_similarity == start_similarity:
+            return 'start', start_similarity
+        elif best_similarity == end_similarity:
+            return 'end', end_similarity
+        else:
+            return 'middle', middle_similarity
+    
+    def _calculate_overlap_similarity(self, words1: List[str], words2: List[str]) -> float:
+        """Calculate similarity between two word lists."""
+        if not words1 or not words2:
+            return 0.0
+        
+        matches = 0
+        for w1, w2 in zip(words1, words2):
+            if w1.lower() == w2.lower():
+                matches += 1
+            elif self._words_are_similar(w1, w2):
+                matches += 0.8
+        
+        return matches / max(len(words1), len(words2))
+    
+    def _assemble_multi_sentence_matches(self, pdf_indexed: List[IndexedSentence], html_indexed: List[IndexedSentence]):
+        """Step 4: Try to build 2:1, 1:2 matches from unmatched sentences."""
+        print("    - Assembling multi-sentence matches...")
+        matched_count = 0
+        
+        # Try to find 2:1 matches (2 PDF sentences -> 1 HTML sentence)
+        for i in range(len(pdf_indexed) - 1):
+            pdf_sent1 = pdf_indexed[i]
+            pdf_sent2 = pdf_indexed[i + 1]
+            
+            if pdf_sent1.is_matched or pdf_sent2.is_matched:
+                continue
+            
+            combined_pdf = f"{pdf_sent1.text} {pdf_sent2.text}"
+            
+            for html_sent in html_indexed:
+                if html_sent.is_matched:
+                    continue
+                
+                similarity = self._calculate_sentence_similarity(combined_pdf, html_sent.text)
+                
+                if similarity >= self.similarity_threshold:
+                    match_id = f"multi_2to1_{self.match_counter}"
+                    self.match_counter += 1
+                    
+                    # Mark as matched
+                    pdf_sent1.is_matched = True
+                    pdf_sent1.match_group_id = match_id
+                    pdf_sent2.is_matched = True
+                    pdf_sent2.match_group_id = match_id
+                    html_sent.is_matched = True
+                    html_sent.match_group_id = match_id
+                    
+                    # Create match
+                    self.matches.append(SentenceMatch(
+                        match_id=match_id,
+                        pdf_sentences=[pdf_sent1, pdf_sent2],
+                        html_sentences=[html_sent],
+                        match_type='multi_2to1',
+                        similarity=similarity,
+                        confidence='medium' if similarity >= 0.8 else 'low'
+                    ))
+                    
+                    matched_count += 1
+                    break
+        
+        # Try to find 1:2 matches (1 PDF sentence -> 2 HTML sentences)
+        for i in range(len(html_indexed) - 1):
+            html_sent1 = html_indexed[i]
+            html_sent2 = html_indexed[i + 1]
+            
+            if html_sent1.is_matched or html_sent2.is_matched:
+                continue
+            
+            combined_html = f"{html_sent1.text} {html_sent2.text}"
+            
+            for pdf_sent in pdf_indexed:
+                if pdf_sent.is_matched:
+                    continue
+                
+                similarity = self._calculate_sentence_similarity(pdf_sent.text, combined_html)
+                
+                if similarity >= self.similarity_threshold:
+                    match_id = f"multi_1to2_{self.match_counter}"
+                    self.match_counter += 1
+                    
+                    # Mark as matched
+                    pdf_sent.is_matched = True
+                    pdf_sent.match_group_id = match_id
+                    html_sent1.is_matched = True
+                    html_sent1.match_group_id = match_id
+                    html_sent2.is_matched = True
+                    html_sent2.match_group_id = match_id
+                    
+                    # Create match
+                    self.matches.append(SentenceMatch(
+                        match_id=match_id,
+                        pdf_sentences=[pdf_sent],
+                        html_sentences=[html_sent1, html_sent2],
+                        match_type='multi_1to2',
+                        similarity=similarity,
+                        confidence='medium' if similarity >= 0.8 else 'low'
+                    ))
+                    
+                    matched_count += 1
+                    break
+        
+        print(f"      Found {matched_count} multi-sentence matches")
+    
+    def _convert_to_legacy_format(self, pdf_indexed: List[IndexedSentence], html_indexed: List[IndexedSentence]) -> List[SentenceAlignment]:
+        """Step 5: Convert to legacy format, maintaining original order."""
+        alignments = []
+        
+        # Create a mapping of all positions
+        max_index = max(len(pdf_indexed), len(html_indexed))
+        
+        for i in range(max_index):
+            pdf_sent = pdf_indexed[i] if i < len(pdf_indexed) else None
+            html_sent = html_indexed[i] if i < len(html_indexed) else None
+            
+            # Check if either sentence is part of a match
+            if pdf_sent and pdf_sent.is_matched:
+                # Find the match
+                for match in self.matches:
+                    if any(s.index == pdf_sent.index for s in match.pdf_sentences):
+                        # This PDF sentence is part of a match
+                        if not any(any(s.index == pdf_sent.index for s in align.pdf_sentences) for align in alignments):
+                            # Haven't added this match yet
+                            diff_type = DiffType.EQUAL if match.similarity >= 0.9 else DiffType.REPLACE
+                            alignments.append(SentenceAlignment(
+                                diff_type=diff_type,
+                                pdf_sentences=[s.text for s in match.pdf_sentences],
+                                html_sentences=[s.text for s in match.html_sentences],
+                                similarity=match.similarity
+                            ))
+                        break
+            elif html_sent and html_sent.is_matched:
+                # Find the match
+                for match in self.matches:
+                    if any(s.index == html_sent.index for s in match.html_sentences):
+                        # This HTML sentence is part of a match
+                        if not any(any(s.index == html_sent.index for s in align.html_sentences) for align in alignments):
+                            # Haven't added this match yet
+                            diff_type = DiffType.EQUAL if match.similarity >= 0.9 else DiffType.REPLACE
+                            alignments.append(SentenceAlignment(
+                                diff_type=diff_type,
+                                pdf_sentences=[s.text for s in match.pdf_sentences],
+                                html_sentences=[s.text for s in match.html_sentences],
+                                similarity=match.similarity
+                            ))
+                        break
+            else:
+                # Unmatched sentences - add in their original positions
+                if pdf_sent and not html_sent:
+                    alignments.append(SentenceAlignment(
+                        diff_type=DiffType.DELETE,
+                        pdf_sentences=[pdf_sent.text],
+                        html_sentences=[],
+                        similarity=0.0
+                    ))
+                elif html_sent and not pdf_sent:
+                    alignments.append(SentenceAlignment(
+                        diff_type=DiffType.INSERT,
+                        pdf_sentences=[],
+                        html_sentences=[html_sent.text],
+                        similarity=0.0
+                    ))
+                elif pdf_sent and html_sent and not pdf_sent.is_matched and not html_sent.is_matched:
+                    # Both unmatched at same position
+                    alignments.append(SentenceAlignment(
+                        diff_type=DiffType.DELETE,
+                        pdf_sentences=[pdf_sent.text],
+                        html_sentences=[],
+                        similarity=0.0
+                    ))
+                    alignments.append(SentenceAlignment(
+                        diff_type=DiffType.INSERT,
+                        pdf_sentences=[],
+                        html_sentences=[html_sent.text],
+                        similarity=0.0
+                    ))
         
         return alignments
     
-    def _find_best_alignment(self, pdf_sentences: List[str], html_sentences: List[str], 
-                           pdf_idx: int, html_idx: int) -> Optional[Dict]:
-        """Find the best alignment starting from the current positions."""
-        best_alignment = None
-        best_score = 0.0
-        
-        # Strategy 1: 1:1 matching (current PDF vs current HTML)
-        if pdf_idx < len(pdf_sentences) and html_idx < len(html_sentences):
-            similarity = self._calculate_robust_similarity_cached(
-                pdf_sentences[pdf_idx], html_sentences[html_idx]
-            )
-            if similarity >= self.similarity_threshold:
-                best_alignment = {
-                    'alignment': SentenceAlignment(
-                        diff_type=DiffType.EQUAL if similarity >= 0.9 else DiffType.REPLACE,
-                        pdf_sentences=[pdf_sentences[pdf_idx]],
-                        html_sentences=[html_sentences[html_idx]],
-                        similarity=similarity
-                    ),
-                    'pdf_advance': 1,
-                    'html_advance': 1,
-                    'score': similarity
-                }
-                best_score = similarity
-        
-        # Strategy 2: 1:many matching (1 PDF sentence vs 2-3 HTML sentences)
-        for html_count in range(2, min(4, len(html_sentences) - html_idx + 1)):
-            if html_idx + html_count <= len(html_sentences):
-                combined_html = ' '.join(html_sentences[html_idx:html_idx + html_count])
-                similarity = self._calculate_robust_similarity_cached(
-                    pdf_sentences[pdf_idx], combined_html
-                )
-                
-                # Boost score slightly for multi-sentence matches to prefer them over weak 1:1 matches
-                adjusted_score = similarity * 1.1 if similarity >= self.similarity_threshold else 0.0
-                
-                if adjusted_score > best_score:
-                    best_alignment = {
-                        'alignment': SentenceAlignment(
-                            diff_type=DiffType.REPLACE,
-                            pdf_sentences=[pdf_sentences[pdf_idx]],
-                            html_sentences=html_sentences[html_idx:html_idx + html_count],
-                            similarity=similarity
-                        ),
-                        'pdf_advance': 1,
-                        'html_advance': html_count,
-                        'score': adjusted_score
-                    }
-                    best_score = adjusted_score
-        
-        # Strategy 3: many:1 matching (2-3 PDF sentences vs 1 HTML sentence)
-        for pdf_count in range(2, min(4, len(pdf_sentences) - pdf_idx + 1)):
-            if pdf_idx + pdf_count <= len(pdf_sentences):
-                combined_pdf = ' '.join(pdf_sentences[pdf_idx:pdf_idx + pdf_count])
-                similarity = self._calculate_robust_similarity_cached(
-                    combined_pdf, html_sentences[html_idx]
-                )
-                
-                # Boost score slightly for multi-sentence matches
-                adjusted_score = similarity * 1.1 if similarity >= self.similarity_threshold else 0.0
-                
-                if adjusted_score > best_score:
-                    best_alignment = {
-                        'alignment': SentenceAlignment(
-                            diff_type=DiffType.REPLACE,
-                            pdf_sentences=pdf_sentences[pdf_idx:pdf_idx + pdf_count],
-                            html_sentences=[html_sentences[html_idx]],
-                            similarity=similarity
-                        ),
-                        'pdf_advance': pdf_count,
-                        'html_advance': 1,
-                        'score': adjusted_score
-                    }
-                    best_score = adjusted_score
-        
-        # Strategy 4: Skip HTML sentence if no good match (HTML insertion)
-        # This allows for cases where HTML has extra content
-        if best_score < self.similarity_threshold:
-            # Check if next HTML sentence matches better with current PDF
-            if html_idx + 1 < len(html_sentences):
-                next_similarity = self._calculate_robust_similarity_cached(
-                    pdf_sentences[pdf_idx], html_sentences[html_idx + 1]
-                )
-                if next_similarity >= self.similarity_threshold:
-                    # Insert the skipped HTML sentence and continue
-                    return {
-                        'alignment': SentenceAlignment(
-                            diff_type=DiffType.INSERT,
-                            pdf_sentences=[],
-                            html_sentences=[html_sentences[html_idx]],
-                            similarity=0.0
-                        ),
-                        'pdf_advance': 0,
-                        'html_advance': 1,
-                        'score': 0.0
-                    }
-        
-        return best_alignment if best_score >= self.similarity_threshold else None
+    def _calculate_sentence_similarity(self, text1: str, text2: str) -> float:
+        """Calculate similarity between two sentences."""
+        return self._calculate_robust_similarity(text1, text2)
     
     
     def _calculate_robust_similarity_cached(self, pdf_sent: str, html_sent: str) -> float:
@@ -1250,7 +1459,239 @@ class VisualComparisonGenerator:
         .low-similarity {{
             background: #dc3545;
         }}
+        .interactive-cell {{
+            position: relative;
+        }}
+        .sentence-content {{
+            margin-bottom: 8px;
+        }}
+        .sentence-index {{
+            font-size: 11px;
+            color: #6c757d;
+            font-style: italic;
+            margin-bottom: 8px;
+        }}
+        .match-controls, .unmatched-controls {{
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-top: 8px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }}
+        .btn-unmatch, .btn-edit-match, .btn-match {{
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            cursor: pointer;
+        }}
+        .btn-unmatch:hover, .btn-edit-match:hover, .btn-match:hover {{
+            background: #0056b3;
+        }}
+        .match-type, .match-target {{
+            font-size: 11px;
+            padding: 2px 4px;
+        }}
+        .placeholder {{
+            color: #6c757d;
+            font-style: italic;
+        }}
+        .save-controls {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            z-index: 1000;
+        }}
+        .btn-save {{
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-left: 8px;
+        }}
+        .btn-save:hover {{
+            background: #1e7e34;
+        }}
+        .match-summary {{
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 6px;
+        }}
     </style>
+    <script>
+        let manualMatches = [];
+        let modifiedMatches = new Set();
+        
+        function unmatchRow(rowId) {{
+            const row = document.querySelector(`[data-row-id="${{rowId}}"]`);
+            if (row) {{
+                // Convert to unmatched state
+                row.className = 'diff-row deleted-row';
+                row.innerHTML = `
+                    <div class="diff-cell interactive-cell">
+                        <div class="sentence-content">${{row.querySelector('.sentence-content').innerHTML}}</div>
+                        <div class="sentence-index">${{row.querySelector('.sentence-index').innerHTML}}</div>
+                        <div class="unmatched-controls">
+                            <button class="btn-match" onclick="startMatching(${{rowId}}, 'pdf')">🔗 Match</button>
+                            <select class="match-target" style="display:none;" onchange="createMatch(${{rowId}}, 'pdf', this.value)">
+                                <option value="">Select HTML sentence...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="diff-cell placeholder">(manually unmatched)</div>
+                `;
+                modifiedMatches.add(rowId);
+                updateMatchSummary();
+            }}
+        }}
+        
+        function editMatch(rowId) {{
+            alert('Match editing not yet implemented - use unmatch and re-match for now');
+        }}
+        
+        function updateMatchType(rowId, newType) {{
+            modifiedMatches.add(rowId);
+            updateMatchSummary();
+        }}
+        
+        function startMatching(rowId, side) {{
+            const row = document.querySelector(`[data-row-id="${{rowId}}"]`);
+            const select = row.querySelector('.match-target');
+            if (select) {{
+                select.style.display = 'inline-block';
+                // Populate options dynamically based on current unmatched sentences
+                // This would require server-side support to get current state
+            }}
+        }}
+        
+        function createMatch(rowId, side, targetIndex) {{
+            if (!targetIndex) return;
+            
+            // Record manual match
+            manualMatches.push({{
+                sourceRow: rowId,
+                sourceSide: side,
+                targetIndex: parseInt(targetIndex),
+                timestamp: new Date().toISOString()
+            }});
+            
+            modifiedMatches.add(rowId);
+            updateMatchSummary();
+            
+            // Visual feedback
+            const row = document.querySelector(`[data-row-id="${{rowId}}"]`);
+            if (row) {{
+                row.style.background = '#d4edda';
+                setTimeout(() => {{
+                    row.style.background = '';
+                }}, 2000);
+            }}
+        }}
+        
+        function updateMatchSummary() {{
+            let summary = document.querySelector('.match-summary');
+            if (!summary) {{
+                summary = document.createElement('div');
+                summary.className = 'match-summary';
+                document.querySelector('.header').appendChild(summary);
+            }}
+            
+            summary.innerHTML = `
+                <h4>📝 Manual Changes</h4>
+                <p>Modified matches: ${{modifiedMatches.size}}</p>
+                <p>Manual matches created: ${{manualMatches.length}}</p>
+                <div class="save-controls">
+                    <button class="btn-save" onclick="saveMatches()">💾 Save Changes</button>
+                    <button class="btn-save" onclick="exportMatches()">📤 Export Matches</button>
+                </div>
+            `;
+        }}
+        
+        function saveMatches() {{
+            const matchData = {{
+                manualMatches: manualMatches,
+                modifiedRows: Array.from(modifiedMatches),
+                timestamp: new Date().toISOString(),
+                totalRows: document.querySelectorAll('.diff-row').length
+            }};
+            
+            // Save to localStorage
+            localStorage.setItem('transcriptMatches', JSON.stringify(matchData));
+            
+            // Download as JSON file
+            const blob = new Blob([JSON.stringify(matchData, null, 2)], {{type: 'application/json'}});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `transcript_matches_${{new Date().toISOString().split('T')[0]}}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert('✅ Matches saved successfully!');
+        }}
+        
+        function exportMatches() {{
+            const allRows = document.querySelectorAll('.diff-row');
+            const exportData = [];
+            
+            allRows.forEach((row, index) => {{
+                const rowId = row.getAttribute('data-row-id');
+                const matchType = row.getAttribute('data-match-type') || 'unmatched';
+                const pdfContent = row.querySelector('.diff-cell:first-child .sentence-content');
+                const htmlContent = row.querySelector('.diff-cell:last-child .sentence-content');
+                
+                exportData.push({{
+                    rowId: rowId,
+                    matchType: matchType,
+                    pdfText: pdfContent ? pdfContent.textContent : '',
+                    htmlText: htmlContent ? htmlContent.textContent : '',
+                    isModified: modifiedMatches.has(parseInt(rowId))
+                }});
+            }});
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], {{type: 'application/json'}});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `transcript_alignment_export_${{new Date().toISOString().split('T')[0]}}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert('📤 Alignment data exported successfully!');
+        }}
+        
+        // Load saved matches on page load
+        window.addEventListener('load', function() {{
+            const savedMatches = localStorage.getItem('transcriptMatches');
+            if (savedMatches) {{
+                try {{
+                    const data = JSON.parse(savedMatches);
+                    manualMatches = data.manualMatches || [];
+                    modifiedMatches = new Set(data.modifiedRows || []);
+                    updateMatchSummary();
+                }} catch (e) {{
+                    console.warn('Could not load saved matches:', e);
+                }}
+            }}
+        }});
+    </script>
 </head>
 <body>
     <div class="header">
@@ -1324,59 +1765,153 @@ class VisualComparisonGenerator:
         return html_template
     
     def _create_diff_rows(self, sentence_alignments: List[SentenceAlignment]) -> str:
-        """Create HTML diff table rows from sentence alignments."""
+        """Create HTML diff table rows with interactive matching capabilities."""
         rows = []
+        row_counter = 0
+        
+        # Get access to the sentence aligner's indexed data if available
+        sentence_aligner = self.sentence_aligner
+        pdf_indexed = getattr(sentence_aligner, '_last_pdf_indexed', [])
+        html_indexed = getattr(sentence_aligner, '_last_html_indexed', [])
+        matches = getattr(sentence_aligner, 'matches', [])
         
         for alignment in sentence_alignments:
-            if alignment.diff_type == DiffType.EQUAL:
-                # Matched sentences - show side by side
-                pdf_text = html.escape(alignment.pdf_sentences[0]) if alignment.pdf_sentences else ""
-                html_text = html.escape(alignment.html_sentences[0]) if alignment.html_sentences else ""
+            row_counter += 1
+            
+            # Determine row type and styling
+            if alignment.diff_type == DiffType.EQUAL or alignment.diff_type == DiffType.REPLACE:
+                # Matched sentences - show side by side with interactive controls
+                pdf_texts = [html.escape(sent) for sent in alignment.pdf_sentences]
+                html_texts = [html.escape(sent) for sent in alignment.html_sentences]
                 
                 similarity_class = self._get_similarity_class(alignment.similarity)
                 similarity_badge = f'<span class="similarity-badge {similarity_class}">{alignment.similarity:.0%}</span>'
                 
+                # Create interactive controls
+                match_controls = f'''
+                <div class="match-controls">
+                    <button class="btn-unmatch" onclick="unmatchRow({row_counter})">✂️ Unmatch</button>
+                    <button class="btn-edit-match" onclick="editMatch({row_counter})">✏️ Edit</button>
+                    <select class="match-type" onchange="updateMatchType({row_counter}, this.value)">
+                        <option value="1:1" {"selected" if len(pdf_texts) == 1 and len(html_texts) == 1 else ""}>1:1</option>
+                        <option value="2:1" {"selected" if len(pdf_texts) == 2 and len(html_texts) == 1 else ""}>2:1</option>
+                        <option value="1:2" {"selected" if len(pdf_texts) == 1 and len(html_texts) == 2 else ""}>1:2</option>
+                        <option value="3:1" {"selected" if len(pdf_texts) == 3 and len(html_texts) == 1 else ""}>3:1</option>
+                        <option value="1:3" {"selected" if len(pdf_texts) == 1 and len(html_texts) == 3 else ""}>1:3</option>
+                    </select>
+                </div>'''
+                
+                row_class = "matched-row" if alignment.diff_type == DiffType.EQUAL else "replaced-row"
+                
                 rows.append(f'''
-                <div class="diff-row matched-row">
-                    <div class="diff-cell">{pdf_text}</div>
-                    <div class="diff-cell">{html_text}{similarity_badge}</div>
+                <div class="diff-row {row_class}" data-row-id="{row_counter}" data-match-type="{len(pdf_texts)}:{len(html_texts)}">
+                    <div class="diff-cell interactive-cell">
+                        <div class="sentence-content">{'<br>'.join(pdf_texts)}</div>
+                        <div class="sentence-index">PDF: {self._get_sentence_indices(alignment.pdf_sentences, pdf_indexed)}</div>
+                    </div>
+                    <div class="diff-cell interactive-cell">
+                        <div class="sentence-content">{'<br>'.join(html_texts)}</div>
+                        <div class="sentence-index">HTML: {self._get_sentence_indices(alignment.html_sentences, html_indexed)}</div>
+                        {similarity_badge}
+                        {match_controls}
+                    </div>
                 </div>''')
             
             elif alignment.diff_type == DiffType.DELETE:
-                # PDF only content
-                for sentence in alignment.pdf_sentences:
+                # PDF only content with manual matching option
+                for i, sentence in enumerate(alignment.pdf_sentences):
                     escaped_sentence = html.escape(sentence)
+                    row_counter += 1 if i > 0 else 0
+                    
+                    match_controls = f'''
+                    <div class="unmatched-controls">
+                        <button class="btn-match" onclick="startMatching({row_counter}, 'pdf')">🔗 Match</button>
+                        <select class="match-target" style="display:none;" onchange="createMatch({row_counter}, 'pdf', this.value)">
+                            <option value="">Select HTML sentence...</option>
+                            {self._create_html_options(html_indexed)}
+                        </select>
+                    </div>'''
+                    
                     rows.append(f'''
-                    <div class="diff-row deleted-row">
-                        <div class="diff-cell">{escaped_sentence}</div>
-                        <div class="diff-cell">(missing in HTML)</div>
+                    <div class="diff-row deleted-row" data-row-id="{row_counter}" data-side="pdf">
+                        <div class="diff-cell interactive-cell">
+                            <div class="sentence-content">{escaped_sentence}</div>
+                            <div class="sentence-index">PDF: {self._get_sentence_index(sentence, pdf_indexed)}</div>
+                            {match_controls}
+                        </div>
+                        <div class="diff-cell placeholder">(not matched - missing in HTML)</div>
                     </div>''')
             
             elif alignment.diff_type == DiffType.INSERT:
-                # HTML only content
-                for sentence in alignment.html_sentences:
+                # HTML only content with manual matching option
+                for i, sentence in enumerate(alignment.html_sentences):
                     escaped_sentence = html.escape(sentence)
+                    row_counter += 1 if i > 0 else 0
+                    
+                    match_controls = f'''
+                    <div class="unmatched-controls">
+                        <button class="btn-match" onclick="startMatching({row_counter}, 'html')">🔗 Match</button>
+                        <select class="match-target" style="display:none;" onchange="createMatch({row_counter}, 'html', this.value)">
+                            <option value="">Select PDF sentence...</option>
+                            {self._create_pdf_options(pdf_indexed)}
+                        </select>
+                    </div>'''
+                    
                     rows.append(f'''
-                    <div class="diff-row inserted-row">
-                        <div class="diff-cell">(not in PDF)</div>
-                        <div class="diff-cell">{escaped_sentence}</div>
+                    <div class="diff-row inserted-row" data-row-id="{row_counter}" data-side="html">
+                        <div class="diff-cell placeholder">(not matched - missing in PDF)</div>
+                        <div class="diff-cell interactive-cell">
+                            <div class="sentence-content">{escaped_sentence}</div>
+                            <div class="sentence-index">HTML: {self._get_sentence_index(sentence, html_indexed)}</div>
+                            {match_controls}
+                        </div>
                     </div>''')
-            
-            elif alignment.diff_type == DiffType.REPLACE:
-                # Modified content - show both versions
-                pdf_text = html.escape(alignment.pdf_sentences[0]) if alignment.pdf_sentences else ""
-                html_text = html.escape(alignment.html_sentences[0]) if alignment.html_sentences else ""
-                
-                similarity_class = self._get_similarity_class(alignment.similarity)
-                similarity_badge = f'<span class="similarity-badge {similarity_class}">{alignment.similarity:.0%}</span>'
-                
-                rows.append(f'''
-                <div class="diff-row replaced-row">
-                    <div class="diff-cell">{pdf_text}</div>
-                    <div class="diff-cell">{html_text}{similarity_badge}</div>
-                </div>''')
         
         return '\n'.join(rows)
+    
+    def _get_sentence_indices(self, sentences: List[str], indexed_sentences: List) -> str:
+        """Get comma-separated indices for a list of sentences."""
+        indices = []
+        for sentence in sentences:
+            idx = self._get_sentence_index(sentence, indexed_sentences)
+            if idx != "?":
+                indices.append(idx)
+        return ", ".join(indices) if indices else "?"
+    
+    def _get_sentence_index(self, sentence: str, indexed_sentences: List) -> str:
+        """Get the original index of a sentence."""
+        try:
+            for indexed in indexed_sentences:
+                if hasattr(indexed, 'text') and indexed.text == sentence:
+                    return str(indexed.index)
+            # Fallback to finding by text content
+            for i, indexed in enumerate(indexed_sentences):
+                text = indexed.text if hasattr(indexed, 'text') else str(indexed)
+                if text == sentence:
+                    return str(i)
+        except:
+            pass
+        return "?"
+    
+    def _create_html_options(self, html_indexed: List) -> str:
+        """Create HTML options for manual matching."""
+        options = []
+        for indexed in html_indexed:
+            if hasattr(indexed, 'text') and hasattr(indexed, 'index') and hasattr(indexed, 'is_matched'):
+                if not indexed.is_matched:
+                    text_preview = indexed.text[:50] + "..." if len(indexed.text) > 50 else indexed.text
+                    options.append(f'<option value="{indexed.index}">[{indexed.index}] {html.escape(text_preview)}</option>')
+        return '\n'.join(options)
+    
+    def _create_pdf_options(self, pdf_indexed: List) -> str:
+        """Create PDF options for manual matching."""
+        options = []
+        for indexed in pdf_indexed:
+            if hasattr(indexed, 'text') and hasattr(indexed, 'index') and hasattr(indexed, 'is_matched'):
+                if not indexed.is_matched:
+                    text_preview = indexed.text[:50] + "..." if len(indexed.text) > 50 else indexed.text
+                    options.append(f'<option value="{indexed.index}">[{indexed.index}] {html.escape(text_preview)}</option>')
+        return '\n'.join(options)
     
     def _get_similarity_class(self, similarity: float) -> str:
         """Get CSS class for similarity score."""
