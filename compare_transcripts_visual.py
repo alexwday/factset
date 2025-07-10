@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from bs4 import BeautifulSoup
 import difflib
 from enum import Enum
+import time
 
 try:
     import pdfplumber
@@ -85,10 +86,16 @@ class AdvancedTranscriptExtractor:
             raise Exception("No PDF library available. Install pdfplumber or PyPDF2")
     
     def _extract_pdf_pdfplumber(self, pdf_path: str) -> Tuple[List[str], List[str]]:
-        """Extract using pdfplumber."""
+        """Extract using pdfplumber with progress tracking."""
         raw_lines = []
         with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
+            total_pages = len(pdf.pages)
+            print(f"    - Processing {total_pages} pages...")
+            
+            for page_num, page in enumerate(pdf.pages, 1):
+                if page_num % 5 == 0 or page_num == total_pages:
+                    print(f"      Page {page_num}/{total_pages}")
+                
                 page_text = page.extract_text()
                 if page_text:
                     raw_lines.extend(page_text.split('\n'))
@@ -96,11 +103,17 @@ class AdvancedTranscriptExtractor:
         return self._process_pdf_lines(raw_lines)
     
     def _extract_pdf_pypdf2(self, pdf_path: str) -> Tuple[List[str], List[str]]:
-        """Extract using PyPDF2."""
+        """Extract using PyPDF2 with progress tracking."""
         raw_lines = []
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
-            for page in pdf_reader.pages:
+            total_pages = len(pdf_reader.pages)
+            print(f"    - Processing {total_pages} pages...")
+            
+            for page_num, page in enumerate(pdf_reader.pages, 1):
+                if page_num % 5 == 0 or page_num == total_pages:
+                    print(f"      Page {page_num}/{total_pages}")
+                
                 page_text = page.extract_text()
                 if page_text:
                     raw_lines.extend(page_text.split('\n'))
@@ -202,16 +215,31 @@ class AdvancedTranscriptExtractor:
 class SlidingWindowMatcher:
     """Sliding window algorithm for matching word sequences."""
     
-    def __init__(self, window_size: int = 8, min_match_threshold: float = 0.7):
-        self.window_size = window_size
+    def __init__(self, window_size: int = 6, min_match_threshold: float = 0.7):
+        self.window_size = window_size  # Reduced from 8 for better performance
         self.min_match_threshold = min_match_threshold
     
     def find_matches(self, pdf_words: List[str], html_words: List[str]) -> List[WordMatch]:
-        """Find matching word segments using sliding window."""
+        """Find matching word segments using sliding window with progress tracking."""
         matches = []
         used_html_indices = set()
+        total_windows = len(pdf_words) - self.window_size + 1
         
-        for pdf_start in range(len(pdf_words) - self.window_size + 1):
+        print(f"    - Processing {total_windows:,} word windows...")
+        start_time = time.time()
+        last_progress_time = start_time
+        
+        for pdf_start in range(total_windows):
+            # Progress reporting every 10% or 2 seconds
+            current_time = time.time()
+            if (current_time - last_progress_time > 2.0) or (pdf_start % max(1, total_windows // 10) == 0):
+                progress = (pdf_start / total_windows) * 100
+                elapsed = current_time - start_time
+                if pdf_start > 0:
+                    eta = (elapsed / pdf_start) * (total_windows - pdf_start)
+                    print(f"      Progress: {progress:.1f}% ({pdf_start:,}/{total_windows:,}) - ETA: {eta:.1f}s")
+                last_progress_time = current_time
+            
             pdf_window = pdf_words[pdf_start:pdf_start + self.window_size]
             
             best_match = self._find_best_html_match(
@@ -232,29 +260,38 @@ class SlidingWindowMatcher:
                 for idx in range(best_match['start'], best_match['end']):
                     used_html_indices.add(idx)
         
+        elapsed = time.time() - start_time
+        print(f"    - Word matching completed in {elapsed:.2f}s, found {len(matches)} matches")
+        
         return self._merge_overlapping_matches(matches)
     
     def _find_best_html_match(self, pdf_window: List[str], html_words: List[str], 
                              used_indices: Set[int]) -> Optional[Dict]:
-        """Find the best matching HTML window for a PDF window."""
+        """Find the best matching HTML window for a PDF window (optimized)."""
         best_match = None
         best_confidence = 0
+        window_size = len(pdf_window)
         
-        for html_start in range(len(html_words) - len(pdf_window) + 1):
+        # Early termination if we find a perfect match
+        for html_start in range(len(html_words) - window_size + 1):
             # Skip if any index is already used
-            if any(idx in used_indices for idx in range(html_start, html_start + len(pdf_window))):
+            if any(idx in used_indices for idx in range(html_start, html_start + window_size)):
                 continue
             
-            html_window = html_words[html_start:html_start + len(pdf_window)]
+            html_window = html_words[html_start:html_start + window_size]
             confidence = self._calculate_similarity(pdf_window, html_window)
             
             if confidence > best_confidence:
                 best_confidence = confidence
                 best_match = {
                     'start': html_start,
-                    'end': html_start + len(pdf_window),
+                    'end': html_start + window_size,
                     'confidence': confidence
                 }
+                
+                # Early termination for near-perfect matches
+                if confidence >= 0.95:
+                    break
         
         return best_match
     
@@ -440,33 +477,58 @@ class VisualComparisonGenerator:
         self.sentence_aligner = SentenceAligner()
     
     def generate_comparison(self, pdf_path: str, html_path: str, output_path: str):
-        """Generate visual comparison HTML."""
-        print("Extracting PDF content...")
+        """Generate visual comparison HTML with progress tracking."""
+        total_start = time.time()
+        print("🚀 Starting comprehensive transcript comparison...")
+        
+        print("\n📄 Extracting PDF content...")
+        start_time = time.time()
         pdf_words, pdf_lines = self.extractor.extract_pdf_words(pdf_path)
+        print(f"  ✓ PDF extraction completed in {time.time() - start_time:.2f}s")
+        print(f"    - Extracted {len(pdf_words):,} words and {len(pdf_lines):,} lines")
         
-        print("Extracting HTML content...")
+        print("\n🌐 Extracting HTML content...")
+        start_time = time.time()
         html_words, html_lines = self.extractor.extract_html_words(html_path)
+        print(f"  ✓ HTML extraction completed in {time.time() - start_time:.2f}s")
+        print(f"    - Extracted {len(html_words):,} words and {len(html_lines):,} lines")
         
-        print("Extracting sentences...")
+        print("\n📝 Extracting sentences...")
+        start_time = time.time()
         pdf_sentences = self.sentence_aligner.extract_sentences(pdf_lines)
         html_sentences = self.sentence_aligner.extract_sentences(html_lines)
+        print(f"  ✓ Sentence extraction completed in {time.time() - start_time:.2f}s")
+        print(f"    - PDF: {len(pdf_sentences):,} sentences")
+        print(f"    - HTML: {len(html_sentences):,} sentences")
         
-        print("Aligning sentences...")
+        print("\n🔗 Aligning sentences...")
+        start_time = time.time()
         sentence_alignments = self.sentence_aligner.align_sentences(pdf_sentences, html_sentences)
+        print(f"  ✓ Sentence alignment completed in {time.time() - start_time:.2f}s")
+        print(f"    - Created {len(sentence_alignments):,} alignments")
         
-        print("Finding word matches...")
+        print("\n🔍 Finding word matches...")
+        start_time = time.time()
         matches = self.matcher.find_matches(pdf_words, html_words)
+        print(f"  ✓ Word matching completed in {time.time() - start_time:.2f}s")
         
-        print("Analyzing coverage...")
+        print("\n📊 Analyzing coverage...")
+        start_time = time.time()
         analysis = self._analyze_coverage(pdf_words, html_words, matches, sentence_alignments)
+        print(f"  ✓ Analysis completed in {time.time() - start_time:.2f}s")
         
-        print("Generating visual HTML...")
+        print("\n🎨 Generating HTML output...")
+        start_time = time.time()
         html_output = self._generate_html_output(
             pdf_words, html_words, matches, analysis, pdf_path, html_path, sentence_alignments
         )
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_output)
+        print(f"  ✓ HTML generation completed in {time.time() - start_time:.2f}s")
+        
+        total_time = time.time() - total_start
+        print(f"\n🎉 Total processing time: {total_time:.2f} seconds")
         
         return analysis
     
