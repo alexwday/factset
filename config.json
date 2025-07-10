@@ -4,62 +4,182 @@
     "RY-CA": {
       "name": "Royal Bank of Canada",
       "region": "CA",
-      "type": "Bank"
+      "type": "Canadian"
     },
     "TD-CA": {
       "name": "Toronto-Dominion Bank",
       "region": "CA",
-      "type": "Bank"
+      "type": "Canadian"
     },
     "BNS-CA": {
       "name": "Bank of Nova Scotia",
       "region": "CA",
-      "type": "Bank"
+      "type": "Canadian"
     },
     "BMO-CA": {
       "name": "Bank of Montreal",
       "region": "CA",
-      "type": "Bank"
+      "type": "Canadian"
     },
     "CM-CA": {
       "name": "Canadian Imperial Bank of Commerce",
       "region": "CA",
-      "type": "Bank"
+      "type": "Canadian"
     },
     "NA-CA": {
       "name": "National Bank of Canada",
       "region": "CA",
-      "type": "Bank"
+      "type": "Canadian"
+    },
+    "LB-CA": {
+      "name": "Laurentian Bank of Canada",
+      "region": "CA",
+      "type": "Canadian"
+    },
+    "CWB-CA": {
+      "name": "Canadian Western Bank",
+      "region": "CA",
+      "type": "Canadian"
     },
     "JPM-US": {
       "name": "JPMorgan Chase & Co.",
       "region": "US",
-      "type": "Bank"
+      "type": "US"
     },
     "BAC-US": {
       "name": "Bank of America Corporation",
       "region": "US",
-      "type": "Bank"
+      "type": "US"
     },
     "WFC-US": {
       "name": "Wells Fargo & Company",
       "region": "US",
-      "type": "Bank"
+      "type": "US"
     },
     "C-US": {
       "name": "Citigroup Inc.",
       "region": "US",
-      "type": "Bank"
+      "type": "US"
     },
     "GS-US": {
       "name": "Goldman Sachs Group Inc.",
       "region": "US",
-      "type": "Bank"
+      "type": "US"
     },
     "MS-US": {
       "name": "Morgan Stanley",
       "region": "US",
-      "type": "Bank"
+      "type": "US"
+    },
+    "USB-US": {
+      "name": "U.S. Bancorp",
+      "region": "US",
+      "type": "US"
+    },
+    "PNC-US": {
+      "name": "PNC Financial Services Group",
+      "region": "US",
+      "type": "US"
+    },
+    "TFC-US": {
+      "name": "Truist Financial Corporation",
+      "region": "US",
+      "type": "US"
+    },
+    "COF-US": {
+      "name": "Capital One Financial Corporation",
+      "region": "US",
+      "type": "US"
+    },
+    "SCHW-US": {
+      "name": "Charles Schwab Corporation",
+      "region": "US",
+      "type": "US"
+    },
+    "BCS-GB": {
+      "name": "Barclays PLC",
+      "region": "GB",
+      "type": "European"
+    },
+    "LLOY-GB": {
+      "name": "Lloyds Banking Group plc",
+      "region": "GB",
+      "type": "European"
+    },
+    "RBS-GB": {
+      "name": "NatWest Group plc",
+      "region": "GB",
+      "type": "European"
+    },
+    "HSBA-GB": {
+      "name": "HSBC Holdings plc",
+      "region": "GB",
+      "type": "European"
+    },
+    "STAN-GB": {
+      "name": "Standard Chartered PLC",
+      "region": "GB",
+      "type": "European"
+    },
+    "DBK-DE": {
+      "name": "Deutsche Bank AG",
+      "region": "DE",
+      "type": "European"
+    },
+    "CBK-DE": {
+      "name": "Commerzbank AG",
+      "region": "DE",
+      "type": "European"
+    },
+    "BNP-FR": {
+      "name": "BNP Paribas",
+      "region": "FR",
+      "type": "European"
+    },
+    "ACA-FR": {
+      "name": "Credit Agricole S.A.",
+      "region": "FR",
+      "type": "European"
+    },
+    "GLE-FR": {
+      "name": "Societe Generale",
+      "region": "FR",
+      "type": "European"
+    },
+    "SAN-ES": {
+      "name": "Banco Santander S.A.",
+      "region": "ES",
+      "type": "European"
+    },
+    "BBVA-ES": {
+      "name": "Banco Bilbao Vizcaya Argentaria S.A.",
+      "region": "ES",
+      "type": "European"
+    },
+    "ISP-IT": {
+      "name": "Intesa Sanpaolo",
+      "region": "IT",
+      "type": "European"
+    },
+    "UCG-IT": {
+      "name": "UniCredit S.p.A.",
+      "region": "IT",
+      "type": "European"
+    },
+    "ING-NL": {
+      "name": "ING Groep N.V.",
+      "region": "NL",
+      "type": "European"
+    },
+    "UBS-CH": {
+      "name": "UBS Group AG",
+      "region": "CH",
+      "type": "European"
+    },
+    "CSGN-CH": {
+      "name": "Credit Suisse Group AG",
+      "region": "CH",
+      "type": "European"
     },
     "MFC-CA": {
       "name": "Manulife Financial Corporation",
@@ -71,8 +191,43 @@
       "region": "CA",
       "type": "Insurance"
     },
+    "GWO-CA": {
+      "name": "Great-West Lifeco Inc.",
+      "region": "CA",
+      "type": "Insurance"
+    },
+    "IFC-CA": {
+      "name": "Intact Financial Corporation",
+      "region": "CA",
+      "type": "Insurance"
+    },
+    "FFH-CA": {
+      "name": "Fairfax Financial Holdings Limited",
+      "region": "CA",
+      "type": "Insurance"
+    },
     "UNH-US": {
       "name": "UnitedHealth Group Incorporated",
+      "region": "US",
+      "type": "Insurance"
+    },
+    "BRK.A-US": {
+      "name": "Berkshire Hathaway Inc.",
+      "region": "US",
+      "type": "Insurance"
+    },
+    "AIG-US": {
+      "name": "American International Group Inc.",
+      "region": "US",
+      "type": "Insurance"
+    },
+    "TRV-US": {
+      "name": "The Travelers Companies Inc.",
+      "region": "US",
+      "type": "Insurance"
+    },
+    "PGR-US": {
+      "name": "Progressive Corporation",
       "region": "US",
       "type": "Insurance"
     }

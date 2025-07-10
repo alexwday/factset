@@ -206,9 +206,9 @@ def sanitize_for_filename(text: Any) -> str:
     clean_text = re.sub(r'[-\s]+', '_', clean_text)
     return clean_text.strip('_')
 
-def create_directory_structure(nas_conn: SMBConnection) -> None:
-    """Create the directory structure for the transcript repository on NAS."""
-    logger.info("Creating directory structure on NAS...")
+def create_base_directory_structure(nas_conn: SMBConnection) -> None:
+    """Create the base directory structure for the transcript repository on NAS."""
+    logger.info("Creating base directory structure on NAS...")
     
     inputs_path = nas_path_join(NAS_BASE_PATH, "Inputs")
     outputs_path = nas_path_join(NAS_BASE_PATH, "Outputs")
@@ -228,13 +228,24 @@ def create_directory_structure(nas_conn: SMBConnection) -> None:
     nas_create_directory(nas_conn, logs_path)
     nas_create_directory(nas_conn, listing_path)
     
-    for transcript_type in config['api_settings']['transcript_types']:
-        type_path = nas_path_join(data_path, transcript_type.lower())
+    # Create type-based folders: Canadian, US, European, Insurance
+    type_folders = ["Canadian", "US", "European", "Insurance"]
+    for type_folder in type_folders:
+        type_path = nas_path_join(data_path, type_folder)
         nas_create_directory(nas_conn, type_path)
-        
-        for ticker in config['monitored_institutions'].keys():
-            institution_path = nas_path_join(type_path, ticker)
-            nas_create_directory(nas_conn, institution_path)
+
+def create_ticker_directory_structure(nas_conn: SMBConnection, ticker: str, institution_type: str) -> None:
+    """Create directory structure for a specific ticker when transcripts are found."""
+    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data")
+    ticker_path = nas_path_join(data_path, institution_type, ticker)
+    
+    # Create ticker folder
+    nas_create_directory(nas_conn, ticker_path)
+    
+    # Create transcript type subfolders
+    for transcript_type in config['api_settings']['transcript_types']:
+        transcript_type_path = nas_path_join(ticker_path, transcript_type.lower())
+        nas_create_directory(nas_conn, transcript_type_path)
 
 def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str] = None) -> str:
     """Create standardized filename from transcript data."""
@@ -268,9 +279,9 @@ def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str
         logger.error(f"Error creating filename: {e}")
         return f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
 
-def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: str) -> Set[str]:
+def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: str, institution_type: str) -> Set[str]:
     """Get list of existing transcript files for a specific ticker and type from NAS."""
-    institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", transcript_type.lower(), ticker)
+    institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", institution_type, ticker, transcript_type.lower())
     return set(nas_list_files(nas_conn, institution_path))
 
 def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str, 
@@ -325,9 +336,12 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
     """Process a single bank: query API, check NAS files, download new transcripts."""
     logger.info(f"Processing: {institution_info['name']} ({ticker})")
     
+    institution_type = institution_info['type']
     bank_downloads = {
         'total': 0,
-        'by_type': {transcript_type: 0 for transcript_type in config['api_settings']['transcript_types']}
+        'by_type': {transcript_type: 0 for transcript_type in config['api_settings']['transcript_types']},
+        'institution_type': institution_type,
+        'found_transcripts': False
     }
     
     try:
@@ -347,7 +361,7 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
         response = api_instance.get_transcripts_ids(**api_params)
         
         if not response or not hasattr(response, 'data') or not response.data:
-            logger.warning(f"No transcripts found for {ticker}")
+            logger.warning(f"No transcripts found for {ticker} - ticker may not exist or have no coverage")
             return bank_downloads
         
         all_transcripts = [transcript.to_dict() for transcript in response.data]
@@ -371,7 +385,12 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
         logger.info(f"Found {len(earnings_transcripts)} earnings transcripts for {ticker}")
         
         if not earnings_transcripts:
+            logger.info(f"No earnings transcripts found for {ticker}")
             return bank_downloads
+        
+        # Create ticker directory structure since we found transcripts
+        create_ticker_directory_structure(nas_conn, ticker, institution_type)
+        bank_downloads['found_transcripts'] = True
         
         total_downloaded = 0
         
@@ -383,7 +402,7 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
             
             logger.info(f"Processing {len(type_transcripts)} {transcript_type} transcripts")
             
-            existing_files = get_existing_files(nas_conn, ticker, transcript_type)
+            existing_files = get_existing_files(nas_conn, ticker, transcript_type, institution_type)
             
             new_transcripts = []
             for transcript in type_transcripts:
@@ -402,7 +421,7 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
                         continue
                     
                     nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", 
-                                                transcript_type.lower(), ticker, filename)
+                                                institution_type, ticker, transcript_type.lower(), filename)
                     
                     if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], 
                                                     nas_file_path, filename, configuration):
@@ -424,38 +443,132 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
         return bank_downloads
 
 def generate_final_inventory(nas_conn: SMBConnection) -> None:
-    """Generate final inventory of all downloaded files from NAS."""
-    logger.info("Generating final inventory from NAS")
+    """Generate comprehensive inventory index of all downloaded files from NAS."""
+    logger.info("Generating comprehensive inventory index from NAS")
     
-    inventory = {}
+    file_index = []
+    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data")
     
-    for transcript_type in config['api_settings']['transcript_types']:
-        inventory[transcript_type] = {}
+    # Iterate through each institution type folder
+    type_folders = ["Canadian", "US", "European", "Insurance"]
+    
+    for institution_type in type_folders:
+        type_path = nas_path_join(data_path, institution_type)
         
-        for ticker in config['monitored_institutions'].keys():
-            institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", transcript_type.lower(), ticker)
-            files = nas_list_files(nas_conn, institution_path)
-            inventory[transcript_type][ticker] = len(files)
+        try:
+            # Get all ticker folders in this type
+            type_items = nas_conn.listPath(NAS_SHARE_NAME, type_path)
+            ticker_folders = [item.filename for item in type_items 
+                            if item.isDirectory and not item.filename.startswith('.')]
+            
+            for ticker in ticker_folders:
+                ticker_path = nas_path_join(type_path, ticker)
+                institution_info = config['monitored_institutions'].get(ticker, {
+                    'name': f'Unknown ({ticker})', 
+                    'region': 'Unknown', 
+                    'type': institution_type
+                })
+                
+                # Get transcript type folders
+                for transcript_type in config['api_settings']['transcript_types']:
+                    transcript_type_path = nas_path_join(ticker_path, transcript_type.lower())
+                    
+                    try:
+                        files = nas_list_files(nas_conn, transcript_type_path)
+                        
+                        for filename in files:
+                            try:
+                                # Get file attributes for metadata
+                                file_path = nas_path_join(transcript_type_path, filename)
+                                file_attrs = nas_conn.getAttributes(NAS_SHARE_NAME, file_path)
+                                
+                                # Parse filename for additional info
+                                file_parts = filename.replace('.xml', '').split('_')
+                                event_date = file_parts[1] if len(file_parts) > 1 else 'unknown'
+                                
+                                file_record = {
+                                    'filepath': f"Outputs/data/{institution_type}/{ticker}/{transcript_type.lower()}/{filename}",
+                                    'filename': filename,
+                                    'institution_type': institution_type,
+                                    'ticker': ticker,
+                                    'institution_name': institution_info['name'],
+                                    'region': institution_info['region'],
+                                    'transcript_type': transcript_type,
+                                    'event_date': event_date,
+                                    'file_size': file_attrs.file_size,
+                                    'date_modified': file_attrs.last_write_time.strftime('%Y-%m-%d %H:%M:%S'),
+                                    'date_created': file_attrs.create_time.strftime('%Y-%m-%d %H:%M:%S')
+                                }
+                                
+                                file_index.append(file_record)
+                                
+                            except Exception as e:
+                                logger.warning(f"Error processing file {filename}: {e}")
+                                
+                    except Exception as e:
+                        # Transcript type folder might not exist if no files of that type
+                        continue
+                        
+        except Exception as e:
+            logger.warning(f"Error processing institution type {institution_type}: {e}")
+            continue
     
-    for transcript_type in config['api_settings']['transcript_types']:
-        total_type = sum(count for count in inventory[transcript_type].values())
-        logger.info(f"Total {transcript_type}: {total_type} files")
+    # Generate summary statistics
+    total_files = len(file_index)
+    by_type = {}
+    by_institution_type = {}
+    by_ticker = {}
     
-    # Save inventory files
-    for transcript_type in config['api_settings']['transcript_types']:
-        inventory_json = json.dumps(inventory[transcript_type], indent=2)
-        inventory_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", 
-                                          f"{transcript_type.lower()}_listing.json")
+    for record in file_index:
+        # Count by transcript type
+        transcript_type = record['transcript_type']
+        if transcript_type not in by_type:
+            by_type[transcript_type] = 0
+        by_type[transcript_type] += 1
         
-        inventory_file_obj = io.BytesIO(inventory_json.encode('utf-8'))
-        nas_upload_file(nas_conn, inventory_file_obj, inventory_file_path)
+        # Count by institution type
+        inst_type = record['institution_type']
+        if inst_type not in by_institution_type:
+            by_institution_type[inst_type] = 0
+        by_institution_type[inst_type] += 1
+        
+        # Count by ticker
+        ticker = record['ticker']
+        if ticker not in by_ticker:
+            by_ticker[ticker] = 0
+        by_ticker[ticker] += 1
     
-    complete_inventory_json = json.dumps(inventory, indent=2)
-    complete_inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", 
-                                          f"complete_inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
+    # Create comprehensive index
+    inventory = {
+        'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'total_files': total_files,
+        'summary': {
+            'by_transcript_type': by_type,
+            'by_institution_type': by_institution_type,
+            'by_ticker': by_ticker
+        },
+        'files': file_index
+    }
     
-    complete_inventory_obj = io.BytesIO(complete_inventory_json.encode('utf-8'))
-    nas_upload_file(nas_conn, complete_inventory_obj, complete_inventory_path)
+    # Log summary
+    logger.info(f"Generated inventory with {total_files} total files")
+    for transcript_type, count in by_type.items():
+        logger.info(f"  {transcript_type}: {count} files")
+    for inst_type, count in by_institution_type.items():
+        logger.info(f"  {inst_type}: {count} files")
+    
+    # Save comprehensive inventory
+    inventory_json = json.dumps(inventory, indent=2)
+    inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", 
+                                 f"transcript_inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
+    
+    inventory_file_obj = io.BytesIO(inventory_json.encode('utf-8'))
+    nas_upload_file(nas_conn, inventory_file_obj, inventory_path)
+    
+    # Also save as current inventory (overwrites previous)
+    current_inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", "current_inventory.json")
+    current_inventory_obj = io.BytesIO(inventory_json.encode('utf-8'))
+    nas_upload_file(nas_conn, current_inventory_obj, current_inventory_path)
 
 def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     """Download SSL certificate from NAS and set up for use."""
@@ -528,7 +641,7 @@ def main() -> None:
         return
     
     try:
-        create_directory_structure(nas_conn)
+        create_base_directory_structure(nas_conn)
         
         start_time = datetime.now()
         total_institutions = len(config['monitored_institutions'])
@@ -536,6 +649,9 @@ def main() -> None:
         
         logger.info(f"Starting bulk sync for {total_institutions} institutions")
         logger.info(f"Date range: {config['stage_0']['sync_start_date']} to {datetime.now().date()}")
+        
+        institutions_with_transcripts = []
+        institutions_without_transcripts = []
         
         with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
             api_instance = transcripts_api.TranscriptsApi(api_client)
@@ -545,6 +661,20 @@ def main() -> None:
                 
                 bank_downloads = process_bank(ticker, institution_info, api_instance, nas_conn, configuration)
                 total_downloaded += bank_downloads['total']
+                
+                if bank_downloads['found_transcripts']:
+                    institutions_with_transcripts.append({
+                        'ticker': ticker,
+                        'name': institution_info['name'],
+                        'type': institution_info['type'],
+                        'downloaded': bank_downloads['total']
+                    })
+                else:
+                    institutions_without_transcripts.append({
+                        'ticker': ticker,
+                        'name': institution_info['name'],
+                        'type': institution_info['type']
+                    })
                 
                 if i < total_institutions:
                     time.sleep(config['api_settings']['request_delay'])
@@ -557,6 +687,16 @@ def main() -> None:
         logger.info("STAGE 0 BULK SYNC COMPLETE")
         logger.info(f"Total new transcripts downloaded: {total_downloaded}")
         logger.info(f"Execution time: {execution_time}")
+        
+        # Log summary of institutions processed
+        logger.info(f"Institutions with transcripts found: {len(institutions_with_transcripts)}")
+        for inst in institutions_with_transcripts:
+            logger.info(f"  {inst['ticker']} ({inst['type']}): {inst['downloaded']} transcripts downloaded")
+        
+        if institutions_without_transcripts:
+            logger.warning(f"Institutions with NO transcripts found: {len(institutions_without_transcripts)}")
+            for inst in institutions_without_transcripts:
+                logger.warning(f"  {inst['ticker']} - {inst['name']} ({inst['type']}): No earnings transcripts or ticker not found")
         
         # Upload log file to NAS
         log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "logs", 
