@@ -381,91 +381,330 @@ class SentenceAligner:
         return False
     
     def align_sentences(self, pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
-        """Align sentences using sequence matching."""
-        # Normalize sentences for comparison
-        pdf_normalized = [self._normalize_sentence(s) for s in pdf_sentences]
-        html_normalized = [self._normalize_sentence(s) for s in html_sentences]
+        """Align sentences using fuzzy matching for robust comparison."""
+        print("    - Using fuzzy sentence matching...")
         
-        # Use difflib to find sequence matches
-        matcher = difflib.SequenceMatcher(None, pdf_normalized, html_normalized)
+        # First pass: direct fuzzy matching
+        alignments = self._fuzzy_align_sentences(pdf_sentences, html_sentences)
+        
+        # Second pass: post-processing for multi-sentence matches
+        print("    - Post-processing for multi-sentence matches...")
+        alignments = self._post_process_alignments(alignments, pdf_sentences, html_sentences)
+        
+        print(f"    - Created {len(alignments)} final alignments")
+        return alignments
+    
+    def _fuzzy_align_sentences(self, pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
+        """Perform fuzzy sentence alignment with substring and similarity matching."""
         alignments = []
+        used_pdf_indices = set()
+        used_html_indices = set()
         
-        for tag, pdf_start, pdf_end, html_start, html_end in matcher.get_opcodes():
-            pdf_group = pdf_sentences[pdf_start:pdf_end]
-            html_group = html_sentences[html_start:html_end]
+        # Phase 1: Find exact and near-exact matches
+        for pdf_idx, pdf_sent in enumerate(pdf_sentences):
+            if pdf_idx in used_pdf_indices:
+                continue
+                
+            best_match = None
+            best_similarity = 0.0
+            best_html_idx = -1
             
-            if tag == 'equal':
-                # Sentences match
-                for pdf_sent, html_sent in zip(pdf_group, html_group):
-                    similarity = self._calculate_sentence_similarity(pdf_sent, html_sent)
-                    alignments.append(SentenceAlignment(
-                        diff_type=DiffType.EQUAL,
-                        pdf_sentences=[pdf_sent],
-                        html_sentences=[html_sent],
-                        similarity=similarity
-                    ))
+            for html_idx, html_sent in enumerate(html_sentences):
+                if html_idx in used_html_indices:
+                    continue
+                
+                similarity = self._calculate_robust_similarity(pdf_sent, html_sent)
+                
+                if similarity > best_similarity and similarity >= 0.6:  # Threshold for matching
+                    best_similarity = similarity
+                    best_match = html_sent
+                    best_html_idx = html_idx
             
-            elif tag == 'delete':
-                # Sentences only in PDF
+            if best_match:
+                # Determine match type based on similarity
+                if best_similarity >= 0.9:
+                    match_type = DiffType.EQUAL
+                else:
+                    match_type = DiffType.REPLACE
+                
+                alignments.append(SentenceAlignment(
+                    diff_type=match_type,
+                    pdf_sentences=[pdf_sent],
+                    html_sentences=[best_match],
+                    similarity=best_similarity
+                ))
+                
+                used_pdf_indices.add(pdf_idx)
+                used_html_indices.add(best_html_idx)
+        
+        # Phase 2: Handle unmatched sentences
+        for pdf_idx, pdf_sent in enumerate(pdf_sentences):
+            if pdf_idx not in used_pdf_indices:
                 alignments.append(SentenceAlignment(
                     diff_type=DiffType.DELETE,
-                    pdf_sentences=pdf_group,
+                    pdf_sentences=[pdf_sent],
                     html_sentences=[],
                     similarity=0.0
                 ))
-            
-            elif tag == 'insert':
-                # Sentences only in HTML
+        
+        for html_idx, html_sent in enumerate(html_sentences):
+            if html_idx not in used_html_indices:
                 alignments.append(SentenceAlignment(
                     diff_type=DiffType.INSERT,
                     pdf_sentences=[],
-                    html_sentences=html_group,
+                    html_sentences=[html_sent],
                     similarity=0.0
                 ))
-            
-            elif tag == 'replace':
-                # Different sentences - try to pair them
-                if len(pdf_group) == 1 and len(html_group) == 1:
-                    similarity = self._calculate_sentence_similarity(pdf_group[0], html_group[0])
-                    alignments.append(SentenceAlignment(
-                        diff_type=DiffType.REPLACE,
-                        pdf_sentences=pdf_group,
-                        html_sentences=html_group,
-                        similarity=similarity
-                    ))
-                else:
-                    # Multiple sentences - treat as separate delete and insert
-                    if pdf_group:
-                        alignments.append(SentenceAlignment(
-                            diff_type=DiffType.DELETE,
-                            pdf_sentences=pdf_group,
-                            html_sentences=[],
-                            similarity=0.0
-                        ))
-                    if html_group:
-                        alignments.append(SentenceAlignment(
-                            diff_type=DiffType.INSERT,
-                            pdf_sentences=[],
-                            html_sentences=html_group,
-                            similarity=0.0
-                        ))
         
-        return alignments
+        # Sort alignments to maintain original order
+        return self._sort_alignments_by_position(alignments, pdf_sentences, html_sentences)
+    
+    def _calculate_robust_similarity(self, pdf_sent: str, html_sent: str) -> float:
+        """Calculate similarity with fuzzy matching for common variations."""
+        # Normalize both sentences
+        pdf_clean = self._normalize_sentence_robust(pdf_sent)
+        html_clean = self._normalize_sentence_robust(html_sent)
+        
+        # Check for substring matches (HTML sentence contained in PDF)
+        if html_clean in pdf_clean:
+            # Calculate how much of the PDF sentence is the HTML sentence
+            html_len = len(html_clean.split())
+            pdf_len = len(pdf_clean.split())
+            if pdf_len > 0:
+                return min(0.95, html_len / pdf_len + 0.3)  # Boost for substring matches
+        
+        # Check reverse (PDF sentence contained in HTML)
+        if pdf_clean in html_clean:
+            pdf_len = len(pdf_clean.split())
+            html_len = len(html_clean.split())
+            if html_len > 0:
+                return min(0.95, pdf_len / html_len + 0.3)
+        
+        # Word-level similarity with fuzzy matching
+        pdf_words = set(pdf_clean.split())
+        html_words = set(html_clean.split())
+        
+        if not pdf_words or not html_words:
+            return 0.0
+        
+        # Exact word matches
+        exact_matches = pdf_words.intersection(html_words)
+        
+        # Fuzzy word matches for common variations
+        fuzzy_matches = 0
+        remaining_pdf = pdf_words - exact_matches
+        remaining_html = html_words - exact_matches
+        
+        for pdf_word in remaining_pdf:
+            for html_word in remaining_html:
+                if self._words_are_similar(pdf_word, html_word):
+                    fuzzy_matches += 1
+                    break
+        
+        total_matches = len(exact_matches) + fuzzy_matches
+        total_words = max(len(pdf_words), len(html_words))
+        
+        return total_matches / total_words if total_words > 0 else 0.0
+    
+    def _normalize_sentence_robust(self, sentence: str) -> str:
+        """Robust normalization handling common variations."""
+        normalized = sentence.lower().strip()
+        
+        # Remove common PDF prefixes (date/time, speaker info)
+        # Pattern: date/time followed by dash or colon, then speaker info
+        normalized = re.sub(r'^.*?\d{1,2}:\d{2}.*?[-–]\s*', '', normalized)
+        normalized = re.sub(r'^.*?\b(am|pm)\b.*?[-–]\s*', '', normalized)
+        normalized = re.sub(r'^.*?\b(morning|afternoon|evening)\b.*?[-–]\s*', '', normalized)
+        
+        # Remove speaker prefixes like "Thanks Asim and"
+        normalized = re.sub(r'^(thanks?|thank you|good morning|good afternoon|hello)\s+\w+\s+(and\s+)?', '', normalized)
+        
+        # Normalize currency symbols and abbreviations
+        currency_mappings = {
+            'cad': 'dollar',
+            'usd': 'dollar', 
+            'us': 'dollar',
+            '$': 'dollar',
+            'cdn': 'dollar',
+            'c$': 'dollar',
+            'us$': 'dollar'
+        }
+        
+        for old, new in currency_mappings.items():
+            normalized = re.sub(r'\b' + re.escape(old) + r'\b', new, normalized)
+        
+        # Normalize numbers with currency
+        normalized = re.sub(r'\bdollar\s*(\d+(?:\.\d+)?)\s*billion\b', r'dollar \1 billion', normalized)
+        normalized = re.sub(r'\bdollar\s*(\d+(?:\.\d+)?)\s*million\b', r'dollar \1 million', normalized)
+        
+        # Remove extra punctuation and whitespace
+        normalized = re.sub(r'[^\w\s]', ' ', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized)
+        
+        return normalized.strip()
+    
+    def _words_are_similar(self, word1: str, word2: str) -> bool:
+        """Check if two words are similar enough to be considered a match."""
+        # Handle common variations
+        variations = {
+            ('reporting', 'reported'),
+            ('earnings', 'earning'),
+            ('billions', 'billion'),
+            ('millions', 'million'),
+            ('dollars', 'dollar'),
+            ('cad', 'usd', '$', 'dollar', 'cdn'),
+            ('quarterly', 'quarter'),
+            ('annual', 'yearly'),
+        }
+        
+        # Check if words are in the same variation group
+        for variation_group in variations:
+            if word1 in variation_group and word2 in variation_group:
+                return True
+        
+        # Check edit distance for similar words
+        if abs(len(word1) - len(word2)) <= 2:
+            similarity = difflib.SequenceMatcher(None, word1, word2).ratio()
+            return similarity >= 0.8
+        
+        return False
+    
+    def _sort_alignments_by_position(self, alignments: List[SentenceAlignment], 
+                                   pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
+        """Sort alignments to maintain reasonable order."""
+        # Create position mapping
+        pdf_positions = {sent: idx for idx, sent in enumerate(pdf_sentences)}
+        html_positions = {sent: idx for idx, sent in enumerate(html_sentences)}
+        
+        def get_sort_key(alignment):
+            pdf_pos = min([pdf_positions.get(sent, 999999) for sent in alignment.pdf_sentences] + [999999])
+            html_pos = min([html_positions.get(sent, 999999) for sent in alignment.html_sentences] + [999999])
+            return min(pdf_pos, html_pos)
+        
+        return sorted(alignments, key=get_sort_key)
+    
+    def _post_process_alignments(self, alignments: List[SentenceAlignment], 
+                                pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
+        """Post-process alignments to handle multi-sentence matches."""
+        # Identify unmatched sentences
+        unmatched_pdf = []
+        unmatched_html = []
+        matched_alignments = []
+        
+        for align in alignments:
+            if align.diff_type == DiffType.DELETE:
+                unmatched_pdf.extend(align.pdf_sentences)
+            elif align.diff_type == DiffType.INSERT:
+                unmatched_html.extend(align.html_sentences)
+            else:
+                matched_alignments.append(align)
+        
+        # Try to match consecutive unmatched sentences
+        new_matches = []
+        
+        # Phase 1: Try combining consecutive PDF sentences to match HTML
+        if unmatched_pdf and unmatched_html:
+            new_matches.extend(self._match_combined_sentences(unmatched_pdf, unmatched_html, "pdf_to_html"))
+        
+        # Phase 2: Try combining consecutive HTML sentences to match PDF
+        if unmatched_pdf and unmatched_html:
+            new_matches.extend(self._match_combined_sentences(unmatched_pdf, unmatched_html, "html_to_pdf"))
+        
+        # Remove newly matched sentences from unmatched lists
+        for match in new_matches:
+            for sent in match.pdf_sentences:
+                if sent in unmatched_pdf:
+                    unmatched_pdf.remove(sent)
+            for sent in match.html_sentences:
+                if sent in unmatched_html:
+                    unmatched_html.remove(sent)
+        
+        # Rebuild final alignments
+        final_alignments = matched_alignments + new_matches
+        
+        # Add remaining unmatched sentences
+        if unmatched_pdf:
+            final_alignments.append(SentenceAlignment(
+                diff_type=DiffType.DELETE,
+                pdf_sentences=unmatched_pdf,
+                html_sentences=[],
+                similarity=0.0
+            ))
+        
+        if unmatched_html:
+            final_alignments.append(SentenceAlignment(
+                diff_type=DiffType.INSERT,
+                pdf_sentences=[],
+                html_sentences=unmatched_html,
+                similarity=0.0
+            ))
+        
+        # Re-sort by position
+        return self._sort_alignments_by_position(final_alignments, pdf_sentences, html_sentences)
+    
+    def _match_combined_sentences(self, unmatched_pdf: List[str], unmatched_html: List[str], 
+                                 direction: str) -> List[SentenceAlignment]:
+        """Try to match by combining consecutive sentences."""
+        new_matches = []
+        
+        if direction == "pdf_to_html":
+            # Try combining 2-3 consecutive PDF sentences to match single HTML sentences
+            for html_sent in unmatched_html[:]:  # Copy to iterate safely
+                # Try combining 2 consecutive PDF sentences
+                for i in range(len(unmatched_pdf) - 1):
+                    combined_pdf = unmatched_pdf[i] + " " + unmatched_pdf[i + 1]
+                    similarity = self._calculate_robust_similarity(combined_pdf, html_sent)
+                    
+                    if similarity >= 0.7:  # Lower threshold for combined matches
+                        new_matches.append(SentenceAlignment(
+                            diff_type=DiffType.REPLACE if similarity < 0.9 else DiffType.EQUAL,
+                            pdf_sentences=[unmatched_pdf[i], unmatched_pdf[i + 1]],
+                            html_sentences=[html_sent],
+                            similarity=similarity
+                        ))
+                        break
+                
+                # Try combining 3 consecutive PDF sentences if no 2-match found
+                if html_sent in unmatched_html:  # Still unmatched
+                    for i in range(len(unmatched_pdf) - 2):
+                        combined_pdf = " ".join([unmatched_pdf[i], unmatched_pdf[i + 1], unmatched_pdf[i + 2]])
+                        similarity = self._calculate_robust_similarity(combined_pdf, html_sent)
+                        
+                        if similarity >= 0.7:
+                            new_matches.append(SentenceAlignment(
+                                diff_type=DiffType.REPLACE if similarity < 0.9 else DiffType.EQUAL,
+                                pdf_sentences=[unmatched_pdf[i], unmatched_pdf[i + 1], unmatched_pdf[i + 2]],
+                                html_sentences=[html_sent],
+                                similarity=similarity
+                            ))
+                            break
+        
+        else:  # html_to_pdf
+            # Try combining 2-3 consecutive HTML sentences to match single PDF sentences
+            for pdf_sent in unmatched_pdf[:]:  # Copy to iterate safely
+                # Try combining 2 consecutive HTML sentences
+                for i in range(len(unmatched_html) - 1):
+                    combined_html = unmatched_html[i] + " " + unmatched_html[i + 1]
+                    similarity = self._calculate_robust_similarity(pdf_sent, combined_html)
+                    
+                    if similarity >= 0.7:
+                        new_matches.append(SentenceAlignment(
+                            diff_type=DiffType.REPLACE if similarity < 0.9 else DiffType.EQUAL,
+                            pdf_sentences=[pdf_sent],
+                            html_sentences=[unmatched_html[i], unmatched_html[i + 1]],
+                            similarity=similarity
+                        ))
+                        break
+        
+        return new_matches
     
     def _normalize_sentence(self, sentence: str) -> str:
-        """Normalize sentence for comparison."""
-        # Convert to lowercase, remove extra whitespace
-        normalized = sentence.lower().strip()
-        # Remove punctuation and normalize whitespace
-        normalized = re.sub(r'[^\w\s]', '', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized)
-        return normalized
+        """Legacy normalize sentence method (kept for compatibility)."""
+        return self._normalize_sentence_robust(sentence)
     
     def _calculate_sentence_similarity(self, sent1: str, sent2: str) -> float:
-        """Calculate similarity between two sentences."""
-        norm1 = self._normalize_sentence(sent1)
-        norm2 = self._normalize_sentence(sent2)
-        return difflib.SequenceMatcher(None, norm1, norm2).ratio()
+        """Legacy similarity method (kept for compatibility)."""
+        return self._calculate_robust_similarity(sent1, sent2)
 
 
 class VisualComparisonGenerator:
