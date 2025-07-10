@@ -281,7 +281,7 @@ def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str
         try:
             logger.info(f"Downloading from URL: {transcript_link}")
             headers = {
-                'Accept': 'application/json',
+                'Accept': 'application/xml,*/*',
                 'Authorization': configuration.get_basic_auth_token(),
             }
             proxies = {
