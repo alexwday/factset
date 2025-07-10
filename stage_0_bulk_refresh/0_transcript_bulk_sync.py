@@ -218,9 +218,9 @@ def create_base_directory_structure(nas_conn: SMBConnection) -> None:
     
     certificate_path = nas_path_join(inputs_path, "certificate")
     config_path = nas_path_join(inputs_path, "config")
-    data_path = nas_path_join(outputs_path, "data")
-    logs_path = nas_path_join(outputs_path, "logs")
-    listing_path = nas_path_join(outputs_path, "listing")
+    data_path = nas_path_join(outputs_path, "Data")
+    logs_path = nas_path_join(outputs_path, "Logs")
+    listing_path = nas_path_join(outputs_path, "Listing")
     
     nas_create_directory(nas_conn, certificate_path)
     nas_create_directory(nas_conn, config_path)
@@ -236,15 +236,21 @@ def create_base_directory_structure(nas_conn: SMBConnection) -> None:
 
 def create_ticker_directory_structure(nas_conn: SMBConnection, ticker: str, institution_type: str) -> None:
     """Create directory structure for a specific ticker when transcripts are found."""
-    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data")
-    ticker_path = nas_path_join(data_path, institution_type, ticker)
+    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data")
+    
+    # Get path-safe name for the ticker folder
+    institution_info = config['monitored_institutions'].get(ticker, {})
+    path_safe_name = institution_info.get('path_safe_name', ticker)
+    ticker_folder_name = f"{ticker}_{path_safe_name}"
+    
+    ticker_path = nas_path_join(data_path, institution_type, ticker_folder_name)
     
     # Create ticker folder
     nas_create_directory(nas_conn, ticker_path)
     
     # Create transcript type subfolders
     for transcript_type in config['api_settings']['transcript_types']:
-        transcript_type_path = nas_path_join(ticker_path, transcript_type.lower())
+        transcript_type_path = nas_path_join(ticker_path, transcript_type)
         nas_create_directory(nas_conn, transcript_type_path)
 
 def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str] = None) -> str:
@@ -281,7 +287,12 @@ def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str
 
 def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: str, institution_type: str) -> Set[str]:
     """Get list of existing transcript files for a specific ticker and type from NAS."""
-    institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", institution_type, ticker, transcript_type.lower())
+    # Get path-safe name for the ticker folder
+    institution_info = config['monitored_institutions'].get(ticker, {})
+    path_safe_name = institution_info.get('path_safe_name', ticker)
+    ticker_folder_name = f"{ticker}_{path_safe_name}"
+    
+    institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", institution_type, ticker_folder_name, transcript_type)
     return set(nas_list_files(nas_conn, institution_path))
 
 def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str, 
@@ -420,8 +431,13 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
                         logger.warning(f"No download link for {filename}")
                         continue
                     
-                    nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", 
-                                                institution_type, ticker, transcript_type.lower(), filename)
+                    # Get path-safe name for the ticker folder
+                    institution_info = config['monitored_institutions'].get(ticker, {})
+                    path_safe_name = institution_info.get('path_safe_name', ticker)
+                    ticker_folder_name = f"{ticker}_{path_safe_name}"
+                    
+                    nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", 
+                                                institution_type, ticker_folder_name, transcript_type, filename)
                     
                     if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], 
                                                     nas_file_path, filename, configuration):
@@ -447,7 +463,7 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
     logger.info("Generating comprehensive inventory index from NAS")
     
     file_index = []
-    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data")
+    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data")
     
     # Iterate through each institution type folder
     type_folders = ["Canadian", "US", "European", "Insurance"]
@@ -461,8 +477,11 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
             ticker_folders = [item.filename for item in type_items 
                             if item.isDirectory and not item.filename.startswith('.')]
             
-            for ticker in ticker_folders:
-                ticker_path = nas_path_join(type_path, ticker)
+            for ticker_folder in ticker_folders:
+                ticker_path = nas_path_join(type_path, ticker_folder)
+                
+                # Extract ticker from folder name (format: TICKER_Path_Safe_Name)
+                ticker = ticker_folder.split('_')[0] if '_' in ticker_folder else ticker_folder
                 institution_info = config['monitored_institutions'].get(ticker, {
                     'name': f'Unknown ({ticker})', 
                     'region': 'Unknown', 
@@ -471,7 +490,7 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
                 
                 # Get transcript type folders
                 for transcript_type in config['api_settings']['transcript_types']:
-                    transcript_type_path = nas_path_join(ticker_path, transcript_type.lower())
+                    transcript_type_path = nas_path_join(ticker_path, transcript_type)
                     
                     try:
                         files = nas_list_files(nas_conn, transcript_type_path)
@@ -487,7 +506,7 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
                                 event_date = file_parts[1] if len(file_parts) > 1 else 'unknown'
                                 
                                 file_record = {
-                                    'filepath': f"Outputs/data/{institution_type}/{ticker}/{transcript_type.lower()}/{filename}",
+                                    'filepath': f"Outputs/Data/{institution_type}/{ticker_folder}/{transcript_type}/{filename}",
                                     'filename': filename,
                                     'institution_type': institution_type,
                                     'ticker': ticker,
@@ -559,14 +578,14 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
     
     # Save comprehensive inventory
     inventory_json = json.dumps(inventory, indent=2)
-    inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", 
+    inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Listing", 
                                  f"transcript_inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
     
     inventory_file_obj = io.BytesIO(inventory_json.encode('utf-8'))
     nas_upload_file(nas_conn, inventory_file_obj, inventory_path)
     
     # Also save as current inventory (overwrites previous)
-    current_inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", "current_inventory.json")
+    current_inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Listing", "current_inventory.json")
     current_inventory_obj = io.BytesIO(inventory_json.encode('utf-8'))
     nas_upload_file(nas_conn, current_inventory_obj, current_inventory_path)
 
@@ -699,7 +718,7 @@ def main() -> None:
                 logger.warning(f"  {inst['ticker']} - {inst['name']} ({inst['type']}): No earnings transcripts or ticker not found")
         
         # Upload log file to NAS
-        log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "logs", 
+        log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Logs", 
                                     f"stage0_sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
         with open(logger.temp_log_file, 'rb') as log_file:
             nas_upload_file(nas_conn, log_file, log_file_path)
