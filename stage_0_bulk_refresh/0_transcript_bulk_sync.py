@@ -62,6 +62,8 @@ if missing_vars:
 # Global variables for configuration
 config = {}
 logger = None
+user = None
+password = None
 
 def setup_logging() -> logging.Logger:
     """Set up logging configuration."""
@@ -274,11 +276,10 @@ def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: st
 def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str, 
                                  nas_file_path: str, transcript_id: str, configuration) -> bool:
     """Download transcript with retry logic and upload to NAS."""
-    user = PROXY_USER
-    password = quote(PROXY_PASSWORD)
     
     for attempt in range(config['api_settings']['max_retries']):
         try:
+            logger.info(f"Downloading from URL: {transcript_link}")
             headers = {
                 'Accept': 'application/json',
                 'Authorization': configuration.get_basic_auth_token(),
@@ -482,7 +483,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
 
 def main() -> None:
     """Main function to orchestrate the Stage 0 bulk transcript sync."""
-    global config, logger
+    global config, logger, user, password
     
     logger = setup_logging()
     logger.info("STAGE 0: BULK TRANSCRIPT SYNC")
