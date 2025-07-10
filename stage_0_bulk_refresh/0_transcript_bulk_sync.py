@@ -505,6 +505,25 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
                                 file_parts = filename.replace('.xml', '').split('_')
                                 event_date = file_parts[1] if len(file_parts) > 1 else 'unknown'
                                 
+                                # Handle timestamp conversion safely
+                                try:
+                                    if hasattr(file_attrs.last_write_time, 'strftime'):
+                                        date_modified = file_attrs.last_write_time.strftime('%Y-%m-%d %H:%M:%S')
+                                    else:
+                                        # Convert from timestamp if it's a float/int
+                                        date_modified = datetime.fromtimestamp(file_attrs.last_write_time).strftime('%Y-%m-%d %H:%M:%S')
+                                except:
+                                    date_modified = 'unknown'
+                                
+                                try:
+                                    if hasattr(file_attrs.create_time, 'strftime'):
+                                        date_created = file_attrs.create_time.strftime('%Y-%m-%d %H:%M:%S')
+                                    else:
+                                        # Convert from timestamp if it's a float/int
+                                        date_created = datetime.fromtimestamp(file_attrs.create_time).strftime('%Y-%m-%d %H:%M:%S')
+                                except:
+                                    date_created = 'unknown'
+                                
                                 file_record = {
                                     'filepath': f"Outputs/Data/{institution_type}/{ticker_folder}/{transcript_type}/{filename}",
                                     'filename': filename,
@@ -515,8 +534,8 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
                                     'transcript_type': transcript_type,
                                     'event_date': event_date,
                                     'file_size': file_attrs.file_size,
-                                    'date_modified': file_attrs.last_write_time.strftime('%Y-%m-%d %H:%M:%S'),
-                                    'date_created': file_attrs.create_time.strftime('%Y-%m-%d %H:%M:%S')
+                                    'date_modified': date_modified,
+                                    'date_created': date_created
                                 }
                                 
                                 file_index.append(file_record)
