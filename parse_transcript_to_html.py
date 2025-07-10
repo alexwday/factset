@@ -16,30 +16,42 @@ def parse_transcript_xml(xml_path: str) -> Dict:
     tree = ET.parse(xml_path)
     root = tree.getroot()
     
+    # Handle namespace if present
+    namespace = ""
+    if root.tag.startswith('{'):
+        namespace = root.tag.split('}')[0] + '}'
+    
+    # Helper function to handle namespaced tags
+    def ns_tag(tag):
+        return f"{namespace}{tag}" if namespace else tag
+    
     # Extract metadata
-    meta = root.find('meta')
+    meta = root.find(ns_tag('meta'))
     if meta is None:
+        # Debug: print available elements
+        print(f"Root tag: {root.tag}")
+        print(f"Root children: {[child.tag for child in root]}")
         raise ValueError("No meta section found in XML")
     
     # Extract title and date
-    title = meta.find('title')
+    title = meta.find(ns_tag('title'))
     title_text = title.text if title is not None else "Untitled Transcript"
     
-    date = meta.find('date')
+    date = meta.find(ns_tag('date'))
     date_text = date.text if date is not None else "Unknown Date"
     
     # Extract companies
     companies = []
-    companies_elem = meta.find('companies')
+    companies_elem = meta.find(ns_tag('companies'))
     if companies_elem is not None:
-        for company in companies_elem.findall('company'):
+        for company in companies_elem.findall(ns_tag('company')):
             companies.append(company.text if company.text else "")
     
     # Extract participants and create speaker mapping
     participants = {}
-    participants_elem = meta.find('participants')
+    participants_elem = meta.find(ns_tag('participants'))
     if participants_elem is not None:
-        for participant in participants_elem.findall('participant'):
+        for participant in participants_elem.findall(ns_tag('participant')):
             p_id = participant.get('id')
             if p_id:
                 participants[p_id] = {
@@ -52,24 +64,24 @@ def parse_transcript_xml(xml_path: str) -> Dict:
                 }
     
     # Extract body content
-    body = root.find('body')
+    body = root.find(ns_tag('body'))
     if body is None:
         raise ValueError("No body section found in XML")
     
     sections = []
-    for section in body.findall('section'):
+    for section in body.findall(ns_tag('section')):
         section_name = section.get('name', 'Unnamed Section')
         speakers = []
         
-        for speaker in section.findall('speaker'):
+        for speaker in section.findall(ns_tag('speaker')):
             speaker_id = speaker.get('id')
             speaker_type = speaker.get('type', '')  # 'q' or 'a' for Q&A sections
             
             # Extract paragraphs from plist
             paragraphs = []
-            plist = speaker.find('plist')
+            plist = speaker.find(ns_tag('plist'))
             if plist is not None:
-                for p in plist.findall('p'):
+                for p in plist.findall(ns_tag('p')):
                     if p.text:
                         paragraphs.append(p.text.strip())
             
