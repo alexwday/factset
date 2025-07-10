@@ -213,57 +213,273 @@ class AdvancedTranscriptExtractor:
 
 
 class SlidingWindowMatcher:
-    """Sliding window algorithm for matching word sequences."""
+    """Sliding window algorithm for matching word sequences with adaptive sizing."""
     
     def __init__(self, window_size: int = 6, min_match_threshold: float = 0.7):
-        self.window_size = window_size  # Reduced from 8 for better performance
+        self.base_window_size = window_size
         self.min_match_threshold = min_match_threshold
+        self.base = 31
+        self.mod = 10**9 + 7
+        self.similarity_cache = {}  # Cache for word similarity calculations
+        self.adaptive_sizing = True  # Enable smart window sizing
+        self.max_cache_size = 10000  # Prevent memory issues
     
     def find_matches(self, pdf_words: List[str], html_words: List[str]) -> List[WordMatch]:
-        """Find matching word segments using sliding window with progress tracking."""
+        """Find matching word segments using optimized approach with adaptive window sizing."""
         matches = []
         used_html_indices = set()
-        total_windows = len(pdf_words) - self.window_size + 1
         
-        print(f"    - Processing {total_windows:,} word windows...")
+        # Determine optimal window sizes to try
+        window_sizes = self._determine_optimal_window_sizes(pdf_words, html_words)
+        print(f"    - Using adaptive window sizes: {window_sizes}")
+        
         start_time = time.time()
-        last_progress_time = start_time
+        
+        # Try different window sizes, starting with the most likely to succeed
+        for window_size in window_sizes:
+            window_matches = self._find_matches_for_window_size(
+                pdf_words, html_words, window_size, used_html_indices
+            )
+            matches.extend(window_matches)
+            
+            # Update used indices
+            for match in window_matches:
+                for idx in range(match.html_start, match.html_end):
+                    used_html_indices.add(idx)
+        
+        elapsed = time.time() - start_time
+        print(f"    - Adaptive matching completed in {elapsed:.2f}s, found {len(matches)} matches")
+        
+        return self._merge_overlapping_matches(matches)
+    
+    def _determine_optimal_window_sizes(self, pdf_words: List[str], html_words: List[str]) -> List[int]:
+        """Determine optimal window sizes based on text characteristics."""
+        if not self.adaptive_sizing:
+            return [self.base_window_size]
+        
+        # Analyze text characteristics
+        avg_word_length = sum(len(word) for word in pdf_words[:100]) / min(100, len(pdf_words))
+        
+        # Financial transcripts often have:
+        # - Short phrases: "revenue increased", "Q3 results" (2-4 words)
+        # - Medium phrases: "earnings per share", "operating margin improved" (4-6 words)  
+        # - Long phrases: "we are pleased to announce", "looking forward to the future" (6-10 words)
+        
+        window_sizes = []
+        
+        if avg_word_length > 6:  # Longer words suggest more technical content
+            window_sizes = [4, 6, 8]  # Shorter windows for technical terms
+        else:  # More conversational content
+            window_sizes = [6, 4, 8]  # Standard window first
+        
+        # Add very short windows for key financial terms
+        if not 3 in window_sizes:
+            window_sizes.append(3)
+            
+        return window_sizes
+    
+    def _find_matches_for_window_size(self, pdf_words: List[str], html_words: List[str], 
+                                    window_size: int, used_html_indices: Set[int]) -> List[WordMatch]:
+        """Find matches for a specific window size."""
+        matches = []
+        total_windows = len(pdf_words) - window_size + 1
+        
+        if total_windows <= 0:
+            return matches
+        
+        print(f"      - Window size {window_size}: {total_windows:,} windows")
+        
+        # Build hash map for this window size
+        html_hash_map = self._build_rolling_hash_map_sized(html_words, window_size)
         
         for pdf_start in range(total_windows):
-            # Progress reporting every 10% or 2 seconds
-            current_time = time.time()
-            if (current_time - last_progress_time > 2.0) or (pdf_start % max(1, total_windows // 10) == 0):
-                progress = (pdf_start / total_windows) * 100
-                elapsed = current_time - start_time
-                if pdf_start > 0:
-                    eta = (elapsed / pdf_start) * (total_windows - pdf_start)
-                    print(f"      Progress: {progress:.1f}% ({pdf_start:,}/{total_windows:,}) - ETA: {eta:.1f}s")
-                last_progress_time = current_time
+            pdf_window = pdf_words[pdf_start:pdf_start + window_size]
             
-            pdf_window = pdf_words[pdf_start:pdf_start + self.window_size]
-            
-            best_match = self._find_best_html_match(
-                pdf_window, html_words, used_html_indices
+            # Use rolling hash for fast candidate finding
+            best_match = self._find_best_html_match_sized(
+                pdf_window, html_words, html_hash_map, used_html_indices, window_size
             )
             
             if best_match and best_match['confidence'] >= self.min_match_threshold:
                 match = WordMatch(
                     pdf_start=pdf_start,
-                    pdf_end=pdf_start + self.window_size,
+                    pdf_end=pdf_start + window_size,
                     html_start=best_match['start'],
                     html_end=best_match['end'],
                     confidence=best_match['confidence']
                 )
                 matches.append(match)
+        
+        return matches
+    
+    def _build_rolling_hash_map_sized(self, words: List[str], window_size: int) -> Dict[int, List[int]]:
+        """Build a hash map of rolling hashes to positions for O(1) lookup with custom window size."""
+        hash_map = {}
+        if len(words) < window_size:
+            return hash_map
+            
+        # Precompute powers of base
+        powers = [1]
+        for i in range(1, window_size):
+            powers.append((powers[-1] * self.base) % self.mod)
+        
+        # Initial hash computation
+        current_hash = 0
+        for i in range(window_size):
+            word_hash = hash(words[i].lower()) % self.mod
+            current_hash = (current_hash + word_hash * powers[window_size - 1 - i]) % self.mod
+        
+        # Store initial hash
+        if current_hash not in hash_map:
+            hash_map[current_hash] = []
+        hash_map[current_hash].append(0)
+        
+        # Rolling hash for remaining positions
+        highest_power = powers[window_size - 1]
+        for i in range(window_size, len(words)):
+            # Remove leftmost word
+            old_word_hash = hash(words[i - window_size].lower()) % self.mod
+            current_hash = (current_hash - old_word_hash * highest_power) % self.mod
+            
+            # Add new word
+            new_word_hash = hash(words[i].lower()) % self.mod
+            current_hash = (current_hash * self.base + new_word_hash) % self.mod
+            
+            # Store position
+            start_pos = i - window_size + 1
+            if current_hash not in hash_map:
+                hash_map[current_hash] = []
+            hash_map[current_hash].append(start_pos)
+        
+        return hash_map
+    
+    def _build_rolling_hash_map(self, words: List[str]) -> Dict[int, List[int]]:
+        """Build a hash map of rolling hashes to positions for O(1) lookup."""
+        return self._build_rolling_hash_map_sized(words, self.base_window_size)
+    
+    def _find_best_html_match_sized(self, pdf_window: List[str], html_words: List[str], 
+                                   html_hash_map: Dict[int, List[int]], 
+                                   used_indices: Set[int], window_size: int) -> Optional[Dict]:
+        """Find matches using rolling hash for custom window size."""
+        pdf_hash = self._compute_window_hash_sized(pdf_window, window_size)
+        
+        # Fast hash-based candidate lookup
+        candidates = html_hash_map.get(pdf_hash, [])
+        
+        best_match = None
+        best_confidence = 0
+        
+        # Check exact hash matches first (fastest)
+        for html_start in candidates:
+            if any(idx in used_indices for idx in range(html_start, html_start + window_size)):
+                continue
                 
-                # Mark HTML indices as used
-                for idx in range(best_match['start'], best_match['end']):
-                    used_html_indices.add(idx)
+            html_window = html_words[html_start:html_start + window_size]
+            confidence = self._calculate_similarity_cached(pdf_window, html_window)
+            
+            if confidence > best_confidence:
+                best_confidence = confidence
+                best_match = {
+                    'start': html_start,
+                    'end': html_start + window_size,
+                    'confidence': confidence
+                }
+                
+                # Early termination for perfect matches
+                if confidence >= 0.98:
+                    return best_match
         
-        elapsed = time.time() - start_time
-        print(f"    - Word matching completed in {elapsed:.2f}s, found {len(matches)} matches")
+        # If no good hash match, skip fuzzy fallback for adaptive sizing (too expensive)
+        return best_match
+    
+    def _compute_window_hash_sized(self, window: List[str], window_size: int) -> int:
+        """Compute rolling hash for a single window with custom size."""
+        window_hash = 0
+        power = 1
         
-        return self._merge_overlapping_matches(matches)
+        for i in range(len(window) - 1, -1, -1):
+            word_hash = hash(window[i].lower()) % self.mod
+            window_hash = (window_hash + word_hash * power) % self.mod
+            power = (power * self.base) % self.mod
+        
+        return window_hash
+    
+    def _compute_window_hash(self, window: List[str]) -> int:
+        """Compute rolling hash for a single window."""
+        window_hash = 0
+        power = 1
+        
+        for i in range(len(window) - 1, -1, -1):
+            word_hash = hash(window[i].lower()) % self.mod
+            window_hash = (window_hash + word_hash * power) % self.mod
+            power = (power * self.base) % self.mod
+        
+        return window_hash
+    
+    def _find_best_html_match_optimized(self, pdf_window: List[str], html_words: List[str], 
+                                      html_hash_map: Dict[int, List[int]], 
+                                      used_indices: Set[int]) -> Optional[Dict]:
+        """Find matches using rolling hash for O(1) candidate lookup."""
+        pdf_hash = self._compute_window_hash(pdf_window)
+        
+        # Fast hash-based candidate lookup
+        candidates = html_hash_map.get(pdf_hash, [])
+        
+        best_match = None
+        best_confidence = 0
+        
+        # Check exact hash matches first (fastest)
+        for html_start in candidates:
+            if any(idx in used_indices for idx in range(html_start, html_start + self.window_size)):
+                continue
+                
+            html_window = html_words[html_start:html_start + self.window_size]
+            confidence = self._calculate_similarity_cached(pdf_window, html_window)
+            
+            if confidence > best_confidence:
+                best_confidence = confidence
+                best_match = {
+                    'start': html_start,
+                    'end': html_start + self.window_size,
+                    'confidence': confidence
+                }
+                
+                # Early termination for perfect matches
+                if confidence >= 0.98:
+                    return best_match
+        
+        # If no good hash match, fall back to fuzzy matching for top candidates
+        if best_confidence < self.min_match_threshold:
+            return self._fuzzy_fallback_search(pdf_window, html_words, used_indices)
+        
+        return best_match
+    
+    def _fuzzy_fallback_search(self, pdf_window: List[str], html_words: List[str], 
+                              used_indices: Set[int]) -> Optional[Dict]:
+        """Fallback fuzzy search for when hash matching fails."""
+        best_match = None
+        best_confidence = 0
+        window_size = len(pdf_window)
+        
+        # Sample every 5th position for fuzzy matching (much faster)
+        step_size = max(1, (len(html_words) - window_size) // 200)  # Limit to ~200 checks
+        
+        for html_start in range(0, len(html_words) - window_size + 1, step_size):
+            if any(idx in used_indices for idx in range(html_start, html_start + window_size)):
+                continue
+            
+            html_window = html_words[html_start:html_start + window_size]
+            confidence = self._calculate_similarity_cached(pdf_window, html_window)
+            
+            if confidence > best_confidence:
+                best_confidence = confidence
+                best_match = {
+                    'start': html_start,
+                    'end': html_start + window_size,
+                    'confidence': confidence
+                }
+        
+        return best_match
     
     def _find_best_html_match(self, pdf_window: List[str], html_words: List[str], 
                              used_indices: Set[int]) -> Optional[Dict]:
@@ -295,17 +511,92 @@ class SlidingWindowMatcher:
         
         return best_match
     
+    def _calculate_similarity_cached(self, window1: List[str], window2: List[str]) -> float:
+        """Calculate similarity with caching for repeated calculations."""
+        # Create cache key from window contents
+        cache_key = (tuple(w.lower() for w in window1), tuple(w.lower() for w in window2))
+        
+        if cache_key in self.similarity_cache:
+            return self.similarity_cache[cache_key]
+        
+        # Prevent cache from growing too large
+        if len(self.similarity_cache) >= self.max_cache_size:
+            # Clear half the cache (simple LRU approximation)
+            keys_to_remove = list(self.similarity_cache.keys())[:self.max_cache_size // 2]
+            for key in keys_to_remove:
+                del self.similarity_cache[key]
+        
+        similarity = self._calculate_similarity(window1, window2)
+        self.similarity_cache[cache_key] = similarity
+        return similarity
+    
     def _calculate_similarity(self, window1: List[str], window2: List[str]) -> float:
-        """Calculate similarity between two word windows."""
+        """Calculate similarity between two word windows with optimizations."""
         if len(window1) != len(window2):
             return 0.0
         
-        exact_matches = sum(1 for w1, w2 in zip(window1, window2) if w1 == w2)
-        fuzzy_matches = sum(1 for w1, w2 in zip(window1, window2) 
-                          if w1 != w2 and self._fuzzy_match(w1, w2))
+        # Fast path: check if windows are identical
+        if window1 == window2:
+            return 1.0
+        
+        # Fast path: check if lowercased windows are identical
+        lower1 = [w.lower() for w in window1]
+        lower2 = [w.lower() for w in window2]
+        if lower1 == lower2:
+            return 0.95  # Nearly perfect but not exact case match
+        
+        exact_matches = 0
+        fuzzy_matches = 0
+        
+        for w1, w2 in zip(window1, window2):
+            if w1.lower() == w2.lower():
+                exact_matches += 1
+            elif self._fuzzy_match_cached(w1, w2):
+                fuzzy_matches += 1
         
         total_score = exact_matches + (fuzzy_matches * 0.8)
         return total_score / len(window1)
+    
+    def _fuzzy_match_cached(self, word1: str, word2: str) -> bool:
+        """Cached fuzzy word matching with optimizations."""
+        # Normalize case for comparison
+        w1, w2 = word1.lower(), word2.lower()
+        
+        # Create cache key
+        cache_key = (w1, w2) if w1 <= w2 else (w2, w1)
+        
+        if cache_key in self.similarity_cache:
+            return self.similarity_cache[cache_key]
+        
+        # Fast rejection filters
+        if abs(len(w1) - len(w2)) > 3:
+            self.similarity_cache[cache_key] = False
+            return False
+        
+        # Very short words must be exact
+        if len(w1) <= 2 or len(w2) <= 2:
+            result = w1 == w2
+            self.similarity_cache[cache_key] = result
+            return result
+        
+        # Common financial abbreviations and variations
+        financial_equivalents = {
+            ('revenue', 'revenues'), ('earning', 'earnings'), ('margin', 'margins'),
+            ('q1', 'first'), ('q2', 'second'), ('q3', 'third'), ('q4', 'fourth'),
+            ('bn', 'billion'), ('mn', 'million'), ('k', 'thousand'),
+            ('ebitda', 'earnings'), ('capex', 'capital'), ('opex', 'operating')
+        }
+        
+        for equiv_pair in financial_equivalents:
+            if (w1 in equiv_pair and w2 in equiv_pair):
+                self.similarity_cache[cache_key] = True
+                return True
+        
+        # Use sequence matcher for detailed comparison
+        similarity = difflib.SequenceMatcher(None, w1, w2).ratio()
+        result = similarity > 0.8
+        self.similarity_cache[cache_key] = result
+        return result
     
     def _fuzzy_match(self, word1: str, word2: str) -> bool:
         """Check if two words are similar enough to be considered a match."""
@@ -381,14 +672,14 @@ class SentenceAligner:
         return False
     
     def align_sentences(self, pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
-        """Align sentences using fuzzy matching for robust comparison."""
-        print("    - Using fuzzy sentence matching...")
+        """Align sentences using optimized ordered matching for robust comparison."""
+        print("    - Using optimized ordered sentence matching...")
         
-        # First pass: direct fuzzy matching
-        alignments = self._fuzzy_align_sentences(pdf_sentences, html_sentences)
+        # Use optimized ordered alignment that maintains sequence
+        alignments = self._ordered_sequence_alignment(pdf_sentences, html_sentences)
         
         # Second pass: post-processing for multi-sentence matches
-        print("\n    - Post-processing for multi-sentence matches...")
+        print("    - Post-processing for multi-sentence matches...")
         alignments = self._post_process_alignments(alignments, pdf_sentences, html_sentences)
         
         print(f"    - Created {len(alignments)} final alignments")
@@ -468,6 +759,105 @@ class SentenceAligner:
         
         # Sort alignments to maintain original order
         return self._sort_alignments_by_position(alignments, pdf_sentences, html_sentences)
+    
+    def _ordered_sequence_alignment(self, pdf_sentences: List[str], html_sentences: List[str]) -> List[SentenceAlignment]:
+        """Optimized ordered sequence alignment using dynamic programming approach."""
+        # Use a sliding window approach that maintains order
+        alignments = []
+        pdf_idx = 0
+        html_idx = 0
+        
+        print(f"    - Using optimized ordered alignment algorithm...")
+        start_time = time.time()
+        
+        while pdf_idx < len(pdf_sentences) and html_idx < len(html_sentences):
+            pdf_sent = pdf_sentences[pdf_idx]
+            
+            # Look ahead window for HTML matches (limited to maintain performance)
+            best_match = None
+            best_similarity = 0.0
+            best_offset = 0
+            lookahead_limit = min(10, len(html_sentences) - html_idx)  # Limit lookahead
+            
+            for offset in range(lookahead_limit):
+                html_sent = html_sentences[html_idx + offset]
+                similarity = self._calculate_robust_similarity_cached(pdf_sent, html_sent)
+                
+                if similarity > best_similarity and similarity >= 0.6:
+                    best_similarity = similarity
+                    best_match = html_sent
+                    best_offset = offset
+                    
+                    # Early termination for excellent matches
+                    if similarity >= 0.9:
+                        break
+            
+            if best_match and best_similarity >= 0.6:
+                # Handle any skipped HTML sentences as inserts
+                for skip_idx in range(best_offset):
+                    alignments.append(SentenceAlignment(
+                        diff_type=DiffType.INSERT,
+                        pdf_sentences=[],
+                        html_sentences=[html_sentences[html_idx + skip_idx]],
+                        similarity=0.0
+                    ))
+                
+                # Add the matched sentence
+                match_type = DiffType.EQUAL if best_similarity >= 0.9 else DiffType.REPLACE
+                alignments.append(SentenceAlignment(
+                    diff_type=match_type,
+                    pdf_sentences=[pdf_sent],
+                    html_sentences=[best_match],
+                    similarity=best_similarity
+                ))
+                
+                pdf_idx += 1
+                html_idx += best_offset + 1
+            else:
+                # No good match found - PDF sentence is a deletion
+                alignments.append(SentenceAlignment(
+                    diff_type=DiffType.DELETE,
+                    pdf_sentences=[pdf_sent],
+                    html_sentences=[],
+                    similarity=0.0
+                ))
+                pdf_idx += 1
+        
+        # Handle remaining sentences
+        while pdf_idx < len(pdf_sentences):
+            alignments.append(SentenceAlignment(
+                diff_type=DiffType.DELETE,
+                pdf_sentences=[pdf_sentences[pdf_idx]],
+                html_sentences=[],
+                similarity=0.0
+            ))
+            pdf_idx += 1
+        
+        while html_idx < len(html_sentences):
+            alignments.append(SentenceAlignment(
+                diff_type=DiffType.INSERT,
+                pdf_sentences=[],
+                html_sentences=[html_sentences[html_idx]],
+                similarity=0.0
+            ))
+            html_idx += 1
+        
+        elapsed = time.time() - start_time
+        print(f"    - Ordered alignment completed in {elapsed:.2f}s, {len(alignments)} alignments")
+        
+        return alignments
+    
+    def _calculate_robust_similarity_cached(self, pdf_sent: str, html_sent: str) -> float:
+        """Cached version of robust similarity calculation."""
+        # Create cache key
+        cache_key = (pdf_sent.strip()[:100], html_sent.strip()[:100])  # Use first 100 chars as key
+        
+        if cache_key in self.similarity_cache:
+            return self.similarity_cache[cache_key]
+        
+        similarity = self._calculate_robust_similarity(pdf_sent, html_sent)
+        self.similarity_cache[cache_key] = similarity
+        return similarity
     
     def _calculate_robust_similarity(self, pdf_sent: str, html_sent: str) -> float:
         """Calculate similarity with fuzzy matching for common variations."""
