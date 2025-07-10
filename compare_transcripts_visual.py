@@ -636,6 +636,8 @@ class SentenceAligner:
     
     def __init__(self, similarity_threshold: float = 0.6):
         self.similarity_threshold = similarity_threshold
+        self.similarity_cache = {}  # Cache for sentence similarity calculations
+        self.max_cache_size = 5000  # Smaller cache for sentence-level operations
     
     def extract_sentences(self, text_lines: List[str]) -> List[str]:
         """Extract sentences from text lines."""
@@ -854,6 +856,13 @@ class SentenceAligner:
         
         if cache_key in self.similarity_cache:
             return self.similarity_cache[cache_key]
+        
+        # Prevent cache from growing too large
+        if len(self.similarity_cache) >= self.max_cache_size:
+            # Clear half the cache (simple LRU approximation)
+            keys_to_remove = list(self.similarity_cache.keys())[:self.max_cache_size // 2]
+            for key in keys_to_remove:
+                del self.similarity_cache[key]
         
         similarity = self._calculate_robust_similarity(pdf_sent, html_sent)
         self.similarity_cache[cache_key] = similarity
