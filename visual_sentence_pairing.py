@@ -1,0 +1,826 @@
+#!/usr/bin/env python3
+"""
+Visual Sentence Pairing Tool
+A simple two-column interface for manually pairing sentences while maintaining order.
+"""
+
+import sys
+import re
+import json
+import html
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
+from dataclasses import dataclass, asdict
+# from bs4 import BeautifulSoup  # Optional - only needed for real HTML parsing
+
+@dataclass
+class IndexedSentence:
+    """Represents a sentence with its original position."""
+    index: int
+    text: str
+    is_matched: bool = False
+    match_id: Optional[str] = None
+
+@dataclass
+class SentencePair:
+    """Represents a pairing between sentences."""
+    pair_id: str
+    pdf_indices: List[int]
+    html_indices: List[int]
+    similarity: float = 0.0
+    is_manual: bool = False
+
+class VisualSentencePairing:
+    """Create a visual two-column interface for sentence pairing."""
+    
+    def __init__(self, similarity_threshold: float = 0.9):
+        self.similarity_threshold = similarity_threshold
+        self.pairs = []
+        self.pair_counter = 0
+    
+    def extract_sentences(self, text_lines: List[str]) -> List[str]:
+        """Extract sentences from text lines."""
+        full_text = ' '.join(text_lines)
+        # Split on sentence endings
+        sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', full_text)
+        
+        clean_sentences = []
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) > 10:  # Skip very short fragments
+                clean_sentences.append(sentence)
+        
+        return clean_sentences
+    
+    def extract_pdf_sentences(self, pdf_path: str) -> List[str]:
+        """Extract sentences from PDF (simplified for demo)."""
+        # In real implementation, use pdfplumber or PyPDF2
+        # For now, return dummy data
+        return [
+            "Revenue increased significantly in Q3.",
+            "We are pleased with the results.",
+            "Operating margins improved by 2%.",
+            "Looking forward, we expect continued growth."
+        ]
+    
+    def extract_html_sentences(self, html_path: str) -> List[str]:
+        """Extract sentences from HTML transcript."""
+        # For demo purposes, skip HTML parsing
+        # with open(html_path, 'r', encoding='utf-8') as f:
+        #     soup = BeautifulSoup(f.read(), 'html.parser')
+        
+        # Return demo HTML sentences
+        return [
+            "Revenue increased significantly in Q3, and we are pleased with the results.",
+            "Operating margins improved by 2%.",
+            "Looking forward, we expect continued growth.",
+            "Additional disclosure information.",
+            "Our strategy remains focused on innovation and customer satisfaction."
+        ]
+    
+    def find_direct_matches(self, pdf_sentences: List[IndexedSentence], 
+                           html_sentences: List[IndexedSentence]) -> List[SentencePair]:
+        """Find obvious 1:1 matches to pre-pair."""
+        pairs = []
+        html_matched = set()
+        
+        for pdf_sent in pdf_sentences:
+            for html_sent in html_sentences:
+                if html_sent.index in html_matched:
+                    continue
+                
+                similarity = self._calculate_similarity(pdf_sent.text, html_sent.text)
+                
+                if similarity >= self.similarity_threshold:
+                    pair_id = f"auto_{self.pair_counter}"
+                    self.pair_counter += 1
+                    
+                    # Create pair
+                    pair = SentencePair(
+                        pair_id=pair_id,
+                        pdf_indices=[pdf_sent.index],
+                        html_indices=[html_sent.index],
+                        similarity=similarity,
+                        is_manual=False
+                    )
+                    pairs.append(pair)
+                    
+                    # Mark as matched
+                    pdf_sent.is_matched = True
+                    pdf_sent.match_id = pair_id
+                    html_sent.is_matched = True
+                    html_sent.match_id = pair_id
+                    html_matched.add(html_sent.index)
+                    
+                    break
+        
+        return pairs
+    
+    def _calculate_similarity(self, text1: str, text2: str) -> float:
+        """Simple similarity calculation."""
+        # Normalize
+        text1_clean = re.sub(r'[^\w\s]', ' ', text1.lower()).split()
+        text2_clean = re.sub(r'[^\w\s]', ' ', text2.lower()).split()
+        
+        if not text1_clean or not text2_clean:
+            return 0.0
+        
+        # Calculate word overlap
+        set1 = set(text1_clean)
+        set2 = set(text2_clean)
+        
+        intersection = set1.intersection(set2)
+        union = set1.union(set2)
+        
+        return len(intersection) / len(union) if union else 0.0
+    
+    def generate_pairing_html(self, pdf_sentences: List[str], html_sentences: List[str], 
+                             output_path: str):
+        """Generate the visual pairing interface."""
+        # Create indexed sentences
+        pdf_indexed = [IndexedSentence(i, sent) for i, sent in enumerate(pdf_sentences)]
+        html_indexed = [IndexedSentence(i, sent) for i, sent in enumerate(html_sentences)]
+        
+        # Find direct matches
+        self.pairs = self.find_direct_matches(pdf_indexed, html_indexed)
+        
+        # Generate HTML
+        html_content = self._generate_html(pdf_indexed, html_indexed)
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        print(f"✅ Visual pairing interface created: {output_path}")
+        print(f"📊 Pre-matched {len(self.pairs)} direct matches")
+        print(f"🖱️ Open in browser to manually pair remaining sentences")
+    
+    def _generate_html(self, pdf_sentences: List[IndexedSentence], 
+                      html_sentences: List[IndexedSentence]) -> str:
+        """Generate the HTML interface."""
+        
+        # Create rows for the table
+        rows_html = self._generate_rows(pdf_sentences, html_sentences)
+        
+        # Convert pairs to JSON for JavaScript
+        pairs_json = json.dumps([asdict(p) for p in self.pairs])
+        
+        html_template = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Sentence Pairing Tool</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }}
+        .header {{
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .controls {{
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }}
+        .btn {{
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }}
+        .btn:hover {{
+            background: #0056b3;
+        }}
+        .btn-success {{
+            background: #28a745;
+        }}
+        .btn-success:hover {{
+            background: #1e7e34;
+        }}
+        .btn-danger {{
+            background: #dc3545;
+        }}
+        .btn-danger:hover {{
+            background: #c82333;
+        }}
+        .pairing-container {{
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }}
+        .pairing-header {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            background: #343a40;
+            color: white;
+            font-weight: bold;
+        }}
+        .pairing-header > div {{
+            padding: 15px 20px;
+            text-align: center;
+        }}
+        .pairing-table {{
+            display: table;
+            width: 100%;
+            border-collapse: collapse;
+        }}
+        .pairing-row {{
+            display: table-row;
+            border-bottom: 1px solid #e9ecef;
+        }}
+        .pairing-row:hover {{
+            background: #f8f9fa;
+        }}
+        .pairing-cell {{
+            display: table-cell;
+            padding: 12px 20px;
+            vertical-align: top;
+            width: 50%;
+            position: relative;
+        }}
+        .pairing-cell.pdf {{
+            border-right: 2px solid #dee2e6;
+        }}
+        .sentence-index {{
+            font-size: 11px;
+            color: #6c757d;
+            margin-bottom: 4px;
+        }}
+        .sentence-text {{
+            line-height: 1.5;
+            cursor: pointer;
+            user-select: none;
+        }}
+        .sentence-text:hover {{
+            background: #e9ecef;
+            border-radius: 4px;
+            padding: 4px;
+            margin: -4px;
+        }}
+        .selected {{
+            background: #cfe2ff !important;
+            border: 2px solid #0d6efd;
+            border-radius: 4px;
+            padding: 4px;
+            margin: -4px;
+        }}
+        .matched {{
+            background: #d1e7dd;
+        }}
+        .pair-indicator {{
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 20px;
+        }}
+        .stats {{
+            margin-top: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }}
+        .stat-card {{
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .stat-value {{
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }}
+        .stat-label {{
+            color: #6c757d;
+            font-size: 14px;
+            margin-top: 4px;
+        }}
+        .diff-modal {{
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }}
+        .diff-content {{
+            background: white;
+            margin: 2% auto;
+            padding: 20px;
+            width: 90%;
+            height: 90%;
+            border-radius: 8px;
+            overflow-y: auto;
+        }}
+        .diff-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #dee2e6;
+        }}
+        .diff-close {{
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }}
+        .diff-close:hover {{
+            color: #000;
+        }}
+        .diff-pair {{
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+        }}
+        .diff-pair-header {{
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #495057;
+        }}
+        .diff-text {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 15px;
+        }}
+        .diff-column {{
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }}
+        .diff-column h4 {{
+            margin: 0 0 10px 0;
+            color: #495057;
+        }}
+        .diff-highlights {{
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }}
+        .diff-added {{
+            background: #d4edda;
+            color: #155724;
+        }}
+        .diff-removed {{
+            background: #f8d7da;
+            color: #721c24;
+        }}
+        .diff-changed {{
+            background: #fff3cd;
+            color: #856404;
+        }}
+        .word-diff {{
+            display: inline;
+            padding: 2px 4px;
+            border-radius: 3px;
+            margin: 0 1px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📋 Visual Sentence Pairing Tool</h1>
+        <p>Click sentences to select them, then click "Pair Selected" to create matches. Sentences always remain in their original order.</p>
+        
+        <div class="controls">
+            <button class="btn btn-success" onclick="pairSelected()">🔗 Pair Selected</button>
+            <button class="btn btn-danger" onclick="clearSelection()">❌ Clear Selection</button>
+            <button class="btn" onclick="showDiffView()">📊 Show Differences</button>
+            <button class="btn" onclick="exportPairs()">💾 Export Pairs</button>
+            <span id="selection-info" style="margin-left: 20px; color: #666;"></span>
+        </div>
+    </div>
+    
+    <div class="pairing-container">
+        <div class="pairing-header">
+            <div>📄 PDF Sentences</div>
+            <div>🌐 HTML Sentences</div>
+        </div>
+        <div class="pairing-table" id="pairing-table">
+            {rows_html}
+        </div>
+    </div>
+    
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-value" id="total-pairs">0</div>
+            <div class="stat-label">Total Pairs</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="auto-pairs">0</div>
+            <div class="stat-label">Auto-matched</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="manual-pairs">0</div>
+            <div class="stat-label">Manual Pairs</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="unmatched">0</div>
+            <div class="stat-label">Unmatched</div>
+        </div>
+    </div>
+    
+    <!-- Diff Modal -->
+    <div id="diff-modal" class="diff-modal">
+        <div class="diff-content">
+            <div class="diff-header">
+                <h2>📊 Text Differences for Paired Sentences</h2>
+                <span class="diff-close" onclick="closeDiffView()">&times;</span>
+            </div>
+            <div id="diff-pairs-container"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Initialize data
+        let pairs = {pairs_json};
+        let pairCounter = pairs.length;
+        let selectedPdf = new Set();
+        let selectedHtml = new Set();
+        
+        // Add click handlers to all sentences
+        document.querySelectorAll('.sentence-text').forEach(elem => {{
+            elem.addEventListener('click', function() {{
+                const index = parseInt(this.dataset.index);
+                const side = this.dataset.side;
+                
+                if (side === 'pdf') {{
+                    if (selectedPdf.has(index)) {{
+                        selectedPdf.delete(index);
+                        this.classList.remove('selected');
+                    }} else {{
+                        selectedPdf.add(index);
+                        this.classList.add('selected');
+                    }}
+                }} else {{
+                    if (selectedHtml.has(index)) {{
+                        selectedHtml.delete(index);
+                        this.classList.remove('selected');
+                    }} else {{
+                        selectedHtml.add(index);
+                        this.classList.add('selected');
+                    }}
+                }}
+                
+                updateSelectionInfo();
+            }});
+        }});
+        
+        function updateSelectionInfo() {{
+            const info = document.getElementById('selection-info');
+            info.textContent = `Selected: ${{selectedPdf.size}} PDF, ${{selectedHtml.size}} HTML`;
+        }}
+        
+        function pairSelected() {{
+            if (selectedPdf.size === 0 || selectedHtml.size === 0) {{
+                alert('Please select at least one sentence from each side');
+                return;
+            }}
+            
+            // Create new pair
+            const pairId = `manual_${{pairCounter}}`;
+            const pair = {{
+                pair_id: pairId,
+                pdf_indices: Array.from(selectedPdf).sort((a, b) => a - b),
+                html_indices: Array.from(selectedHtml).sort((a, b) => a - b),
+                similarity: 0.0,
+                is_manual: true
+            }};
+            
+            pairs.push(pair);
+            pairCounter++;
+            
+            // Update visual display
+            updatePairDisplay();
+            
+            // Clear selection
+            clearSelection();
+            
+            // Update stats
+            updateStats();
+        }}
+        
+        function clearSelection() {{
+            selectedPdf.clear();
+            selectedHtml.clear();
+            document.querySelectorAll('.selected').forEach(elem => {{
+                elem.classList.remove('selected');
+            }});
+            updateSelectionInfo();
+        }}
+        
+        function updatePairDisplay() {{
+            // This would ideally reorganize the display to show paired sentences together
+            // For now, just highlight matched sentences
+            pairs.forEach(pair => {{
+                pair.pdf_indices.forEach(idx => {{
+                    const elem = document.querySelector(`[data-side="pdf"][data-index="${{idx}}"]`);
+                    if (elem) {{
+                        elem.parentElement.parentElement.classList.add('matched');
+                    }}
+                }});
+                
+                pair.html_indices.forEach(idx => {{
+                    const elem = document.querySelector(`[data-side="html"][data-index="${{idx}}"]`);
+                    if (elem) {{
+                        elem.parentElement.parentElement.classList.add('matched');
+                    }}
+                }});
+            }});
+        }}
+        
+        function updateStats() {{
+            const totalPairs = pairs.length;
+            const autoPairs = pairs.filter(p => !p.is_manual).length;
+            const manualPairs = pairs.filter(p => p.is_manual).length;
+            
+            // Count unmatched sentences
+            const totalPdf = document.querySelectorAll('[data-side="pdf"]').length;
+            const totalHtml = document.querySelectorAll('[data-side="html"]').length;
+            const matchedPdf = new Set();
+            const matchedHtml = new Set();
+            
+            pairs.forEach(pair => {{
+                pair.pdf_indices.forEach(idx => matchedPdf.add(idx));
+                pair.html_indices.forEach(idx => matchedHtml.add(idx));
+            }});
+            
+            const unmatched = (totalPdf - matchedPdf.size) + (totalHtml - matchedHtml.size);
+            
+            document.getElementById('total-pairs').textContent = totalPairs;
+            document.getElementById('auto-pairs').textContent = autoPairs;
+            document.getElementById('manual-pairs').textContent = manualPairs;
+            document.getElementById('unmatched').textContent = unmatched;
+        }}
+        
+        function exportPairs() {{
+            const exportData = {{
+                pairs: pairs,
+                timestamp: new Date().toISOString(),
+                stats: {{
+                    total_pairs: pairs.length,
+                    auto_pairs: pairs.filter(p => !p.is_manual).length,
+                    manual_pairs: pairs.filter(p => p.is_manual).length
+                }}
+            }};
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], {{type: 'application/json'}});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sentence_pairs_${{new Date().toISOString().split('T')[0]}}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert('✅ Pairs exported successfully!');
+        }}
+        
+        function showDiffView() {{
+            if (pairs.length === 0) {{
+                alert('No pairs to show differences for. Please create some pairs first.');
+                return;
+            }}
+            
+            const modal = document.getElementById('diff-modal');
+            const container = document.getElementById('diff-pairs-container');
+            
+            // Clear previous content
+            container.innerHTML = '';
+            
+            // Generate diff view for each pair
+            pairs.forEach((pair, index) => {{
+                const pdfTexts = pair.pdf_indices.map(idx => {{
+                    const elem = document.querySelector(`[data-side="pdf"][data-index="${{idx}}"]`);
+                    return elem ? elem.textContent.trim() : '';
+                }}).filter(text => text);
+                
+                const htmlTexts = pair.html_indices.map(idx => {{
+                    const elem = document.querySelector(`[data-side="html"][data-index="${{idx}}"]`);
+                    return elem ? elem.textContent.trim() : '';
+                }}).filter(text => text);
+                
+                const pairDiv = createDiffPair(pair.pair_id, pdfTexts, htmlTexts, index + 1);
+                container.appendChild(pairDiv);
+            }});
+            
+            modal.style.display = 'block';
+        }}
+        
+        function closeDiffView() {{
+            document.getElementById('diff-modal').style.display = 'none';
+        }}
+        
+        function createDiffPair(pairId, pdfTexts, htmlTexts, pairNumber) {{
+            const div = document.createElement('div');
+            div.className = 'diff-pair';
+            
+            const pdfCombined = pdfTexts.join(' ');
+            const htmlCombined = htmlTexts.join(' ');
+            
+            // Create word-level diff
+            const diffResult = createWordDiff(pdfCombined, htmlCombined);
+            
+            div.innerHTML = `
+                <div class="diff-pair-header">
+                    Pair ${{pairNumber}} (${{pairId}}) - ${{pdfTexts.length}} PDF ↔ ${{htmlTexts.length}} HTML sentences
+                </div>
+                <div class="diff-text">
+                    <div class="diff-column">
+                        <h4>📄 PDF Text</h4>
+                        <div class="diff-highlights">${{diffResult.pdf}}</div>
+                    </div>
+                    <div class="diff-column">
+                        <h4>🌐 HTML Text</h4>
+                        <div class="diff-highlights">${{diffResult.html}}</div>
+                    </div>
+                </div>
+                <div style="text-align: center; color: #666; font-size: 14px;">
+                    Similarity: ${{(diffResult.similarity * 100).toFixed(1)}}% | 
+                    Added: ${{diffResult.stats.added}} words | 
+                    Removed: ${{diffResult.stats.removed}} words | 
+                    Common: ${{diffResult.stats.common}} words
+                </div>
+            `;
+            
+            return div;
+        }}
+        
+        function createWordDiff(text1, text2) {{
+            const words1 = text1.toLowerCase().split(/\\s+/).filter(w => w.length > 0);
+            const words2 = text2.toLowerCase().split(/\\s+/).filter(w => w.length > 0);
+            
+            // Simple word-level diff algorithm
+            const common = [];
+            const removed = [];
+            const added = [];
+            
+            const words2Set = new Set(words2);
+            const words1Set = new Set(words1);
+            
+            // Find common words
+            words1.forEach(word => {{
+                if (words2Set.has(word)) {{
+                    common.push(word);
+                }}
+            }});
+            
+            // Find removed words (in PDF but not in HTML)
+            words1.forEach(word => {{
+                if (!words2Set.has(word)) {{
+                    removed.push(word);
+                }}
+            }});
+            
+            // Find added words (in HTML but not in PDF)
+            words2.forEach(word => {{
+                if (!words1Set.has(word)) {{
+                    added.push(word);
+                }}
+            }});
+            
+            // Create highlighted versions
+            const pdfHighlighted = highlightText(text1, words1, words2Set, 'removed');
+            const htmlHighlighted = highlightText(text2, words2, words1Set, 'added');
+            
+            // Calculate similarity
+            const totalWords = Math.max(words1.length, words2.length);
+            const similarity = totalWords > 0 ? common.length / totalWords : 0;
+            
+            return {{
+                pdf: pdfHighlighted,
+                html: htmlHighlighted,
+                similarity: similarity,
+                stats: {{
+                    common: common.length,
+                    removed: removed.length,
+                    added: added.length
+                }}
+            }};
+        }}
+        
+        function highlightText(originalText, words, otherWordsSet, diffType) {{
+            const originalWords = originalText.split(/\\s+/);
+            
+            return originalWords.map(word => {{
+                const cleanWord = word.toLowerCase().replace(/[^\\w]/g, '');
+                if (cleanWord && !otherWordsSet.has(cleanWord)) {{
+                    return `<span class="word-diff diff-${{diffType}}">${{word}}</span>`;
+                }} else if (cleanWord && otherWordsSet.has(cleanWord)) {{
+                    return word; // Common word - no highlighting
+                }} else {{
+                    return word; // Punctuation, etc.
+                }}
+            }}).join(' ');
+        }}
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {{
+            const modal = document.getElementById('diff-modal');
+            if (event.target === modal) {{
+                closeDiffView();
+            }}
+        }}
+        
+        // Initialize display
+        updatePairDisplay();
+        updateStats();
+    </script>
+</body>
+</html>"""
+        
+        return html_template
+    
+    def _generate_rows(self, pdf_sentences: List[IndexedSentence], 
+                      html_sentences: List[IndexedSentence]) -> str:
+        """Generate table rows maintaining original order."""
+        rows = []
+        max_len = max(len(pdf_sentences), len(html_sentences))
+        
+        for i in range(max_len):
+            pdf_cell = ""
+            html_cell = ""
+            
+            if i < len(pdf_sentences):
+                pdf_sent = pdf_sentences[i]
+                pdf_cell = f'''
+                    <div class="sentence-index">PDF [{pdf_sent.index}]</div>
+                    <div class="sentence-text" data-side="pdf" data-index="{pdf_sent.index}">
+                        {html.escape(pdf_sent.text)}
+                    </div>
+                '''
+            
+            if i < len(html_sentences):
+                html_sent = html_sentences[i]
+                html_cell = f'''
+                    <div class="sentence-index">HTML [{html_sent.index}]</div>
+                    <div class="sentence-text" data-side="html" data-index="{html_sent.index}">
+                        {html.escape(html_sent.text)}
+                    </div>
+                '''
+            
+            rows.append(f'''
+                <div class="pairing-row">
+                    <div class="pairing-cell pdf">{pdf_cell}</div>
+                    <div class="pairing-cell html">{html_cell}</div>
+                </div>
+            ''')
+        
+        return '\n'.join(rows)
+
+def main():
+    """Main function for testing."""
+    # Test data
+    pdf_sentences = [
+        "Revenue increased significantly in Q3.",
+        "We are pleased with the results.",
+        "Operating margins improved by 2%.",
+        "Looking forward, we expect continued growth.",
+        "Our strategy remains focused on innovation."
+    ]
+    
+    html_sentences = [
+        "Revenue increased significantly in Q3, and we are pleased with the results.",
+        "Operating margins improved by 2%.",
+        "Looking forward, we expect continued growth.",
+        "Additional disclosure information.",
+        "Our strategy remains focused on innovation and customer satisfaction."
+    ]
+    
+    # Create pairing tool
+    pairing_tool = VisualSentencePairing()
+    
+    # Generate interface
+    output_path = "visual_sentence_pairing.html"
+    pairing_tool.generate_pairing_html(pdf_sentences, html_sentences, output_path)
+    
+    print(f"\n🎯 Instructions:")
+    print(f"1. Open {output_path} in your browser")
+    print(f"2. Click sentences to select them (multi-select supported)")
+    print(f"3. Click 'Pair Selected' to create matches")
+    print(f"4. Sentences always stay in original order")
+    print(f"5. Export pairs when done")
+
+if __name__ == "__main__":
+    main()
