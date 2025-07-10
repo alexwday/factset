@@ -388,7 +388,7 @@ class SentenceAligner:
         alignments = self._fuzzy_align_sentences(pdf_sentences, html_sentences)
         
         # Second pass: post-processing for multi-sentence matches
-        print("    - Post-processing for multi-sentence matches...")
+        print("\n    - Post-processing for multi-sentence matches...")
         alignments = self._post_process_alignments(alignments, pdf_sentences, html_sentences)
         
         print(f"    - Created {len(alignments)} final alignments")
@@ -400,10 +400,18 @@ class SentenceAligner:
         used_pdf_indices = set()
         used_html_indices = set()
         
+        total_pdf = len(pdf_sentences)
+        print(f"    - Matching {total_pdf:,} PDF sentences against {len(html_sentences):,} HTML sentences...")
+        
         # Phase 1: Find exact and near-exact matches
         for pdf_idx, pdf_sent in enumerate(pdf_sentences):
             if pdf_idx in used_pdf_indices:
                 continue
+            
+            # Progress update without newlines
+            if pdf_idx % max(1, total_pdf // 20) == 0 or pdf_idx == total_pdf - 1:
+                progress = (pdf_idx + 1) / total_pdf * 100
+                print(f"\r      Progress: {progress:.1f}% ({pdf_idx + 1:,}/{total_pdf:,})", end="", flush=True)
                 
             best_match = None
             best_similarity = 0.0
@@ -436,6 +444,8 @@ class SentenceAligner:
                 
                 used_pdf_indices.add(pdf_idx)
                 used_html_indices.add(best_html_idx)
+        
+        print()  # New line after progress
         
         # Phase 2: Handle unmatched sentences
         for pdf_idx, pdf_sent in enumerate(pdf_sentences):
@@ -599,15 +609,19 @@ class SentenceAligner:
             else:
                 matched_alignments.append(align)
         
+        print(f"      Found {len(unmatched_pdf)} unmatched PDF and {len(unmatched_html)} unmatched HTML sentences")
+        
         # Try to match consecutive unmatched sentences
         new_matches = []
         
         # Phase 1: Try combining consecutive PDF sentences to match HTML
         if unmatched_pdf and unmatched_html:
+            print("      Phase 1: Combining PDF sentences to match HTML...")
             new_matches.extend(self._match_combined_sentences(unmatched_pdf, unmatched_html, "pdf_to_html"))
         
         # Phase 2: Try combining consecutive HTML sentences to match PDF
         if unmatched_pdf and unmatched_html:
+            print("      Phase 2: Combining HTML sentences to match PDF...")
             new_matches.extend(self._match_combined_sentences(unmatched_pdf, unmatched_html, "html_to_pdf"))
         
         # Remove newly matched sentences from unmatched lists
@@ -648,8 +662,13 @@ class SentenceAligner:
         new_matches = []
         
         if direction == "pdf_to_html":
+            total_html = len(unmatched_html)
             # Try combining 2-3 consecutive PDF sentences to match single HTML sentences
-            for html_sent in unmatched_html[:]:  # Copy to iterate safely
+            for html_idx, html_sent in enumerate(unmatched_html[:]):  # Copy to iterate safely
+                if html_idx % max(1, total_html // 10) == 0:
+                    progress = (html_idx + 1) / total_html * 100
+                    print(f"\r        PDF→HTML: {progress:.1f}% ({html_idx + 1}/{total_html})", end="", flush=True)
+                
                 # Try combining 2 consecutive PDF sentences
                 for i in range(len(unmatched_pdf) - 1):
                     combined_pdf = unmatched_pdf[i] + " " + unmatched_pdf[i + 1]
@@ -678,10 +697,17 @@ class SentenceAligner:
                                 similarity=similarity
                             ))
                             break
+            if total_html > 0:
+                print()  # New line after progress
         
         else:  # html_to_pdf
+            total_pdf = len(unmatched_pdf)
             # Try combining 2-3 consecutive HTML sentences to match single PDF sentences
-            for pdf_sent in unmatched_pdf[:]:  # Copy to iterate safely
+            for pdf_idx, pdf_sent in enumerate(unmatched_pdf[:]):  # Copy to iterate safely
+                if pdf_idx % max(1, total_pdf // 10) == 0:
+                    progress = (pdf_idx + 1) / total_pdf * 100
+                    print(f"\r        HTML→PDF: {progress:.1f}% ({pdf_idx + 1}/{total_pdf})", end="", flush=True)
+                
                 # Try combining 2 consecutive HTML sentences
                 for i in range(len(unmatched_html) - 1):
                     combined_html = unmatched_html[i] + " " + unmatched_html[i + 1]
@@ -695,6 +721,8 @@ class SentenceAligner:
                             similarity=similarity
                         ))
                         break
+            if total_pdf > 0:
+                print()  # New line after progress
         
         return new_matches
     
