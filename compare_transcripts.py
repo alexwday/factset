@@ -248,7 +248,7 @@ class TranscriptComparator:
             # Remove extra whitespace, normalize punctuation
             text = re.sub(r'\s+', ' ', text.strip())
             text = re.sub(r'["""]', '"', text)
-            text = re.sub(r'[''']', "'", text)
+            text = re.sub(r"[''']", "'", text)
             text = re.sub(r'[–—]', '-', text)
             if text:
                 normalized.append(text)
