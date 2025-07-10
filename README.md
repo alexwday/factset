@@ -48,9 +48,14 @@ Required environment variables:
 - `API_PASSWORD` - Your FactSet API password  
 - `PROXY_USER` - Corporate proxy username
 - `PROXY_PASSWORD` - Corporate proxy password
+- `PROXY_URL` - Corporate proxy URL (e.g., oproxy.fg.rbc.com:8080)
 - `NAS_USERNAME` - NAS server username
 - `NAS_PASSWORD` - NAS server password
 - `NAS_SERVER_IP` - NAS server IP address
+- `NAS_SERVER_NAME` - NAS server name for NTLM
+- `NAS_SHARE_NAME` - NAS share name
+- `NAS_BASE_PATH` - Base path within NAS share
+- `CLIENT_MACHINE_NAME` - Client machine name for SMB
 
 ### 3. Run Scripts
 
@@ -60,19 +65,23 @@ Each stage is a standalone Python script:
 # Stage 0: Bulk historical sync (optional)
 python stage_0_bulk_refresh/0_transcript_bulk_sync.py
 
-# Stage 1: Daily incremental sync
+# Stage 1: Daily incremental sync (planned)
 python stage_1_daily_sync/1_transcript_daily_sync.py
 
-# Stage 2: Processing & analysis
+# Stage 2: Processing & analysis (planned)
 python stage_2_processing/2_transcript_processing.py
 ```
 
+**Current Status**: Stage 0 is fully implemented and ready for use. Stages 1 and 2 are planned for future development.
+
 ## Pipeline Stages
 
-### Stage 0: Bulk Refresh (Optional)
+### Stage 0: Bulk Refresh (Implemented)
 - **Purpose**: Download ALL historical transcripts from 2023-present
 - **When to use**: Initial setup or complete repository refresh
 - **Output**: Complete transcript repository on NAS
+- **Configuration**: Loads operational settings from `Inputs/config/stage_0_config.json` on NAS
+- **Features**: Self-contained script with environment variable authentication
 
 ### Stage 1: Daily Sync (Scheduled)
 - **Purpose**: Check for new transcripts daily and download incrementally
@@ -90,11 +99,13 @@ python stage_2_processing/2_transcript_processing.py
 - Contains only credentials and connection details
 - Shared across all stages
 - Never committed to git (in .gitignore)
+- Variables: API credentials, proxy settings, NAS connection details
 
 ### Operational Settings (NAS config files)
 - Stored on NAS in `Inputs/config/` folder
 - Stage-specific: `stage_0_config.json`, `stage_1_config.json`, etc.
 - Contains monitored institutions, API settings, processing parameters
+- Downloaded by each script at runtime from NAS
 
 ## Monitored Institutions
 

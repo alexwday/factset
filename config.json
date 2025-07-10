@@ -1,0 +1,102 @@
+{
+  "monitored_institutions": {
+    "RY-CA": {
+      "name": "Royal Bank of Canada",
+      "region": "CA",
+      "type": "Bank"
+    },
+    "TD-CA": {
+      "name": "Toronto-Dominion Bank",
+      "region": "CA",
+      "type": "Bank"
+    },
+    "BNS-CA": {
+      "name": "Bank of Nova Scotia",
+      "region": "CA",
+      "type": "Bank"
+    },
+    "BMO-CA": {
+      "name": "Bank of Montreal",
+      "region": "CA",
+      "type": "Bank"
+    },
+    "CM-CA": {
+      "name": "Canadian Imperial Bank of Commerce",
+      "region": "CA",
+      "type": "Bank"
+    },
+    "NA-CA": {
+      "name": "National Bank of Canada",
+      "region": "CA",
+      "type": "Bank"
+    },
+    "JPM-US": {
+      "name": "JPMorgan Chase & Co.",
+      "region": "US",
+      "type": "Bank"
+    },
+    "BAC-US": {
+      "name": "Bank of America Corporation",
+      "region": "US",
+      "type": "Bank"
+    },
+    "WFC-US": {
+      "name": "Wells Fargo & Company",
+      "region": "US",
+      "type": "Bank"
+    },
+    "C-US": {
+      "name": "Citigroup Inc.",
+      "region": "US",
+      "type": "Bank"
+    },
+    "GS-US": {
+      "name": "Goldman Sachs Group Inc.",
+      "region": "US",
+      "type": "Bank"
+    },
+    "MS-US": {
+      "name": "Morgan Stanley",
+      "region": "US",
+      "type": "Bank"
+    },
+    "MFC-CA": {
+      "name": "Manulife Financial Corporation",
+      "region": "CA",
+      "type": "Insurance"
+    },
+    "SLF-CA": {
+      "name": "Sun Life Financial Inc.",
+      "region": "CA",
+      "type": "Insurance"
+    },
+    "UNH-US": {
+      "name": "UnitedHealth Group Incorporated",
+      "region": "US",
+      "type": "Insurance"
+    }
+  },
+  "api_settings": {
+    "industry_categories": ["IN:BANKS", "IN:FNLSVC", "IN:INS", "IN:SECS"],
+    "transcript_types": ["Corrected", "Raw", "NearRealTime"],
+    "sort_order": ["-storyDateTime"],
+    "pagination_limit": 1000,
+    "pagination_offset": 0,
+    "request_delay": 2.0,
+    "max_retries": 3,
+    "retry_delay": 5.0
+  },
+  "stage_0": {
+    "sync_start_date": "2023-01-01",
+    "description": "Bulk historical download from 2023-present"
+  },
+  "stage_1": {
+    "sync_days_back": 7,
+    "description": "Daily incremental sync with lookback period"
+  },
+  "stage_2": {
+    "processing_enabled": true,
+    "analysis_types": ["sentiment", "topics", "metrics"],
+    "description": "Processing and analysis of downloaded transcripts"
+  }
+}
