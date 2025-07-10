@@ -1,0 +1,13 @@
+# FactSet SDK
+fds.sdk.EventsandTranscripts
+
+# Core dependencies
+pandas
+requests
+python-dotenv
+
+# SMB connection
+pysmb
+
+# Utility libraries
+python-dateutil

@@ -17,29 +17,52 @@ import json
 import tempfile
 import io
 from smb.SMBConnection import SMBConnection
-from typing import Dict, List, Optional, Set, Tuple, Any
+from smb.base import SMBTimeout
+from typing import Dict, List, Optional, Set, Any, Tuple
 import warnings
+from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Semaphore
+from dataclasses import dataclass
+from collections import defaultdict
 
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-# Configuration
-SSL_CERT_NAS_PATH = "Inputs/certificate/certificate.cer"
-PROXY_USER = "XXXXXXX"
-PROXY_PASSWORD = "XXXXXXX"
-PROXY_URL = "oproxy.fg.rbc.com:8080"
+# Load environment variables - handles both notebook and script execution
+load_dotenv(dotenv_path='.env')  # For script execution
+if not os.getenv('API_USERNAME'):  # If not found, try parent directory
+    load_dotenv(dotenv_path='../.env')  # For notebook execution
 
-API_USERNAME = "x"
-API_PASSWORD = "x"
+# Configuration from environment
+SSL_CERT_NAS_PATH = os.getenv('SSL_CERT_NAS_PATH', 'Inputs/certificate/certificate.cer')
+PROXY_USER = os.getenv('PROXY_USER')
+PROXY_PASSWORD = os.getenv('PROXY_PASSWORD')
+PROXY_URL = os.getenv('PROXY_URL', 'oproxy.fg.rbc.com:8080')
 
-NAS_USERNAME = "your_nas_username"
-NAS_PASSWORD = "your_nas_password"
-NAS_SERVER_IP = "192.168.1.100"
-NAS_SERVER_NAME = "NAS-SERVER"
-NAS_SHARE_NAME = "shared_folder"
-NAS_BASE_PATH = "transcript_repository"
+API_USERNAME = os.getenv('API_USERNAME')
+API_PASSWORD = os.getenv('API_PASSWORD')
+
+NAS_USERNAME = os.getenv('NAS_USERNAME')
+NAS_PASSWORD = os.getenv('NAS_PASSWORD')
+NAS_SERVER_IP = os.getenv('NAS_SERVER_IP', '192.168.1.100')
+NAS_SERVER_NAME = os.getenv('NAS_SERVER_NAME', 'NAS-SERVER')
+NAS_SHARE_NAME = os.getenv('NAS_SHARE_NAME', 'shared_folder')
+NAS_BASE_PATH = os.getenv('NAS_BASE_PATH', 'transcript_repository')
 NAS_PORT = 445
 CLIENT_MACHINE_NAME = "SYNC-CLIENT"
+
+# Performance settings
+MAX_CONCURRENT_DOWNLOADS = int(os.getenv('MAX_CONCURRENT_DOWNLOADS', '5'))
+RATE_LIMIT_PER_SECOND = int(os.getenv('RATE_LIMIT_PER_SECOND', '10'))
+DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+
+# Validate required environment variables
+required_vars = ['PROXY_USER', 'PROXY_PASSWORD', 'API_USERNAME', 'API_PASSWORD', 
+                 'NAS_USERNAME', 'NAS_PASSWORD']
+missing_vars = [var for var in required_vars if not os.getenv(var)]
+if missing_vars:
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 SYNC_START_DATE = "2023-01-01"
 
@@ -73,8 +96,22 @@ RETRY_DELAY = 5.0
 user = PROXY_USER
 password = quote(PROXY_PASSWORD)
 
+# Rate limiter
+rate_limiter = Semaphore(RATE_LIMIT_PER_SECOND)
+last_request_time = 0
+
+@dataclass
+class DownloadFailure:
+    """Track failed downloads for retry"""
+    ticker: str
+    transcript_type: str
+    filename: str
+    transcript_link: str
+    error: str
+    attempts: int = 0
+
 def setup_logging() -> logging.Logger:
-    """Set up logging configuration."""
+    """Set up logging configuration with debug mode support."""
     temp_log_file = tempfile.NamedTemporaryFile(
         mode='w+', 
         suffix='.log', 
@@ -82,9 +119,11 @@ def setup_logging() -> logging.Logger:
         delete=False
     )
     
+    log_level = logging.DEBUG if DEBUG_MODE else logging.INFO
+    
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=log_level,
+        format='%(asctime)s - %(levelname)s - [%(funcName)s] - %(message)s',
         handlers=[
             logging.FileHandler(temp_log_file.name),
             logging.StreamHandler()
@@ -93,7 +132,21 @@ def setup_logging() -> logging.Logger:
     
     logger = logging.getLogger(__name__)
     logger.temp_log_file = temp_log_file.name
+    
+    if DEBUG_MODE:
+        logger.debug("Debug mode enabled")
+    
     return logger
+
+def rate_limit_request():
+    """Ensure we don't exceed rate limit."""
+    global last_request_time
+    with rate_limiter:
+        current_time = time.time()
+        time_since_last = current_time - last_request_time
+        if time_since_last < (1.0 / RATE_LIMIT_PER_SECOND):
+            time.sleep((1.0 / RATE_LIMIT_PER_SECOND) - time_since_last)
+        last_request_time = time.time()
 
 def get_nas_connection() -> Optional[SMBConnection]:
     """Create and return an SMB connection to the NAS."""
@@ -114,6 +167,9 @@ def get_nas_connection() -> Optional[SMBConnection]:
             logger.error(f"Failed to connect to NAS: {NAS_SERVER_IP}")
             return None
             
+    except SMBTimeout as e:
+        logger.error(f"NAS connection timeout: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error connecting to NAS: {e}")
         return None
@@ -127,7 +183,8 @@ def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
     try:
         conn.getAttributes(NAS_SHARE_NAME, file_path)
         return True
-    except:
+    except Exception as e:
+        logger.debug(f"File not found or error checking: {file_path} - {e}")
         return False
 
 def nas_create_directory(conn: SMBConnection, dir_path: str) -> bool:
@@ -135,7 +192,7 @@ def nas_create_directory(conn: SMBConnection, dir_path: str) -> bool:
     try:
         conn.createDirectory(NAS_SHARE_NAME, dir_path)
         return True
-    except Exception:
+    except Exception as e:
         if nas_file_exists(conn, dir_path):
             return True
         
@@ -145,7 +202,8 @@ def nas_create_directory(conn: SMBConnection, dir_path: str) -> bool:
             try:
                 conn.createDirectory(NAS_SHARE_NAME, dir_path)
                 return True
-            except:
+            except Exception as nested_e:
+                logger.error(f"Failed to create directory {dir_path}: {nested_e}")
                 return False
         return False
 
@@ -156,6 +214,7 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
         if parent_dir:
             nas_create_directory(conn, parent_dir)
         
+        local_file_obj.seek(0)
         conn.storeFile(NAS_SHARE_NAME, nas_file_path, local_file_obj)
         return True
     except Exception as e:
@@ -179,7 +238,8 @@ def nas_list_files(conn: SMBConnection, directory_path: str) -> List[str]:
         files = conn.listPath(NAS_SHARE_NAME, directory_path)
         return [file_info.filename for file_info in files 
                 if not file_info.isDirectory and file_info.filename.endswith('.xml')]
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Directory doesn't exist or error listing: {directory_path} - {e}")
         return []
 
 def sanitize_for_filename(text: Any) -> str:
@@ -192,6 +252,28 @@ def sanitize_for_filename(text: Any) -> str:
     clean_text = re.sub(r'[^\w\s-]', '', clean_text)
     clean_text = re.sub(r'[-\s]+', '_', clean_text)
     return clean_text.strip('_')
+
+def validate_transcript_data(transcript: Dict[str, Any]) -> bool:
+    """Validate that transcript data contains required fields."""
+    required_fields = ['event_type', 'transcript_type', 'event_id', 'report_id']
+    
+    for field in required_fields:
+        if field not in transcript or transcript.get(field) is None:
+            logger.warning(f"Missing required field '{field}' in transcript data")
+            return False
+    
+    # Validate transcript link
+    if not transcript.get('transcripts_link'):
+        logger.warning("Missing transcript download link")
+        return False
+    
+    # Validate link format
+    link = transcript.get('transcripts_link', '')
+    if not link.startswith(('http://', 'https://')):
+        logger.warning(f"Invalid transcript link format: {link}")
+        return False
+    
+    return True
 
 def create_directory_structure(nas_conn: SMBConnection) -> None:
     """Create the directory structure for the transcript repository on NAS."""
@@ -236,7 +318,7 @@ def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str
         if pd.notna(event_date):
             try:
                 event_date_str = pd.to_datetime(event_date).strftime('%Y-%m-%d')
-            except:
+            except Exception:
                 event_date_str = str(event_date)
         else:
             event_date_str = 'unknown_date'
@@ -259,10 +341,12 @@ def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: st
     return set(nas_list_files(nas_conn, institution_path))
 
 def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str, 
-                                 nas_file_path: str, transcript_id: str) -> bool:
-    """Download transcript with retry logic and upload to NAS."""
+                                 nas_file_path: str, transcript_id: str) -> Tuple[bool, Optional[str]]:
+    """Download transcript with retry logic and upload to NAS. Returns (success, error_message)."""
     for attempt in range(MAX_RETRIES):
         try:
+            rate_limit_request()
+            
             headers = {
                 'Accept': 'application/json',
                 'Authorization': configuration.get_basic_auth_token(),
@@ -282,29 +366,134 @@ def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str
             
             response.raise_for_status()
             
+            # Validate response content
+            if len(response.content) == 0:
+                raise ValueError("Empty response content")
+            
+            if len(response.content) > 50 * 1024 * 1024:  # 50MB limit
+                raise ValueError(f"Response too large: {len(response.content)} bytes")
+            
             file_obj = io.BytesIO(response.content)
             file_size = len(response.content)
             
             if nas_upload_file(nas_conn, file_obj, nas_file_path):
                 logger.info(f"Downloaded and uploaded {transcript_id} ({file_size:,} bytes)")
-                return True
+                return True, None
             else:
-                logger.error(f"Failed to upload {transcript_id} to NAS")
-                return False
-            
+                error_msg = f"Failed to upload {transcript_id} to NAS"
+                logger.error(error_msg)
+                return False, error_msg
+                
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"HTTP error {e.response.status_code}: {e}"
+        except requests.exceptions.Timeout as e:
+            error_msg = f"Request timeout: {e}"
+        except requests.exceptions.ConnectionError as e:
+            error_msg = f"Connection error: {e}"
+        except ValueError as e:
+            error_msg = f"Validation error: {e}"
         except Exception as e:
-            logger.warning(f"Download attempt {attempt + 1} failed for {transcript_id}: {e}")
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(RETRY_DELAY)
-            else:
-                logger.error(f"Failed to download {transcript_id} after {MAX_RETRIES} attempts")
-                return False
+            error_msg = f"Unexpected error: {e}"
+        
+        logger.warning(f"Download attempt {attempt + 1} failed for {transcript_id}: {error_msg}")
+        
+        if attempt < MAX_RETRIES - 1:
+            time.sleep(RETRY_DELAY * (attempt + 1))  # Exponential backoff
+        else:
+            logger.error(f"Failed to download {transcript_id} after {MAX_RETRIES} attempts")
+            return False, error_msg
     
-    return False
+    return False, "Max retries exceeded"
+
+def download_transcripts_concurrent(nas_conn: SMBConnection, 
+                                  new_transcripts: List[Tuple[Dict, str]], 
+                                  ticker: str, 
+                                  transcript_type: str) -> Tuple[int, List[DownloadFailure]]:
+    """Download transcripts concurrently with thread pool."""
+    downloaded_count = 0
+    failed_downloads = []
+    
+    def download_single(transcript_data: Tuple[Dict, str]) -> Tuple[bool, Optional[DownloadFailure]]:
+        transcript, filename = transcript_data
+        
+        nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", 
+                                    transcript_type.lower(), ticker, filename)
+        
+        success, error_msg = download_transcript_with_retry(
+            nas_conn, transcript['transcripts_link'], nas_file_path, filename
+        )
+        
+        if not success:
+            failure = DownloadFailure(
+                ticker=ticker,
+                transcript_type=transcript_type,
+                filename=filename,
+                transcript_link=transcript['transcripts_link'],
+                error=error_msg or "Unknown error",
+                attempts=1
+            )
+            return False, failure
+        
+        return True, None
+    
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS) as executor:
+        future_to_transcript = {
+            executor.submit(download_single, t): t 
+            for t in new_transcripts
+        }
+        
+        for future in as_completed(future_to_transcript):
+            try:
+                success, failure = future.result()
+                if success:
+                    downloaded_count += 1
+                elif failure:
+                    failed_downloads.append(failure)
+            except Exception as e:
+                transcript, filename = future_to_transcript[future]
+                logger.error(f"Exception in concurrent download for {filename}: {e}")
+                failed_downloads.append(DownloadFailure(
+                    ticker=ticker,
+                    transcript_type=transcript_type,
+                    filename=filename,
+                    transcript_link=transcript['transcripts_link'],
+                    error=str(e),
+                    attempts=1
+                ))
+    
+    return downloaded_count, failed_downloads
+
+def save_failed_downloads(nas_conn: SMBConnection, all_failures: List[DownloadFailure]) -> None:
+    """Save list of failed downloads for analysis."""
+    if not all_failures:
+        return
+    
+    failed_data = {
+        'timestamp': datetime.now().isoformat(),
+        'total_failures': len(all_failures),
+        'failures': [
+            {
+                'ticker': f.ticker,
+                'transcript_type': f.transcript_type,
+                'filename': f.filename,
+                'error': f.error,
+                'attempts': f.attempts
+            }
+            for f in all_failures
+        ]
+    }
+    
+    failed_json = json.dumps(failed_data, indent=2)
+    failed_path = nas_path_join(NAS_BASE_PATH, "Outputs", "logs", 
+                              f"failed_downloads_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
+    
+    file_obj = io.BytesIO(failed_json.encode('utf-8'))
+    if nas_upload_file(nas_conn, file_obj, failed_path):
+        logger.info(f"Saved {len(all_failures)} failed downloads to {failed_path}")
 
 def process_bank(ticker: str, institution_info: Dict[str, str], 
                 api_instance: transcripts_api.TranscriptsApi, 
-                nas_conn: SMBConnection) -> Dict[str, Any]:
+                nas_conn: SMBConnection) -> Tuple[Dict[str, Any], List[DownloadFailure]]:
     """Process a single bank: query API, check NAS files, download new transcripts."""
     logger.info(f"Processing: {institution_info['name']} ({ticker})")
     
@@ -312,8 +501,11 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
         'total': 0,
         'by_type': {transcript_type: 0 for transcript_type in TRANSCRIPT_TYPES}
     }
+    all_failures = []
     
     try:
+        rate_limit_request()
+        
         start_date = datetime.strptime(SYNC_START_DATE, "%Y-%m-%d").date()
         end_date = datetime.now().date()
         
@@ -331,7 +523,11 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
         
         if not response or not hasattr(response, 'data') or not response.data:
             logger.warning(f"No transcripts found for {ticker}")
-            return bank_downloads
+            return bank_downloads, all_failures
+        
+        # Validate response
+        if len(response.data) > 10000:  # Sanity check
+            logger.warning(f"Unusually large response for {ticker}: {len(response.data)} items")
         
         all_transcripts = [transcript.to_dict() for transcript in response.data]
         logger.info(f"Found {len(all_transcripts)} total transcripts for {ticker}")
@@ -349,12 +545,13 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
         earnings_transcripts = [
             transcript for transcript in filtered_transcripts
             if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', ''))
+            and validate_transcript_data(transcript)
         ]
         
-        logger.info(f"Found {len(earnings_transcripts)} earnings transcripts for {ticker}")
+        logger.info(f"Found {len(earnings_transcripts)} valid earnings transcripts for {ticker}")
         
         if not earnings_transcripts:
-            return bank_downloads
+            return bank_downloads, all_failures
         
         total_downloaded = 0
         
@@ -377,40 +574,35 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
             logger.info(f"Found {len(new_transcripts)} new {transcript_type} transcripts to download")
             
             if new_transcripts:
-                downloaded_count = 0
-                
-                for transcript, filename in new_transcripts:
-                    if pd.isna(transcript.get('transcripts_link')) or not transcript.get('transcripts_link'):
-                        logger.warning(f"No download link for {filename}")
-                        continue
-                    
-                    nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", 
-                                                transcript_type.lower(), ticker, filename)
-                    
-                    if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], 
-                                                    nas_file_path, filename):
-                        downloaded_count += 1
-                        
-                    time.sleep(REQUEST_DELAY)
+                # Download concurrently
+                downloaded_count, failures = download_transcripts_concurrent(
+                    nas_conn, new_transcripts, ticker, transcript_type
+                )
                 
                 logger.info(f"Successfully downloaded {downloaded_count}/{len(new_transcripts)} {transcript_type} transcripts")
                 total_downloaded += downloaded_count
                 bank_downloads['by_type'][transcript_type] = downloaded_count
+                all_failures.extend(failures)
         
         bank_downloads['total'] = total_downloaded
-        logger.info(f"Completed {ticker}: Downloaded {total_downloaded} new transcripts total")
+        logger.info(f"Completed {ticker}: Downloaded {total_downloaded} new transcripts total, {len(all_failures)} failures")
         
-        return bank_downloads
+        return bank_downloads, all_failures
         
     except Exception as e:
         logger.error(f"Error processing {ticker}: {e}")
-        return bank_downloads
+        return bank_downloads, all_failures
 
-def generate_final_inventory(nas_conn: SMBConnection) -> None:
+def generate_final_inventory(nas_conn: SMBConnection) -> Dict[str, Any]:
     """Generate final inventory of all downloaded files from NAS."""
     logger.info("Generating final inventory from NAS")
     
     inventory = {}
+    summary_stats = {
+        'total_files': 0,
+        'by_type': defaultdict(int),
+        'by_institution': defaultdict(int)
+    }
     
     for transcript_type in TRANSCRIPT_TYPES:
         inventory[transcript_type] = {}
@@ -418,13 +610,21 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
         for ticker in MONITORED_INSTITUTIONS.keys():
             institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "data", transcript_type.lower(), ticker)
             files = nas_list_files(nas_conn, institution_path)
-            inventory[transcript_type][ticker] = len(files)
+            count = len(files)
+            inventory[transcript_type][ticker] = count
+            
+            summary_stats['total_files'] += count
+            summary_stats['by_type'][transcript_type] += count
+            summary_stats['by_institution'][ticker] += count
     
+    # Log summary
+    logger.info(f"Total files in repository: {summary_stats['total_files']}")
     for transcript_type in TRANSCRIPT_TYPES:
-        total_type = sum(count for count in inventory[transcript_type].values())
-        logger.info(f"Total {transcript_type}: {total_type} files")
+        logger.info(f"Total {transcript_type}: {summary_stats['by_type'][transcript_type]} files")
     
     # Save inventory files
+    timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    
     for transcript_type in TRANSCRIPT_TYPES:
         inventory_json = json.dumps(inventory[transcript_type], indent=2)
         inventory_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", 
@@ -433,12 +633,21 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
         inventory_file_obj = io.BytesIO(inventory_json.encode('utf-8'))
         nas_upload_file(nas_conn, inventory_file_obj, inventory_file_path)
     
-    complete_inventory_json = json.dumps(inventory, indent=2)
+    # Save complete inventory with metadata
+    complete_inventory = {
+        'timestamp': timestamp,
+        'summary': dict(summary_stats),
+        'inventory': inventory
+    }
+    
+    complete_inventory_json = json.dumps(complete_inventory, indent=2)
     complete_inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "listing", 
-                                          f"complete_inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
+                                          f"complete_inventory_{timestamp}.json")
     
     complete_inventory_obj = io.BytesIO(complete_inventory_json.encode('utf-8'))
     nas_upload_file(nas_conn, complete_inventory_obj, complete_inventory_path)
+    
+    return complete_inventory
 
 def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     """Download SSL certificate from NAS and set up for use."""
@@ -446,6 +655,11 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
         logger.info("Downloading SSL certificate from NAS...")
         cert_data = nas_download_file(nas_conn, SSL_CERT_NAS_PATH)
         if cert_data:
+            # Validate certificate data
+            if len(cert_data) < 100:  # Basic sanity check
+                logger.error("SSL certificate appears to be invalid (too small)")
+                return None
+            
             temp_cert = tempfile.NamedTemporaryFile(mode='wb', suffix='.cer', delete=False)
             temp_cert.write(cert_data)
             temp_cert.close()
@@ -465,8 +679,10 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
 def main() -> None:
     """Main function to orchestrate the transcript repository sync."""
     logger.info("EARNINGS TRANSCRIPT REPOSITORY SYNC v2")
+    logger.info(f"Environment: {'DEBUG' if DEBUG_MODE else 'PRODUCTION'}")
     
     temp_cert_path = None
+    start_time = datetime.now()
     
     nas_conn = get_nas_connection()
     if not nas_conn:
@@ -498,33 +714,48 @@ def main() -> None:
     try:
         create_directory_structure(nas_conn)
         
-        start_time = datetime.now()
         total_institutions = len(MONITORED_INSTITUTIONS)
         total_downloaded = 0
+        all_failures = []
+        download_summary = {}
         
         logger.info(f"Starting sync for {total_institutions} institutions")
         logger.info(f"Date range: {SYNC_START_DATE} to {datetime.now().date()}")
+        logger.info(f"Max concurrent downloads: {MAX_CONCURRENT_DOWNLOADS}")
+        logger.info(f"Rate limit: {RATE_LIMIT_PER_SECOND} requests/second")
         
         with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
             api_instance = transcripts_api.TranscriptsApi(api_client)
             
             for i, (ticker, institution_info) in enumerate(MONITORED_INSTITUTIONS.items(), 1):
-                logger.info(f"Processing institution {i}/{total_institutions}")
+                logger.info(f"\nProcessing institution {i}/{total_institutions}")
                 
-                bank_downloads = process_bank(ticker, institution_info, api_instance, nas_conn)
+                bank_downloads, failures = process_bank(ticker, institution_info, api_instance, nas_conn)
+                download_summary[ticker] = bank_downloads
                 total_downloaded += bank_downloads['total']
+                all_failures.extend(failures)
                 
                 if i < total_institutions:
                     time.sleep(REQUEST_DELAY)
         
-        generate_final_inventory(nas_conn)
+        # Save failed downloads if any
+        if all_failures:
+            save_failed_downloads(nas_conn, all_failures)
         
+        # Generate final inventory
+        final_inventory = generate_final_inventory(nas_conn)
+        
+        # Final summary
         end_time = datetime.now()
         execution_time = end_time - start_time
         
+        logger.info("\n" + "="*60)
         logger.info("SYNC COMPLETE")
+        logger.info("="*60)
         logger.info(f"Total new transcripts downloaded: {total_downloaded}")
+        logger.info(f"Total failures: {len(all_failures)}")
         logger.info(f"Execution time: {execution_time}")
+        logger.info(f"Total files in repository: {final_inventory['summary']['total_files']}")
         
         # Upload log file to NAS
         log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "logs", 
@@ -532,20 +763,25 @@ def main() -> None:
         with open(logger.temp_log_file, 'rb') as log_file:
             nas_upload_file(nas_conn, log_file, log_file_path)
         
+    except KeyboardInterrupt:
+        logger.info("Sync interrupted by user")
+    except Exception as e:
+        logger.error(f"Fatal error during sync: {e}", exc_info=True)
     finally:
         if nas_conn:
             nas_conn.close()
         
-        if temp_cert_path:
+        if temp_cert_path and os.path.exists(temp_cert_path):
             try:
                 os.unlink(temp_cert_path)
-            except:
+            except Exception:
                 pass
         
-        try:
-            os.unlink(logger.temp_log_file)
-        except:
-            pass
+        if hasattr(logger, 'temp_log_file') and os.path.exists(logger.temp_log_file):
+            try:
+                os.unlink(logger.temp_log_file)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     logger = setup_logging()
