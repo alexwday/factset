@@ -11,7 +11,17 @@ import html
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass, asdict
-# from bs4 import BeautifulSoup  # Optional - only needed for real HTML parsing
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    print("Warning: BeautifulSoup not found. Install with: pip install beautifulsoup4")
+    BeautifulSoup = None
+
+try:
+    import pdfplumber
+except ImportError:
+    print("Warning: pdfplumber not found. Install with: pip install pdfplumber")
+    pdfplumber = None
 
 @dataclass
 class IndexedSentence:
@@ -53,30 +63,76 @@ class VisualSentencePairing:
         return clean_sentences
     
     def extract_pdf_sentences(self, pdf_path: str) -> List[str]:
-        """Extract sentences from PDF (simplified for demo)."""
-        # In real implementation, use pdfplumber or PyPDF2
-        # For now, return dummy data
-        return [
-            "Revenue increased significantly in Q3.",
-            "We are pleased with the results.",
-            "Operating margins improved by 2%.",
-            "Looking forward, we expect continued growth."
-        ]
+        """Extract sentences from PDF using pdfplumber."""
+        if not pdfplumber:
+            print("❌ pdfplumber not available. Using demo data.")
+            return [
+                "Revenue increased significantly in Q3.",
+                "We are pleased with the results.",
+                "Operating margins improved by 2%.",
+                "Looking forward, we expect continued growth."
+            ]
+        
+        try:
+            sentences = []
+            with pdfplumber.open(pdf_path) as pdf:
+                text_lines = []
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        text_lines.extend(text.split('\n'))
+                
+                sentences = self.extract_sentences(text_lines)
+            
+            print(f"📄 Extracted {len(sentences)} sentences from PDF")
+            return sentences
+            
+        except Exception as e:
+            print(f"❌ Error reading PDF: {e}")
+            return []
     
     def extract_html_sentences(self, html_path: str) -> List[str]:
         """Extract sentences from HTML transcript."""
-        # For demo purposes, skip HTML parsing
-        # with open(html_path, 'r', encoding='utf-8') as f:
-        #     soup = BeautifulSoup(f.read(), 'html.parser')
+        if not BeautifulSoup:
+            print("❌ BeautifulSoup not available. Using demo data.")
+            return [
+                "Revenue increased significantly in Q3, and we are pleased with the results.",
+                "Operating margins improved by 2%.",
+                "Looking forward, we expect continued growth.",
+                "Additional disclosure information.",
+                "Our strategy remains focused on innovation and customer satisfaction."
+            ]
         
-        # Return demo HTML sentences
-        return [
-            "Revenue increased significantly in Q3, and we are pleased with the results.",
-            "Operating margins improved by 2%.",
-            "Looking forward, we expect continued growth.",
-            "Additional disclosure information.",
-            "Our strategy remains focused on innovation and customer satisfaction."
-        ]
+        try:
+            with open(html_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Extract text from various common HTML structures
+            text_elements = []
+            
+            # Try common transcript structures
+            for selector in ['div.speaker-block', 'div.content', 'p', 'div']:
+                elements = soup.select(selector)
+                if elements:
+                    for elem in elements:
+                        text = elem.get_text().strip()
+                        if text and len(text) > 20:  # Skip very short text
+                            text_elements.append(text)
+            
+            # If no structured content found, get all text
+            if not text_elements:
+                text = soup.get_text()
+                text_elements = [line.strip() for line in text.split('\n') if line.strip()]
+            
+            sentences = self.extract_sentences(text_elements)
+            print(f"🌐 Extracted {len(sentences)} sentences from HTML")
+            return sentences
+            
+        except Exception as e:
+            print(f"❌ Error reading HTML: {e}")
+            return []
     
     def find_direct_matches(self, pdf_sentences: List[IndexedSentence], 
                            html_sentences: List[IndexedSentence]) -> List[SentencePair]:
@@ -790,37 +846,60 @@ class VisualSentencePairing:
         return '\n'.join(rows)
 
 def main():
-    """Main function for testing."""
-    # Test data
-    pdf_sentences = [
-        "Revenue increased significantly in Q3.",
-        "We are pleased with the results.",
-        "Operating margins improved by 2%.",
-        "Looking forward, we expect continued growth.",
-        "Our strategy remains focused on innovation."
-    ]
+    """Main function - accepts PDF and HTML file paths as arguments."""
+    import argparse
     
-    html_sentences = [
-        "Revenue increased significantly in Q3, and we are pleased with the results.",
-        "Operating margins improved by 2%.",
-        "Looking forward, we expect continued growth.",
-        "Additional disclosure information.",
-        "Our strategy remains focused on innovation and customer satisfaction."
-    ]
+    parser = argparse.ArgumentParser(description='Visual Sentence Pairing Tool')
+    parser.add_argument('--pdf', help='Path to PDF file', required=False)
+    parser.add_argument('--html', help='Path to HTML file', required=False)
+    parser.add_argument('--output', help='Output HTML file name', default='visual_sentence_pairing.html')
+    
+    args = parser.parse_args()
     
     # Create pairing tool
     pairing_tool = VisualSentencePairing()
     
+    # Extract sentences
+    if args.pdf:
+        print(f"📄 Reading PDF: {args.pdf}")
+        pdf_sentences = pairing_tool.extract_pdf_sentences(args.pdf)
+    else:
+        print("📄 No PDF provided, using demo data")
+        pdf_sentences = [
+            "Revenue increased significantly in Q3.",
+            "We are pleased with the results.",
+            "Operating margins improved by 2%.",
+            "Looking forward, we expect continued growth.",
+            "Our strategy remains focused on innovation."
+        ]
+    
+    if args.html:
+        print(f"🌐 Reading HTML: {args.html}")
+        html_sentences = pairing_tool.extract_html_sentences(args.html)
+    else:
+        print("🌐 No HTML provided, using demo data")
+        html_sentences = [
+            "Revenue increased significantly in Q3, and we are pleased with the results.",
+            "Operating margins improved by 2%.",
+            "Looking forward, we expect continued growth.",
+            "Additional disclosure information.",
+            "Our strategy remains focused on innovation and customer satisfaction."
+        ]
+    
+    if not pdf_sentences or not html_sentences:
+        print("❌ No sentences extracted. Check your files and dependencies.")
+        return
+    
     # Generate interface
-    output_path = "visual_sentence_pairing.html"
-    pairing_tool.generate_pairing_html(pdf_sentences, html_sentences, output_path)
+    pairing_tool.generate_pairing_html(pdf_sentences, html_sentences, args.output)
     
     print(f"\n🎯 Instructions:")
-    print(f"1. Open {output_path} in your browser")
+    print(f"1. Open {args.output} in your browser")
     print(f"2. Click sentences to select them (multi-select supported)")
     print(f"3. Click 'Pair Selected' to create matches")
-    print(f"4. Sentences always stay in original order")
+    print(f"4. Click 'Show Differences' to see word-level diffs")
     print(f"5. Export pairs when done")
+    print(f"\n🚀 To open: open {args.output}")
 
 if __name__ == "__main__":
     main()
