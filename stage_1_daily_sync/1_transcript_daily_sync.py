@@ -1016,7 +1016,7 @@ def main() -> None:
         with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
             api_instance = transcripts_api.TranscriptsApi(api_client)
             
-            # Get all transcripts for all target dates
+            # Get all transcripts for all target dates - efficient discovery
             all_transcripts_by_ticker = {}
             for ticker in monitored_tickers:
                 all_transcripts_by_ticker[ticker] = []
@@ -1034,30 +1034,42 @@ def main() -> None:
                 if target_date != target_dates[-1]:  # Don't sleep after last date
                     time.sleep(config['api_settings']['request_delay'])
             
-            # Process each institution with their accumulated transcripts
+            # Log summary of discovery results
+            banks_with_transcripts = [ticker for ticker, transcripts in all_transcripts_by_ticker.items() if transcripts]
+            total_transcripts_found = sum(len(transcripts) for transcripts in all_transcripts_by_ticker.values())
+            
+            if banks_with_transcripts:
+                logger.info(f"Discovery complete: Found {total_transcripts_found} transcripts for {len(banks_with_transcripts)} banks: {', '.join(banks_with_transcripts)}")
+            else:
+                logger.info("Discovery complete: No new transcripts found for any monitored banks")
+            
+            # Process each institution with their accumulated transcripts (proven logic)
             for i, (ticker, institution_info) in enumerate(config['monitored_institutions'].items(), 1):
-                logger.info(f"Processing institution {i}/{total_institutions}")
-                
                 transcripts_for_ticker = all_transcripts_by_ticker[ticker]
-                bank_downloads = process_bank(ticker, institution_info, transcripts_for_ticker, nas_conn, configuration, user, password)
-                total_downloaded += bank_downloads['total']
                 
-                if bank_downloads['found_transcripts']:
-                    institutions_with_transcripts.append({
-                        'ticker': ticker,
-                        'name': institution_info['name'],
-                        'type': institution_info['type'],
-                        'downloaded': bank_downloads['total']
-                    })
+                # Only process if we found transcripts for this bank
+                if transcripts_for_ticker:
+                    logger.info(f"Processing institution {i}/{total_institutions}: {institution_info['name']} ({ticker})")
+                    
+                    bank_downloads = process_bank(ticker, institution_info, transcripts_for_ticker, nas_conn, configuration, user, password)
+                    total_downloaded += bank_downloads['total']
+                    
+                    if bank_downloads['found_transcripts']:
+                        institutions_with_transcripts.append({
+                            'ticker': ticker,
+                            'name': institution_info['name'],
+                            'type': institution_info['type'],
+                            'downloaded': bank_downloads['total']
+                        })
                 else:
+                    # No transcripts found for this bank - skip processing
                     institutions_without_transcripts.append({
                         'ticker': ticker,
                         'name': institution_info['name'],
                         'type': institution_info['type']
                     })
                 
-                if i < total_institutions:
-                    time.sleep(config['api_settings']['request_delay'])
+                # No artificial delays between banks - we already have all the data
         
         end_time = datetime.now()
         execution_time = end_time - start_time
