@@ -53,8 +53,8 @@ PROXY_DOMAIN = os.getenv('PROXY_DOMAIN', 'MAPLE')
 
 # Test configuration
 TEST_TICKER = "RY-CA"  # Royal Bank of Canada
-TEST_PERIODS = ["QTR", "QTR_R", "ANN", "ANN_R", "LTM"]  # Different periodicities to test
-TEST_CURRENCIES = ["CAD", "USD", "LOCAL"]  # Different currencies to test
+TEST_PERIODS = ["QTR"]  # Just latest quarter
+TEST_CURRENCIES = ["CAD"]  # Just CAD currency
 
 # Validate required environment variables
 required_env_vars = [
@@ -218,9 +218,9 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
         if is_array_type:
             print(f"    🔍 Processing array-type metrics ({data_type}) - may need extended time")
         
-        # Add date range for recent data (last 3 years)
+        # Add date range for recent data (last 1 year for quick results)
         end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=3*365)
+        start_date = end_date - timedelta(days=365)
         
         # Create request object with proper model class wrapping
         # CRITICAL: All parameters must be wrapped in their respective model classes
@@ -695,16 +695,8 @@ def main():
                             if not metric_codes:
                                 continue
                                 
-                            # Adjust batch size based on data type
-                            array_types = ['floatArray', 'doubleArray', 'intArray', 'stringArray']
-                            if data_type in array_types:
-                                # Array types may need smaller batches due to multi-dimensional data
-                                batch_size = 5
-                            else:
-                                # Regular scalar types can handle larger batches
-                                batch_size = 20
-                            
-                            test_metrics = metric_codes[:batch_size]
+                            # For quick overview, test just a few metrics per data type
+                            test_metrics = metric_codes[:5]  # Just 5 metrics per type for quick overview
                             print(f"    📊 Testing {len(test_metrics)} {data_type} metrics...")
                             
                             data = get_fundamental_data(
