@@ -69,7 +69,7 @@ class EnhancedTranscriptComparer:
     def pre_tokenize_normalize(self, text: str) -> str:
         """
         Apply normalizations that affect token boundaries BEFORE tokenization.
-        Only handles clear cases that change token boundaries.
+        Handles cases where hyphen differences create token boundary mismatches.
         """
         # Normalize currency symbols that affect token boundaries
         # Convert $X to CAD X (with space to create proper tokens)
@@ -79,9 +79,25 @@ class EnhancedTranscriptComparer:
         # US$X -> CAD X, USD$X -> CAD X, etc.
         normalized = re.sub(r'(?:US|USD|C)\$(\d+(?:\.\d+)?)', r'CAD \1', normalized)
         
-        # Handle compound phrases that should be split the same way
-        # Convert "year-over-year" to "year over year" to match tokenization
+        # Handle compound phrases - convert hyphenated versions to spaced versions
+        # This ensures consistent tokenization
+        
+        # Financial terms
         normalized = re.sub(r'\byear-over-year\b', 'year over year', normalized)
+        normalized = re.sub(r'\bthrough-the-cycle\b', 'through the cycle', normalized)
+        normalized = re.sub(r'\blower-cost\b', 'lower cost', normalized)
+        normalized = re.sub(r'\bhigh-single-digit\b', 'high single digit', normalized)
+        normalized = re.sub(r'\ball-bank\b', 'all bank', normalized)
+        normalized = re.sub(r'\bAll-Bank\b', 'All Bank', normalized)
+        normalized = re.sub(r'\bshorter-duration\b', 'shorter duration', normalized)
+        
+        # Common prefixes - convert to spaced versions to match tokenization
+        # This handles pretax vs pre-tax, requeue vs re-queue, etc.
+        normalized = re.sub(r'\b(pre|post|re|co|multi|non|anti|de|dis|mis|over|under|sub|super)-(\w+)', r'\1 \2', normalized)
+        
+        # Also handle compound words that should be split
+        # Convert "pretax" to "pre tax", "requeue" to "re queue", etc.
+        normalized = re.sub(r'\b(pre|post|re|co|multi|non|anti|de|dis|mis|over|under|sub|super)(\w+)', r'\1 \2', normalized)
         
         return normalized
     
@@ -176,19 +192,6 @@ class EnhancedTranscriptComparer:
         """Simple tokenization preserving original tokens."""
         return re.findall(r'\S+', text)
     
-    def tokenize_with_pre_normalization(self, text: str) -> Tuple[List[str], List[str]]:
-        """
-        Tokenize text with pre-normalization for better token boundary alignment.
-        Returns: (original_tokens, normalized_tokens_for_alignment)
-        """
-        # Apply pre-tokenization normalization
-        pre_normalized = self.pre_tokenize_normalize(text)
-        
-        # Tokenize both original and pre-normalized text
-        original_tokens = self.tokenize(text)
-        pre_normalized_tokens = self.tokenize(pre_normalized)
-        
-        return original_tokens, pre_normalized_tokens
     
     def calculate_similarity(self, token1: str, token2: str) -> float:
         """Calculate similarity between tokens."""
@@ -680,28 +683,23 @@ class EnhancedTranscriptComparer:
         pdf_text = self.extract_pdf_text(pdf_path)
         html_text = self.extract_html_text(html_path)
         
-        # Apply pre-tokenization normalization and tokenize
-        pdf_orig_tokens, pdf_pre_norm_tokens = self.tokenize_with_pre_normalization(pdf_text)
-        html_orig_tokens, html_pre_norm_tokens = self.tokenize_with_pre_normalization(html_text)
+        # Apply pre-tokenization normalization to handle currency symbols
+        pdf_pre_norm_text = self.pre_tokenize_normalize(pdf_text)
+        html_pre_norm_text = self.pre_tokenize_normalize(html_text)
         
-        # Use pre-normalized tokens for alignment if they're different from original
-        # This handles currency symbol cases like $4.5 vs CAD 4.5
-        if pdf_pre_norm_tokens != pdf_orig_tokens or html_pre_norm_tokens != html_orig_tokens:
-            # Use pre-normalized tokens for alignment
-            segments = self.align_sequences_smart(pdf_pre_norm_tokens, html_pre_norm_tokens)
-            # But preserve original tokens for display
-            self._map_segments_to_original(segments, pdf_orig_tokens, html_orig_tokens, 
-                                         pdf_pre_norm_tokens, html_pre_norm_tokens)
-        else:
-            # Use original tokens
-            segments = self.align_sequences_smart(pdf_orig_tokens, html_orig_tokens)
+        # Tokenize the pre-normalized text
+        pdf_tokens = self.tokenize(pdf_pre_norm_text)
+        html_tokens = self.tokenize(html_pre_norm_text)
+        
+        # Use the original smart alignment approach
+        segments = self.align_sequences_smart(pdf_tokens, html_tokens)
         
         # Merge all adjacent segments of the same type
         segments = self.merge_adjacent_segments(segments)
         
-        # Calculate statistics based on original tokens
-        total_pdf_tokens = len(pdf_orig_tokens)
-        total_html_tokens = len(html_orig_tokens)
+        # Calculate statistics
+        total_pdf_tokens = len(pdf_tokens)
+        total_html_tokens = len(html_tokens)
         
         exact_matches = sum(
             len(seg.pdf_text.split()) 
@@ -728,16 +726,6 @@ class EnhancedTranscriptComparer:
             'segments': segments
         }
     
-    def _map_segments_to_original(self, segments: List[AlignedSegment], 
-                                pdf_orig: List[str], html_orig: List[str],
-                                pdf_pre_norm: List[str], html_pre_norm: List[str]):
-        """
-        Map segments back to original tokens when pre-normalization was applied.
-        This is a simplified version - in practice, you'd need more sophisticated mapping.
-        """
-        # For now, we'll assume a simple case where token counts match
-        # In a full implementation, this would need more sophisticated token mapping
-        pass
 
 
 def main():
