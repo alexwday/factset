@@ -43,6 +43,7 @@ NAS_BASE_PATH = os.getenv('NAS_BASE_PATH')
 NAS_PORT = int(os.getenv('NAS_PORT', 445))
 CONFIG_PATH = os.getenv('CONFIG_PATH')
 CLIENT_MACHINE_NAME = os.getenv('CLIENT_MACHINE_NAME')
+PROXY_DOMAIN = os.getenv('PROXY_DOMAIN', 'MAPLE')
 
 # Validate required environment variables
 required_env_vars = [
@@ -62,8 +63,6 @@ if missing_vars:
 # Global variables for configuration
 config = {}
 logger = None
-user = None
-password = None
 
 def setup_logging() -> logging.Logger:
     """Set up logging configuration."""
@@ -87,8 +86,20 @@ def setup_logging() -> logging.Logger:
     logger.temp_log_file = temp_log_file.name
     return logger
 
+def sanitize_url_for_logging(url: str) -> str:
+    """Sanitize URL for logging by removing query parameters and auth tokens."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        # Return only scheme, netloc, and path - remove query params and fragments
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    except (ValueError, TypeError, AttributeError, ImportError) as e:
+        logger.warning(f"URL sanitization failed: {e}")
+        return "[URL_SANITIZED]"
+
 def get_nas_connection() -> Optional[SMBConnection]:
     """Create and return an SMB connection to the NAS."""
+    global logger
     try:
         conn = SMBConnection(
             username=NAS_USERNAME,
@@ -100,18 +111,122 @@ def get_nas_connection() -> Optional[SMBConnection]:
         )
         
         if conn.connect(NAS_SERVER_IP, NAS_PORT):
-            logger.info(f"Connected to NAS: {NAS_SERVER_IP}")
+            logger.info("Connected to NAS successfully")
             return conn
         else:
-            logger.error(f"Failed to connect to NAS: {NAS_SERVER_IP}")
+            logger.error("Failed to connect to NAS")
             return None
             
     except Exception as e:
         logger.error(f"Error connecting to NAS: {e}")
         return None
 
+def validate_config_schema(config: Dict[str, Any]) -> None:
+    """Validate configuration schema and parameters."""
+    global logger
+    
+    # Define required configuration structure
+    required_structure = {
+        'stage_0': {
+            'sync_start_date': str,
+            'description': str
+        },
+        'api_settings': {
+            'request_delay': (int, float),
+            'max_retries': int,
+            'retry_delay': (int, float),
+            'transcript_types': list
+        },
+        'monitored_institutions': dict,
+        'ssl_cert_nas_path': str
+    }
+    
+    # Validate top-level structure
+    for top_key, top_value in required_structure.items():
+        if top_key not in config:
+            raise ValueError(f"Missing required configuration section: {top_key}")
+        
+        if isinstance(top_value, dict):
+            # Validate nested structure
+            for nested_key, expected_type in top_value.items():
+                if nested_key not in config[top_key]:
+                    raise ValueError(f"Missing required configuration parameter: {top_key}.{nested_key}")
+                
+                actual_value = config[top_key][nested_key]
+                if isinstance(expected_type, tuple):
+                    if not isinstance(actual_value, expected_type):
+                        raise ValueError(f"Invalid type for {top_key}.{nested_key}: expected {expected_type}, got {type(actual_value)}")
+                else:
+                    if not isinstance(actual_value, expected_type):
+                        raise ValueError(f"Invalid type for {top_key}.{nested_key}: expected {expected_type}, got {type(actual_value)}")
+        else:
+            # Validate direct parameter
+            if not isinstance(config[top_key], top_value):
+                raise ValueError(f"Invalid type for {top_key}: expected {top_value}, got {type(config[top_key])}")
+    
+    # Validate specific parameter values
+    try:
+        # Validate sync_start_date format
+        datetime.strptime(config['stage_0']['sync_start_date'], "%Y-%m-%d")
+    except ValueError as e:
+        raise ValueError(f"Invalid sync_start_date format: {e}")
+    
+    # Validate API settings ranges
+    if config['api_settings']['request_delay'] < 0:
+        raise ValueError("request_delay must be non-negative")
+    
+    if config['api_settings']['max_retries'] < 1:
+        raise ValueError("max_retries must be at least 1")
+    
+    if config['api_settings']['retry_delay'] < 0:
+        raise ValueError("retry_delay must be non-negative")
+    
+    # Validate transcript types
+    if not config['api_settings']['transcript_types']:
+        raise ValueError("transcript_types cannot be empty")
+    
+    valid_transcript_types = ['Raw', 'Corrected', 'NearRealTime']
+    for transcript_type in config['api_settings']['transcript_types']:
+        if transcript_type not in valid_transcript_types:
+            raise ValueError(f"Invalid transcript type: {transcript_type}. Must be one of: {valid_transcript_types}")
+    
+    # Validate monitored institutions structure
+    if not config['monitored_institutions']:
+        raise ValueError("monitored_institutions cannot be empty")
+    
+    for ticker, institution_info in config['monitored_institutions'].items():
+        if not isinstance(institution_info, dict):
+            raise ValueError(f"Invalid institution info for {ticker}: must be a dictionary")
+        
+        required_fields = ['name', 'type', 'path_safe_name']
+        for field in required_fields:
+            if field not in institution_info:
+                raise ValueError(f"Missing required field '{field}' for institution {ticker}")
+            if not isinstance(institution_info[field], str):
+                raise ValueError(f"Field '{field}' for institution {ticker} must be a string")
+        
+        # Validate institution type
+        valid_types = ['Canadian', 'US', 'European', 'Insurance']
+        if institution_info['type'] not in valid_types:
+            raise ValueError(f"Invalid institution type for {ticker}: {institution_info['type']}. Must be one of: {valid_types}")
+    
+    # Validate SSL certificate path
+    if not config['ssl_cert_nas_path'].strip():
+        raise ValueError("ssl_cert_nas_path cannot be empty")
+    
+    if not validate_nas_path(config['ssl_cert_nas_path']):
+        raise ValueError(f"Invalid SSL certificate path: {config['ssl_cert_nas_path']}")
+    
+    # Validate ticker formats for security
+    for ticker in config['monitored_institutions'].keys():
+        if not re.match(r'^[A-Z0-9-]+$', ticker):
+            raise ValueError(f"Invalid ticker format: {ticker}")
+    
+    logger.info("Configuration validation successful")
+
 def load_stage_config(nas_conn: SMBConnection) -> Dict[str, Any]:
-    """Load shared configuration from NAS."""
+    """Load and validate shared configuration from NAS."""
+    global logger
     try:
         logger.info("Loading shared configuration from NAS...")
         config_data = nas_download_file(nas_conn, CONFIG_PATH)
@@ -119,6 +234,10 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict[str, Any]:
         if config_data:
             stage_config = json.loads(config_data.decode('utf-8'))
             logger.info("Successfully loaded shared configuration from NAS")
+            
+            # Validate configuration schema and parameters
+            validate_config_schema(stage_config)
+            
             return stage_config
         else:
             logger.error("Config file not found on NAS - script cannot proceed")
@@ -126,6 +245,9 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict[str, Any]:
             
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in config file: {e}")
+        raise
+    except ValueError as e:
+        logger.error(f"Configuration validation failed: {e}")
         raise
     except Exception as e:
         logger.error(f"Error loading config from NAS: {e}")
@@ -137,33 +259,61 @@ def nas_path_join(*parts: str) -> str:
 
 def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
     """Check if a file exists on the NAS."""
+    global logger
     try:
         conn.getAttributes(NAS_SHARE_NAME, file_path)
         return True
-    except:
+    except Exception as e:
+        # Log debug info but don't treat as error - file might just not exist
+        logger.debug(f"File existence check failed for {file_path}: {e}")
         return False
 
 def nas_create_directory(conn: SMBConnection, dir_path: str) -> bool:
-    """Create directory on NAS with parent directory creation."""
-    try:
-        conn.createDirectory(NAS_SHARE_NAME, dir_path)
-        return True
-    except Exception:
-        if nas_file_exists(conn, dir_path):
-            return True
-        
-        parent_dir = '/'.join(dir_path.split('/')[:-1])
-        if parent_dir and parent_dir != dir_path:
-            nas_create_directory(conn, parent_dir)
-            try:
-                conn.createDirectory(NAS_SHARE_NAME, dir_path)
-                return True
-            except:
-                return False
+    """Create directory on NAS with safe iterative parent creation."""
+    global logger
+    
+    # Normalize and validate path
+    normalized_path = dir_path.strip('/').rstrip('/')
+    if not normalized_path:
+        logger.error("Cannot create directory with empty path")
         return False
+    
+    # Split path into components
+    path_parts = [part for part in normalized_path.split('/') if part]
+    if not path_parts:
+        logger.error("Cannot create directory with invalid path")
+        return False
+    
+    # Build path incrementally from root
+    current_path = ""
+    for part in path_parts:
+        current_path = f"{current_path}/{part}" if current_path else part
+        
+        # Check if directory exists
+        if nas_file_exists(conn, current_path):
+            continue
+        
+        # Try to create directory
+        try:
+            conn.createDirectory(NAS_SHARE_NAME, current_path)
+            logger.debug(f"Created directory: {current_path}")
+        except Exception as e:
+            # If it fails and doesn't exist, it's a real error
+            if not nas_file_exists(conn, current_path):
+                logger.error(f"Failed to create directory {current_path}: {e}")
+                return False
+    
+    return True
 
 def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_path: str) -> bool:
     """Upload a file object to NAS."""
+    global logger
+    
+    # Validate path for security
+    if not validate_nas_path(nas_file_path):
+        logger.error(f"Invalid NAS file path: {nas_file_path}")
+        return False
+    
     try:
         parent_dir = '/'.join(nas_file_path.split('/')[:-1])
         if parent_dir:
@@ -177,6 +327,13 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
 
 def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes]:
     """Download a file from NAS and return as bytes."""
+    global logger
+    
+    # Validate path for security
+    if not validate_nas_path(nas_file_path):
+        logger.error(f"Invalid NAS file path: {nas_file_path}")
+        return None
+    
     try:
         file_obj = io.BytesIO()
         conn.retrieveFile(NAS_SHARE_NAME, nas_file_path, file_obj)
@@ -188,12 +345,90 @@ def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes
 
 def nas_list_files(conn: SMBConnection, directory_path: str) -> List[str]:
     """List XML files in a NAS directory."""
+    global logger
     try:
         files = conn.listPath(NAS_SHARE_NAME, directory_path)
         return [file_info.filename for file_info in files 
                 if not file_info.isDirectory and file_info.filename.endswith('.xml')]
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Failed to list files in {directory_path}: {e}")
         return []
+
+def validate_file_path(path: str) -> bool:
+    """Validate file path for security."""
+    if not path or not isinstance(path, str):
+        return False
+    
+    # Check for directory traversal attacks
+    if '..' in path or path.startswith('/'):
+        return False
+    
+    # Check for invalid characters
+    invalid_chars = ['<', '>', ':', '"', '|', '?', '*', '\x00']
+    if any(char in path for char in invalid_chars):
+        return False
+    
+    # Check path length
+    if len(path) > 260:  # Windows MAX_PATH limitation
+        return False
+    
+    return True
+
+def validate_nas_path(path: str) -> bool:
+    """Validate NAS path structure."""
+    if not path or not isinstance(path, str):
+        return False
+    
+    # Ensure path is relative and safe
+    normalized = path.strip('/')
+    parts = normalized.split('/')
+    
+    for part in parts:
+        if not part or part in ['.', '..']:
+            return False
+        if not validate_file_path(part):
+            return False
+    
+    return True
+
+def validate_api_response_structure(response) -> bool:
+    """Validate API response structure and content."""
+    global logger
+    
+    if not response or not hasattr(response, 'data'):
+        logger.warning("API response missing data attribute")
+        return False
+    
+    if not isinstance(response.data, list):
+        logger.warning("API response data is not a list")
+        return False
+    
+    for i, transcript in enumerate(response.data):
+        transcript_dict = transcript.to_dict()
+        
+        # Validate required fields
+        required_fields = ['primary_ids', 'event_type', 'transcripts_link']
+        for field in required_fields:
+            if field not in transcript_dict:
+                logger.warning(f"Transcript {i} missing required field: {field}")
+                return False
+        
+        # Validate data types
+        if not isinstance(transcript_dict.get('primary_ids'), list):
+            logger.warning(f"Transcript {i} has invalid primary_ids type")
+            return False
+        
+        # Validate URL format
+        url = transcript_dict.get('transcripts_link')
+        if url and not isinstance(url, str):
+            logger.warning(f"Transcript {i} has invalid transcripts_link type")
+            return False
+        
+        if url and not url.startswith(('http://', 'https://')):
+            logger.warning(f"Transcript {i} has invalid URL format: {url}")
+            return False
+    
+    return True
 
 def sanitize_for_filename(text: Any) -> str:
     """Sanitize text to be safe for filename."""
@@ -208,6 +443,7 @@ def sanitize_for_filename(text: Any) -> str:
 
 def create_base_directory_structure(nas_conn: SMBConnection) -> None:
     """Create the base directory structure for the transcript repository on NAS."""
+    global logger
     logger.info("Creating base directory structure on NAS...")
     
     inputs_path = nas_path_join(NAS_BASE_PATH, "Inputs")
@@ -236,6 +472,7 @@ def create_base_directory_structure(nas_conn: SMBConnection) -> None:
 
 def create_ticker_directory_structure(nas_conn: SMBConnection, ticker: str, institution_type: str) -> None:
     """Create directory structure for a specific ticker when transcripts are found."""
+    global config
     data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data")
     
     # Get path-safe name for the ticker folder
@@ -255,6 +492,7 @@ def create_ticker_directory_structure(nas_conn: SMBConnection, ticker: str, inst
 
 def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str] = None) -> str:
     """Create standardized filename from transcript data."""
+    global logger
     try:
         if target_ticker:
             primary_id = sanitize_for_filename(target_ticker)
@@ -268,7 +506,8 @@ def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str
         if pd.notna(event_date):
             try:
                 event_date_str = pd.to_datetime(event_date).strftime('%Y-%m-%d')
-            except:
+            except (ValueError, TypeError, pd.errors.OutOfBoundsDatetime) as e:
+                logger.warning(f"Date parsing failed for {event_date}: {e}")
                 event_date_str = str(event_date)
         else:
             event_date_str = 'unknown_date'
@@ -287,6 +526,7 @@ def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str
 
 def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: str, institution_type: str) -> Set[str]:
     """Get list of existing transcript files for a specific ticker and type from NAS."""
+    global config
     # Get path-safe name for the ticker folder
     institution_info = config['monitored_institutions'].get(ticker, {})
     path_safe_name = institution_info.get('path_safe_name', ticker)
@@ -296,19 +536,23 @@ def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: st
     return set(nas_list_files(nas_conn, institution_path))
 
 def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str, 
-                                 nas_file_path: str, transcript_id: str, configuration) -> bool:
+                                 nas_file_path: str, transcript_id: str, configuration, 
+                                 proxy_user: str, proxy_password: str) -> bool:
     """Download transcript with retry logic and upload to NAS."""
+    global logger, config
     
     for attempt in range(config['api_settings']['max_retries']):
         try:
-            logger.info(f"Downloading from URL: {transcript_link}")
+            logger.info(f"Downloading from URL: {sanitize_url_for_logging(transcript_link)}")
             headers = {
                 'Accept': 'application/xml,*/*',
                 'Authorization': configuration.get_basic_auth_token(),
             }
+            escaped_domain = quote(PROXY_DOMAIN + '\\' + proxy_user)
+            proxy_url = f"http://{escaped_domain}:{quote(proxy_password)}@{PROXY_URL}"
             proxies = {
-                'https': "http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL),
-                'http': "http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL)
+                'https': proxy_url,
+                'http': proxy_url
             }
             
             response = requests.get(
@@ -343,8 +587,10 @@ def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str
 
 def process_bank(ticker: str, institution_info: Dict[str, str], 
                 api_instance: transcripts_api.TranscriptsApi, 
-                nas_conn: SMBConnection, configuration) -> Dict[str, Any]:
+                nas_conn: SMBConnection, configuration, 
+                proxy_user: str, proxy_password: str) -> Dict[str, Any]:
     """Process a single bank: query API, check NAS files, download new transcripts."""
+    global logger, config
     logger.info(f"Processing: {institution_info['name']} ({ticker})")
     
     institution_type = institution_info['type']
@@ -375,6 +621,11 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
             logger.warning(f"No transcripts found for {ticker} - ticker may not exist or have no coverage")
             return bank_downloads
         
+        # Validate API response structure
+        if not validate_api_response_structure(response):
+            logger.error(f"Invalid API response structure for {ticker}")
+            return bank_downloads
+        
         all_transcripts = [transcript.to_dict() for transcript in response.data]
         logger.info(f"Found {len(all_transcripts)} total transcripts for {ticker}")
         
@@ -382,6 +633,12 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
         filtered_transcripts = []
         for transcript in all_transcripts:
             primary_ids = transcript.get('primary_ids', [])
+            
+            # Validate that primary_ids is actually a list
+            if not isinstance(primary_ids, list):
+                logger.warning(f"Invalid primary_ids type for transcript: {type(primary_ids)}")
+                continue
+            
             if primary_ids == [ticker]:
                 filtered_transcripts.append(transcript)
         
@@ -440,7 +697,8 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
                                                 institution_type, ticker_folder_name, transcript_type, filename)
                     
                     if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], 
-                                                    nas_file_path, filename, configuration):
+                                                    nas_file_path, filename, configuration, 
+                                                    proxy_user, proxy_password):
                         downloaded_count += 1
                         
                     time.sleep(config['api_settings']['request_delay'])
@@ -460,6 +718,7 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
 
 def generate_final_inventory(nas_conn: SMBConnection) -> None:
     """Generate comprehensive inventory index of all downloaded files from NAS."""
+    global logger, config
     logger.info("Generating comprehensive inventory index from NAS")
     
     file_index = []
@@ -512,7 +771,8 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
                                     else:
                                         # Convert from timestamp if it's a float/int
                                         date_modified = datetime.fromtimestamp(file_attrs.last_write_time).strftime('%Y-%m-%d %H:%M:%S')
-                                except:
+                                except (AttributeError, ValueError, TypeError, OSError) as e:
+                                    logger.debug(f"Timestamp conversion failed for {filename}: {e}")
                                     date_modified = 'unknown'
                                 
                                 try:
@@ -521,7 +781,8 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
                                     else:
                                         # Convert from timestamp if it's a float/int
                                         date_created = datetime.fromtimestamp(file_attrs.create_time).strftime('%Y-%m-%d %H:%M:%S')
-                                except:
+                                except (AttributeError, ValueError, TypeError, OSError) as e:
+                                    logger.debug(f"Create timestamp conversion failed for {filename}: {e}")
                                     date_created = 'unknown'
                                 
                                 file_record = {
@@ -610,6 +871,7 @@ def generate_final_inventory(nas_conn: SMBConnection) -> None:
 
 def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     """Download SSL certificate from NAS and set up for use."""
+    global logger, config
     try:
         logger.info("Downloading SSL certificate from NAS...")
         cert_data = nas_download_file(nas_conn, config['ssl_cert_nas_path'])
@@ -634,7 +896,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
 
 def main() -> None:
     """Main function to orchestrate the Stage 0 bulk transcript sync."""
-    global config, logger, user, password
+    global config, logger
     
     logger = setup_logging()
     logger.info("STAGE 0: BULK TRANSCRIPT SYNC")
@@ -661,22 +923,16 @@ def main() -> None:
     user = PROXY_USER
     password = quote(PROXY_PASSWORD)
     
+    escaped_domain = quote(PROXY_DOMAIN + '\\' + user)
+    proxy_url = f"http://{escaped_domain}:{password}@{PROXY_URL}"
     configuration = fds.sdk.EventsandTranscripts.Configuration(
         username=API_USERNAME,
         password=API_PASSWORD,
-        proxy="http://%s:%s@%s" % ("MAPLE%5C" + user, password, PROXY_URL),
+        proxy=proxy_url,
         ssl_ca_cert=temp_cert_path
     )
     configuration.get_basic_auth_token()
     logger.info("FactSet API client configured")
-    
-    # Close and reconnect to NAS for main operations
-    nas_conn.close()
-    
-    nas_conn = get_nas_connection()
-    if not nas_conn:
-        logger.error("Failed to reconnect to NAS - aborting sync")
-        return
     
     try:
         create_base_directory_structure(nas_conn)
@@ -697,7 +953,7 @@ def main() -> None:
             for i, (ticker, institution_info) in enumerate(config['monitored_institutions'].items(), 1):
                 logger.info(f"Processing institution {i}/{total_institutions}")
                 
-                bank_downloads = process_bank(ticker, institution_info, api_instance, nas_conn, configuration)
+                bank_downloads = process_bank(ticker, institution_info, api_instance, nas_conn, configuration, user, password)
                 total_downloaded += bank_downloads['total']
                 
                 if bank_downloads['found_transcripts']:
@@ -736,11 +992,29 @@ def main() -> None:
             for inst in institutions_without_transcripts:
                 logger.warning(f"  {inst['ticker']} - {inst['name']} ({inst['type']}): No earnings transcripts or ticker not found")
         
-        # Upload log file to NAS
-        log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Logs", 
-                                    f"stage0_sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
-        with open(logger.temp_log_file, 'rb') as log_file:
-            nas_upload_file(nas_conn, log_file, log_file_path)
+        # Upload log file to NAS - properly close logging first
+        try:
+            # Close all logging handlers to ensure file is not in use
+            for handler in logger.handlers[:]:
+                handler.close()
+                logger.removeHandler(handler)
+            
+            # Force any remaining buffered log data to be written
+            logging.shutdown()
+            
+            # Now safely upload the log file
+            log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Logs", 
+                                        f"stage0_sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+            
+            # Read the entire log file and convert to BytesIO for upload
+            with open(logger.temp_log_file, 'rb') as log_file:
+                log_content = log_file.read()
+            
+            log_file_obj = io.BytesIO(log_content)
+            nas_upload_file(nas_conn, log_file_obj, log_file_path)
+            
+        except Exception as e:
+            print(f"Error uploading log file: {e}")  # Can't use logger since it's shut down
         
     finally:
         if nas_conn:
@@ -749,11 +1023,13 @@ def main() -> None:
         if temp_cert_path:
             try:
                 os.unlink(temp_cert_path)
-            except:
-                pass
+            except (OSError, FileNotFoundError) as e:
+                print(f"Cleanup failed for certificate file: {e}")
         
         try:
             os.unlink(logger.temp_log_file)
+        except (OSError, FileNotFoundError) as e:
+            print(f"Cleanup failed for log file: {e}")
         except:
             pass
 

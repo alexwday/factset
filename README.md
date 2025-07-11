@@ -12,7 +12,6 @@ factset/
 ├── docs/                                  # Documentation & FactSet SDK docs
 ├── stage_0_bulk_refresh/                  # Historical bulk download (optional)
 ├── stage_1_daily_sync/                    # Daily incremental sync (scheduled)
-├── stage_2_processing/                    # Transcript processing & analysis
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -75,11 +74,11 @@ python stage_0_bulk_refresh/0_transcript_bulk_sync.py
 # Stage 1: Daily incremental sync (planned)
 python stage_1_daily_sync/1_transcript_daily_sync.py
 
-# Stage 2: Processing & analysis (planned)
-python stage_2_processing/2_transcript_processing.py
+# Stage 2: Processing & analysis (planned - future development)
+# python stage_2_processing/2_transcript_processing.py
 ```
 
-**Current Status**: Stage 0 is fully implemented and ready for use. Stages 1 and 2 are planned for future development.
+**Current Status**: Stage 0 is production-ready with all security issues resolved ✅. Stage 1 is planned for future development.
 
 ## Testing from Work Environment
 
@@ -173,22 +172,24 @@ CLIENT_MACHINE_NAME=SYNC-CLIENT
 
 ## Pipeline Stages
 
-### Stage 0: Bulk Refresh (Implemented)
+### Stage 0: Bulk Refresh ✅ PRODUCTION READY
 - **Purpose**: Download ALL historical transcripts from 2023-present
 - **When to use**: Initial setup or complete repository refresh
 - **Output**: Complete transcript repository on NAS
 - **Configuration**: Loads operational settings from `Inputs/config/stage_0_config.json` on NAS
 - **Features**: Self-contained script with environment variable authentication
+- **Security**: All 9 critical security and reliability issues resolved
 
 ### Stage 1: Daily Sync (Scheduled)
 - **Purpose**: Check for new transcripts daily and download incrementally
 - **When to use**: Regular scheduled operations
 - **Output**: New transcripts added to existing repository
 
-### Stage 2: Processing (Future)
+### Stage 2: Processing (Future Development)
 - **Purpose**: Process, enrich, and analyze downloaded transcripts
 - **When to use**: After transcripts are downloaded
 - **Output**: Processed data and analysis results
+- **Status**: Not yet implemented
 
 ## Configuration
 
@@ -256,21 +257,117 @@ CLIENT_MACHINE_NAME=SYNC-CLIENT
 - Check console output for real-time status
 - Log files stored on NAS for historical analysis
 
-## Development
+## Development Standards & Security
+
+> **CRITICAL**: These standards are mandatory for all future development. They prevent security vulnerabilities and production failures discovered in Stage 0.
+
+### 🚨 Security-First Development (NON-NEGOTIABLE)
+
+ALL new scripts MUST include:
+
+#### Input Validation Framework
+```python
+def validate_file_path(path: str) -> bool:
+    """Prevent directory traversal attacks."""
+    
+def validate_nas_path(path: str) -> bool:
+    """Ensure safe NAS paths only."""
+    
+def validate_api_response_structure(response) -> bool:
+    """Validate API responses before processing."""
+    
+def sanitize_url_for_logging(url: str) -> str:
+    """Remove auth tokens from URLs before logging."""
+```
+
+#### Error Handling Standards
+```python
+# FORBIDDEN - CAUSES PRODUCTION FAILURES:
+except:
+    pass
+
+# REQUIRED - SPECIFIC ERROR HANDLING:
+except (OSError, FileNotFoundError) as e:
+    logger.error(f"File operation failed: {e}")
+```
+
+### 📋 Pre-Deployment Checklist (MANDATORY)
+
+Every script MUST pass ALL checks before deployment:
+
+#### Security Review ✅
+- [ ] All input validation implemented
+- [ ] No credential exposure in logs
+- [ ] File paths validated against directory traversal
+- [ ] URLs sanitized before logging
+- [ ] Configuration schema validated
+
+#### Error Handling Review ✅
+- [ ] No bare `except:` clauses anywhere
+- [ ] Specific exception types for each operation
+- [ ] Appropriate logging levels used
+- [ ] Error context preserved in logs
+
+#### Resource Management Review ✅
+- [ ] No connection open/close/reopen patterns
+- [ ] Proper cleanup in finally blocks
+- [ ] No race conditions in file operations
+- [ ] Global variables properly declared
 
 ### Adding New Stages
-1. Create new stage directory: `stage_X_<purpose>/`
-2. Create standalone script: `X_<descriptive_name>.py`
-3. Copy shared functions from existing scripts
-4. Create stage-specific config file on NAS
-5. Update this README
 
-### Script Requirements
-- Each script must be completely standalone
-- No imports between stage scripts
-- Shared functions are copy-pasted (not imported)
-- Scripts work from terminal or any Python environment
-- All scripts use same .env file for authentication
+1. **Create Directory Structure**:
+   ```
+   stage_X_<purpose>/
+   ├── CLAUDE.md              # Stage-specific lessons and standards
+   ├── X_<descriptive_name>.py # Main script following all standards
+   └── tests/                  # Comprehensive test suite
+   ```
+
+2. **Copy Security Framework**:
+   - Copy ALL validation functions from Stage 0
+   - Implement ALL error handling patterns
+   - Add ALL input validation
+
+3. **Follow Architecture Requirements**:
+   - Each script completely standalone
+   - No imports between stage scripts
+   - Shared functions copy-pasted (not imported)
+   - Works from terminal or any Python environment
+   - Uses same .env file for authentication
+
+4. **Validate Against Standards**:
+   - Pass ALL security checks
+   - Pass ALL error handling checks
+   - Pass ALL resource management checks
+   - Complete comprehensive testing
+
+### Development History
+
+#### Stage 0 Critical Issues Resolved
+Stage 0 underwent comprehensive security review, resolving 9 critical issues:
+
+1. **Undefined Variables** (CRITICAL): Variable scope issues causing runtime failures
+2. **Global Variable Scope** (CRITICAL): Missing global declarations causing UnboundLocalError
+3. **Security Credential Exposure** (HIGH): IP logging, URL tokens, hardcoded domains
+4. **Inefficient Connection Management** (MEDIUM): Unnecessary connection patterns
+5. **Unsafe Directory Recursion** (MEDIUM): Stack overflow vulnerability
+6. **Log File Race Condition** (MEDIUM): Concurrent file access issues
+7. **Configuration Validation** (MEDIUM): Missing schema validation
+8. **Generic Error Handling** (MEDIUM): Bare except clauses masking failures
+9. **Input Validation** (LOW): Missing validation for external data
+
+#### Code Quality Standards
+- **Security-First**: Input validation, credential protection, path validation
+- **Error Handling**: Specific exceptions, proper logging, error context preservation
+- **Resource Management**: Proper cleanup, no race conditions, efficient patterns
+- **Configuration**: Schema validation, environment variable validation
+- **Testing**: Comprehensive test coverage for all failure scenarios
+
+### Reference Implementation
+- **Stage 0**: `stage_0_bulk_refresh/0_transcript_bulk_sync.py` - Production-ready reference
+- **Stage 0 Documentation**: `stage_0_bulk_refresh/CLAUDE.md` - Detailed lessons learned
+- **Development Standards**: This section - Mandatory requirements for all future development
 
 ## Support
 
