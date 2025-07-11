@@ -105,8 +105,9 @@ class EnhancedTranscriptComparer:
         # Convert to lowercase (case insensitive)
         normalized = token.lower()
         
-        # Remove hyphens within words (FX-trading -> FXtrading)
-        normalized = re.sub(r'(\w)-(\w)', r'\1\2', normalized)
+        # Remove ALL hyphens (not just within words)
+        # This makes FX-trading -> fxtrading and matches "FX trading" -> "fx trading"
+        normalized = normalized.replace('-', ' ')
         
         # Remove possessive 's (Banking's -> Banking)
         normalized = re.sub(r"'s\b", '', normalized)
@@ -398,31 +399,40 @@ class EnhancedTranscriptComparer:
             border-right: 2px solid #eee;
         }}
         
-        /* Match - no color */
+        /* Match - green */
         .match-row {{
-            background-color: white;
+            background-color: #e6ffe6;
         }}
         
         .match-row td {{
-            color: #333;
+            color: #006600;
         }}
         
-        /* Similar - yellow */
+        /* Similar - light green */
         .similar-row {{
-            background-color: #fff9e6;
+            background-color: #f0fff0;
         }}
         
         .similar-row td {{
-            color: #664d00;
+            color: #228b22;
         }}
         
-        /* Missing - red for both columns */
-        .missing-row {{
-            background-color: #fee;
+        /* Missing from HTML (PDF only) - light red */
+        .pdf-only-row {{
+            background-color: #ffe6e6;
         }}
         
-        .missing-row td {{
-            color: #c00;
+        .pdf-only-row td {{
+            color: #cc0000;
+        }}
+        
+        /* Missing from PDF (HTML only) - darker red */
+        .html-only-row {{
+            background-color: #ffcccc;
+        }}
+        
+        .html-only-row td {{
+            color: #990000;
         }}
         
         .column-header {{
@@ -458,19 +468,24 @@ class EnhancedTranscriptComparer:
         }}
         
         .legend-match {{
-            background-color: white;
-            color: #333;
-            border: 1px solid #ddd;
+            background-color: #e6ffe6;
+            color: #006600;
+            border: 1px solid #006600;
         }}
         
         .legend-similar {{
-            background-color: #fff9e6;
-            color: #664d00;
+            background-color: #f0fff0;
+            color: #228b22;
         }}
         
-        .legend-missing {{
-            background-color: #fee;
-            color: #c00;
+        .legend-pdf-only {{
+            background-color: #ffe6e6;
+            color: #cc0000;
+        }}
+        
+        .legend-html-only {{
+            background-color: #ffcccc;
+            color: #990000;
         }}
         
         .alignment-table tr:hover {{
@@ -580,7 +595,7 @@ class EnhancedTranscriptComparer:
             
             elif segment.alignment_type == AlignmentType.HTML_GAP:
                 html_content += f"""
-                <tr class="missing-row">
+                <tr class="pdf-only-row">
                     <td>{html_module.escape(segment.pdf_text)}</td>
                     <td></td>
                 </tr>
@@ -588,7 +603,7 @@ class EnhancedTranscriptComparer:
             
             elif segment.alignment_type == AlignmentType.PDF_GAP:
                 html_content += f"""
-                <tr class="missing-row">
+                <tr class="html-only-row">
                     <td></td>
                     <td>{html_module.escape(segment.html_text)}</td>
                 </tr>
@@ -601,8 +616,9 @@ class EnhancedTranscriptComparer:
         <div class="legend">
             <h3>Legend</h3>
             <span class="legend-item legend-match">Exact Match</span>
-            <span class="legend-item legend-similar">Similar (normalized)</span>
-            <span class="legend-item legend-missing">Missing Content</span>
+            <span class="legend-item legend-similar">Normalized Match</span>
+            <span class="legend-item legend-pdf-only">PDF Only</span>
+            <span class="legend-item legend-html-only">HTML Only</span>
         </div>
     </div>
 </body>
