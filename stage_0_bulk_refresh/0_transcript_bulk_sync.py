@@ -522,6 +522,88 @@ def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str
         logger.error(f"Error creating filename: {e}")
         return f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml"
 
+def create_version_agnostic_key(transcript_data: Dict[str, Any], target_ticker: Optional[str] = None) -> str:
+    """Create version-agnostic key for duplicate detection (excludes version_id)."""
+    global logger
+    try:
+        if target_ticker:
+            primary_id = sanitize_for_filename(target_ticker)
+        else:
+            primary_id = sanitize_for_filename(
+                transcript_data.get('primary_ids', ['unknown'])[0] 
+                if transcript_data.get('primary_ids') else 'unknown'
+            )
+        
+        event_date = transcript_data.get('event_date')
+        if pd.notna(event_date):
+            try:
+                event_date_str = pd.to_datetime(event_date).strftime('%Y-%m-%d')
+            except (ValueError, TypeError, pd.errors.OutOfBoundsDatetime) as e:
+                logger.warning(f"Date parsing failed for {event_date}: {e}")
+                event_date_str = str(event_date)
+        else:
+            event_date_str = 'unknown_date'
+        
+        event_type = sanitize_for_filename(transcript_data.get('event_type', 'unknown'))
+        transcript_type = sanitize_for_filename(transcript_data.get('transcript_type', 'unknown'))
+        event_id = sanitize_for_filename(transcript_data.get('event_id', 'unknown'))
+        report_id = sanitize_for_filename(transcript_data.get('report_id', 'unknown'))
+        
+        # Version-agnostic key excludes version_id
+        return f"{primary_id}_{event_date_str}_{event_type}_{transcript_type}_{event_id}_{report_id}"
+        
+    except Exception as e:
+        logger.error(f"Error creating version-agnostic key: {e}")
+        return f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+def parse_version_from_filename(filename: str) -> Optional[int]:
+    """Extract version number from filename. Returns None if not found or invalid."""
+    global logger
+    try:
+        # Remove .xml extension
+        basename = filename.replace('.xml', '')
+        # Split by underscores and get the last part (version_id)
+        parts = basename.split('_')
+        if len(parts) >= 6:  # Should have at least 6 parts based on our naming convention
+            version_part = parts[-1]
+            # Try to convert to integer
+            return int(version_part)
+    except (ValueError, IndexError, AttributeError) as e:
+        logger.debug(f"Could not parse version from filename {filename}: {e}")
+    
+    return None
+
+def get_version_agnostic_key_from_filename(filename: str) -> str:
+    """Extract version-agnostic key from existing filename."""
+    try:
+        # Remove .xml extension
+        basename = filename.replace('.xml', '')
+        # Split by underscores and remove the last part (version_id)
+        parts = basename.split('_')
+        if len(parts) >= 6:
+            return '_'.join(parts[:-1])  # All parts except the last one (version_id)
+    except (ValueError, IndexError, AttributeError) as e:
+        logger.debug(f"Could not extract version-agnostic key from filename {filename}: {e}")
+    
+    return basename  # Return as-is if parsing fails
+
+def nas_remove_file(conn: SMBConnection, nas_file_path: str) -> bool:
+    """Remove a file from NAS."""
+    global logger
+    
+    # Validate path for security
+    if not validate_nas_path(nas_file_path):
+        logger.error(f"Invalid NAS file path for removal: {nas_file_path}")
+        return False
+    
+    try:
+        conn.deleteFiles(NAS_SHARE_NAME, nas_file_path)
+        logger.info(f"Removed old version from NAS: {nas_file_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to remove file from NAS {nas_file_path}: {e}")
+        return False
+
 def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: str, institution_type: str) -> Set[str]:
     """Get list of existing transcript files for a specific ticker and type from NAS."""
     global config
@@ -532,6 +614,78 @@ def get_existing_files(nas_conn: SMBConnection, ticker: str, transcript_type: st
     
     institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", institution_type, ticker_folder_name, transcript_type)
     return set(nas_list_files(nas_conn, institution_path))
+
+def get_existing_files_with_version_management(nas_conn: SMBConnection, ticker: str, transcript_type: str, institution_type: str) -> Dict[str, Dict[str, Any]]:
+    """Get existing files with version management - keeps only latest version of each transcript."""
+    global config, logger
+    
+    # Get path-safe name for the ticker folder
+    institution_info = config['monitored_institutions'].get(ticker, {})
+    path_safe_name = institution_info.get('path_safe_name', ticker)
+    ticker_folder_name = f"{ticker}_{path_safe_name}"
+    
+    institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", institution_type, ticker_folder_name, transcript_type)
+    all_files = nas_list_files(nas_conn, institution_path)
+    
+    # Group files by version-agnostic key
+    version_groups = {}
+    for filename in all_files:
+        version_agnostic_key = get_version_agnostic_key_from_filename(filename)
+        version_id = parse_version_from_filename(filename)
+        
+        if version_agnostic_key not in version_groups:
+            version_groups[version_agnostic_key] = []
+        
+        version_groups[version_agnostic_key].append({
+            'filename': filename,
+            'version_id': version_id,
+            'full_path': nas_path_join(institution_path, filename)
+        })
+    
+    # Keep only the latest version of each transcript
+    latest_versions = {}
+    files_to_remove = []
+    
+    for version_agnostic_key, files in version_groups.items():
+        if len(files) == 1:
+            # Only one version, keep it
+            latest_versions[version_agnostic_key] = files[0]
+        else:
+            # Multiple versions, find the latest
+            files_with_valid_versions = [f for f in files if f['version_id'] is not None]
+            files_with_invalid_versions = [f for f in files if f['version_id'] is None]
+            
+            if files_with_valid_versions:
+                # Sort by version_id descending and keep the highest
+                latest_file = max(files_with_valid_versions, key=lambda x: x['version_id'])
+                latest_versions[version_agnostic_key] = latest_file
+                
+                # Mark older versions for removal
+                for file_info in files_with_valid_versions:
+                    if file_info['version_id'] < latest_file['version_id']:
+                        files_to_remove.append(file_info)
+                        logger.info(f"Marking older version for removal: {file_info['filename']} (version {file_info['version_id']})")
+                
+                # Also remove files with invalid versions when we have valid ones
+                files_to_remove.extend(files_with_invalid_versions)
+            else:
+                # No valid versions, keep the first one (arbitrary choice)
+                latest_versions[version_agnostic_key] = files_with_invalid_versions[0]
+                files_to_remove.extend(files_with_invalid_versions[1:])
+    
+    # Remove old versions from NAS
+    for file_info in files_to_remove:
+        nas_remove_file(nas_conn, file_info['full_path'])
+    
+    # Return a dictionary mapping version-agnostic keys to file info
+    result = {}
+    for version_agnostic_key, file_info in latest_versions.items():
+        result[version_agnostic_key] = {
+            'filename': file_info['filename'],
+            'version_id': file_info['version_id']
+        }
+    
+    return result
 
 def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str, 
                                  nas_file_path: str, transcript_id: str, configuration, 
@@ -668,19 +822,48 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
             
             logger.info(f"Processing {len(type_transcripts)} {transcript_type} transcripts")
             
-            existing_files = get_existing_files(nas_conn, ticker, transcript_type, institution_type)
+            # Get existing files with version management (automatically cleans up old versions)
+            existing_files_with_versions = get_existing_files_with_version_management(nas_conn, ticker, transcript_type, institution_type)
             
             new_transcripts = []
+            updated_transcripts = []
+            
             for transcript in type_transcripts:
-                filename = create_filename(transcript, target_ticker=ticker)
-                if filename not in existing_files:
+                version_agnostic_key = create_version_agnostic_key(transcript, target_ticker=ticker)
+                new_version_id = transcript.get('version_id')
+                
+                if version_agnostic_key not in existing_files_with_versions:
+                    # Completely new transcript
+                    filename = create_filename(transcript, target_ticker=ticker)
                     new_transcripts.append((transcript, filename))
+                else:
+                    # Check if this is a newer version
+                    existing_info = existing_files_with_versions[version_agnostic_key]
+                    existing_version_id = existing_info['version_id']
+                    
+                    # Convert version IDs to integers for comparison
+                    try:
+                        new_version_int = int(new_version_id) if new_version_id else 0
+                        existing_version_int = int(existing_version_id) if existing_version_id else 0
+                        
+                        if new_version_int > existing_version_int:
+                            # This is a newer version, download it (old version already removed)
+                            filename = create_filename(transcript, target_ticker=ticker)
+                            updated_transcripts.append((transcript, filename))
+                            logger.info(f"Found newer version: {filename} (version {new_version_int} > {existing_version_int})")
+                    except (ValueError, TypeError) as e:
+                        # If version comparison fails, treat as new transcript
+                        logger.warning(f"Version comparison failed for {version_agnostic_key}: {e}")
+                        filename = create_filename(transcript, target_ticker=ticker)
+                        new_transcripts.append((transcript, filename))
             
-            logger.info(f"Found {len(new_transcripts)} new {transcript_type} transcripts to download")
+            total_to_download = len(new_transcripts) + len(updated_transcripts)
+            logger.info(f"Found {len(new_transcripts)} new and {len(updated_transcripts)} updated {transcript_type} transcripts to download")
             
-            if new_transcripts:
+            if total_to_download > 0:
                 downloaded_count = 0
                 
+                # Download new transcripts
                 for transcript, filename in new_transcripts:
                     if pd.isna(transcript.get('transcripts_link')) or not transcript.get('transcripts_link'):
                         logger.warning(f"No download link for {filename}")
@@ -701,7 +884,29 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
                         
                     time.sleep(config['api_settings']['request_delay'])
                 
-                logger.info(f"Successfully downloaded {downloaded_count}/{len(new_transcripts)} {transcript_type} transcripts")
+                # Download updated transcripts (newer versions)
+                for transcript, filename in updated_transcripts:
+                    if pd.isna(transcript.get('transcripts_link')) or not transcript.get('transcripts_link'):
+                        logger.warning(f"No download link for {filename}")
+                        continue
+                    
+                    # Get path-safe name for the ticker folder
+                    institution_info = config['monitored_institutions'].get(ticker, {})
+                    path_safe_name = institution_info.get('path_safe_name', ticker)
+                    ticker_folder_name = f"{ticker}_{path_safe_name}"
+                    
+                    nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", 
+                                                institution_type, ticker_folder_name, transcript_type, filename)
+                    
+                    if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], 
+                                                    nas_file_path, filename, configuration, 
+                                                    proxy_user, proxy_password):
+                        downloaded_count += 1
+                        logger.info(f"Downloaded updated version: {filename}")
+                        
+                    time.sleep(config['api_settings']['request_delay'])
+                
+                logger.info(f"Successfully downloaded {downloaded_count}/{total_to_download} {transcript_type} transcripts")
                 total_downloaded += downloaded_count
                 bank_downloads['by_type'][transcript_type] = downloaded_count
         
