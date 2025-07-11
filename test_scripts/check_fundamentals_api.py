@@ -20,6 +20,7 @@ import warnings
 from dotenv import load_dotenv
 import json
 import time
+from pathlib import Path
 
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -288,6 +289,245 @@ def display_sample_data(metrics_data: Dict[str, List[Dict[str, Any]]], max_metri
             
             print(f"    {date} | FY{fy} Q{fp} | {formatted_value}")
 
+def generate_html_report(all_metrics: Dict[str, List[Dict[str, Any]]], 
+                        category_results: Dict[str, Dict[str, Any]], 
+                        ticker: str) -> str:
+    """Generate comprehensive HTML report."""
+    
+    # Calculate overall statistics
+    total_metrics = sum(len(metrics) for metrics in all_metrics.values())
+    total_data_points = sum(
+        max((result.get('total_points', 0) for result in cat_data.values()), default=0)
+        for cat_data in category_results.values()
+    )
+    categories_with_data = sum(
+        1 for cat_data in category_results.values() 
+        if any(result.get('total_points', 0) > 0 for result in cat_data.values())
+    )
+    
+    # Generate HTML
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>FactSet Fundamentals API Analysis - {ticker}</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }}
+            .header {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 30px;
+                border-radius: 10px;
+                margin-bottom: 30px;
+                text-align: center;
+            }}
+            .summary {{
+                background: white;
+                padding: 25px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                margin-bottom: 30px;
+            }}
+            .metrics-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 20px;
+                margin-bottom: 30px;
+            }}
+            .category-card {{
+                background: white;
+                padding: 20px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                border-left: 4px solid #667eea;
+            }}
+            .category-header {{
+                font-size: 1.2em;
+                font-weight: bold;
+                margin-bottom: 15px;
+                color: #667eea;
+            }}
+            .metric-count {{
+                font-size: 2em;
+                font-weight: bold;
+                color: #4CAF50;
+                margin-bottom: 10px;
+            }}
+            .status-good {{ color: #4CAF50; }}
+            .status-warning {{ color: #ff9800; }}
+            .status-error {{ color: #f44336; }}
+            .data-table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+                background: white;
+                border-radius: 10px;
+                overflow: hidden;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .data-table th {{
+                background: #667eea;
+                color: white;
+                padding: 15px;
+                text-align: left;
+            }}
+            .data-table td {{
+                padding: 12px 15px;
+                border-bottom: 1px solid #eee;
+            }}
+            .data-table tr:hover {{
+                background: #f8f9fa;
+            }}
+            .conclusion {{
+                background: white;
+                padding: 25px;
+                border-radius: 10px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                margin-top: 30px;
+            }}
+            .conclusion.good {{
+                border-left: 4px solid #4CAF50;
+            }}
+            .conclusion.warning {{
+                border-left: 4px solid #ff9800;
+            }}
+            .conclusion.error {{
+                border-left: 4px solid #f44336;
+            }}
+            .timestamp {{
+                color: #666;
+                font-size: 0.9em;
+                text-align: center;
+                margin-top: 30px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>FactSet Fundamentals API Analysis</h1>
+            <h2>{ticker} - Royal Bank of Canada</h2>
+            <p>Comprehensive evaluation of available fundamental data</p>
+        </div>
+        
+        <div class="summary">
+            <h2>Executive Summary</h2>
+            <div class="metrics-grid">
+                <div class="category-card">
+                    <div class="metric-count">{total_metrics}</div>
+                    <div>Total Available Metrics</div>
+                </div>
+                <div class="category-card">
+                    <div class="metric-count">{categories_with_data}/10</div>
+                    <div>Categories with Data</div>
+                </div>
+                <div class="category-card">
+                    <div class="metric-count">{total_data_points:,}</div>
+                    <div>Data Points Retrieved</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="summary">
+            <h2>Category Analysis</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Available Metrics</th>
+                        <th>Data Points</th>
+                        <th>Coverage</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+    """
+    
+    # Add category rows
+    for category, metrics in all_metrics.items():
+        cat_data = category_results.get(category, {})
+        metrics_available = len(metrics)
+        
+        if cat_data:
+            best_result = max(cat_data.values(), key=lambda x: x.get('total_points', 0))
+            data_points = best_result.get('total_points', 0)
+            metrics_with_data = best_result.get('metrics_with_data', 0)
+            
+            if data_points > 0:
+                coverage = f"{(metrics_with_data / metrics_available * 100):.1f}%" if metrics_available > 0 else "0%"
+                status = "✅ Excellent" if metrics_with_data > metrics_available * 0.5 else "⚠️ Moderate"
+                status_class = "status-good" if metrics_with_data > metrics_available * 0.5 else "status-warning"
+            else:
+                coverage = "0%"
+                status = "❌ No Data"
+                status_class = "status-error"
+        else:
+            data_points = 0
+            coverage = "0%"
+            status = "❌ No Access"
+            status_class = "status-error"
+        
+        html_content += f"""
+                    <tr>
+                        <td><strong>{category.replace('_', ' ')}</strong></td>
+                        <td>{metrics_available}</td>
+                        <td>{data_points:,}</td>
+                        <td>{coverage}</td>
+                        <td class="{status_class}">{status}</td>
+                    </tr>
+        """
+    
+    # Business conclusion
+    if total_data_points > 100:
+        conclusion_class = "good"
+        conclusion_text = "✅ EXCELLENT - FactSet Fundamentals API provides comprehensive data coverage"
+        recommendation = "Recommend proceeding with full implementation for internal reporting"
+    elif total_data_points > 50:
+        conclusion_class = "warning"
+        conclusion_text = "⚠️ MODERATE - FactSet Fundamentals API provides partial data coverage"
+        recommendation = "Consider supplementary data sources for complete reporting"
+    else:
+        conclusion_class = "error"
+        conclusion_text = "❌ LIMITED - FactSet Fundamentals API provides limited data coverage"
+        recommendation = "Investigate access permissions or consider alternative data sources"
+    
+    html_content += f"""
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="conclusion {conclusion_class}">
+            <h2>Business Recommendation</h2>
+            <h3>{conclusion_text}</h3>
+            <p><strong>Recommendation:</strong> {recommendation}</p>
+            <p><strong>Key Findings:</strong></p>
+            <ul>
+                <li>Total metrics available: {total_metrics:,}</li>
+                <li>Categories with data: {categories_with_data}/10</li>
+                <li>Maximum data points: {total_data_points:,}</li>
+                <li>Tested across multiple periods: QTR, ANN, LTM</li>
+                <li>Tested across multiple currencies: CAD, USD, LOCAL</li>
+            </ul>
+        </div>
+        
+        <div class="timestamp">
+            Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html_content
+
 def main():
     """Main function to test FactSet Fundamentals API."""
     print("\n" + "="*80)
@@ -491,6 +731,24 @@ def main():
             print(f"✅ Test complete at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"🎯 Tested {TEST_TICKER} across {len(TEST_PERIODS)} periods and {len(TEST_CURRENCIES)} currencies")
             print(f"📊 Evaluated {total_metrics} available metrics across {len(all_metrics)} categories")
+            
+            # Generate HTML report
+            print(f"\n📄 GENERATING HTML REPORT...")
+            html_report = generate_html_report(all_metrics, category_results, TEST_TICKER)
+            
+            # Save HTML report
+            output_dir = Path(__file__).parent / "output"
+            output_dir.mkdir(exist_ok=True)
+            
+            html_filename = f"factset_fundamentals_analysis_{TEST_TICKER}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+            html_path = output_dir / html_filename
+            
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(html_report)
+            
+            print(f"✅ HTML report saved: {html_path}")
+            print(f"🌐 Open the file in your browser to view the formatted report")
+            print(f"📧 Share the HTML file with your team for review")
             
     finally:
         # Cleanup
