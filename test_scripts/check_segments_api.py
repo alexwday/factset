@@ -142,8 +142,8 @@ def setup_ssl_certificate(nas_conn: SMBConnection, ssl_cert_path: str) -> Option
         print(f"❌ Error downloading SSL certificate from NAS: {e}")
         return None
 
-def discover_all_metrics(data_api: metrics_api.MetricsApi) -> List[str]:
-    """Discover all available metrics from the metrics API."""
+def discover_all_metrics(data_api: metrics_api.MetricsApi) -> Tuple[List[str], Dict[str, str]]:
+    """Discover all available metrics from the metrics API and return metrics list and descriptions map."""
     print("🔍 Discovering all available metrics...")
     
     categories = [
@@ -153,6 +153,7 @@ def discover_all_metrics(data_api: metrics_api.MetricsApi) -> List[str]:
     ]
     
     all_metrics = []
+    metric_descriptions = {}
     
     for category in categories:
         try:
@@ -160,7 +161,15 @@ def discover_all_metrics(data_api: metrics_api.MetricsApi) -> List[str]:
             response = data_api.get_fds_fundamentals_metrics(category=category)
             
             if response and hasattr(response, 'data') and response.data:
-                category_metrics = [metric.metric for metric in response.data if hasattr(metric, 'metric') and metric.metric]
+                category_metrics = []
+                for metric in response.data:
+                    if hasattr(metric, 'metric') and metric.metric:
+                        metric_code = metric.metric
+                        metric_desc = getattr(metric, 'description', 'No description available')
+                        
+                        category_metrics.append(metric_code)
+                        metric_descriptions[metric_code] = metric_desc
+                
                 all_metrics.extend(category_metrics)
                 print(f"    ✅ Found {len(category_metrics)} {category} metrics")
             else:
@@ -174,8 +183,9 @@ def discover_all_metrics(data_api: metrics_api.MetricsApi) -> List[str]:
     # Remove duplicates and sort
     unique_metrics = sorted(list(set(all_metrics)))
     print(f"📊 Total unique metrics discovered: {len(unique_metrics)}")
+    print(f"📊 Metric descriptions captured: {len(metric_descriptions)}")
     
-    return unique_metrics
+    return unique_metrics, metric_descriptions
 
 def explore_segments_api(seg_api: segments_api.SegmentsApi, ticker: str) -> Dict[str, Any]:
     """Explore what segments-related methods are available."""
@@ -204,7 +214,7 @@ def explore_segments_api(seg_api: segments_api.SegmentsApi, ticker: str) -> Dict
         
         return {"methods": api_methods, "target_method": target_method, "available": False, "relevant": relevant_methods}
 
-def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str, available_metrics: List[str]) -> Optional[Dict[str, Any]]:
+def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str, available_metrics: List[str], metric_descriptions: Dict[str, str]) -> Optional[Dict[str, Any]]:
     """Test getting segments data for the ticker."""
     print(f"📊 Testing segments data retrieval for {ticker}...")
     
@@ -557,7 +567,7 @@ def main():
             print(f"\n🔍 PHASE 1: DISCOVERING ALL AVAILABLE METRICS")
             print("="*80)
             
-            available_metrics = discover_all_metrics(data_api)
+            available_metrics, metric_descriptions = discover_all_metrics(data_api)
             
             # Phase 2: Explore available segments methods
             print(f"\n🔍 PHASE 2: EXPLORING SEGMENTS API METHODS")
@@ -569,7 +579,7 @@ def main():
             print(f"\n🔍 PHASE 3: TESTING SEGMENTS DATA RETRIEVAL")
             print("="*80)
             
-            segments_data = test_segments_data(seg_api, TEST_TICKER, available_metrics)
+            segments_data = test_segments_data(seg_api, TEST_TICKER, available_metrics, metric_descriptions)
             
             # Phase 4: Generate table output
             print(f"\n📊 GENERATING SEGMENTS DATA TABLE")
@@ -609,12 +619,17 @@ def main():
                     segment_name = segment_dict.get('label', 'Unknown')
                     date_value = segment_dict.get('date', 'Unknown')
                     
+                    # Get metric description from the mapping
+                    metric_code = segment_dict.get('metric', 'Unknown')
+                    metric_description = metric_descriptions.get(metric_code, 'No description available')
+                    
                     # Extract key fields for table (based on actual API response structure)
                     table_row = {
                         'Ticker': segment_dict.get('request_id', TEST_TICKER),
                         'Segment': segment_name,
                         'Date': date_value,
-                        'Metric': segment_dict.get('metric', 'Unknown'),
+                        'Metric': metric_code,
+                        'Description': metric_description,
                         'Value': segment_dict.get('value', 'N/A'),
                         'FSYM_ID': segment_dict.get('fsym_id', 'N/A')
                     }
@@ -623,8 +638,12 @@ def main():
                 # Create DataFrame and display
                 if table_data:
                     df = pd.DataFrame(table_data)
+                    
+                    # Sort by Segment, then by Metric for better organization
+                    df = df.sort_values(['Segment', 'Metric'], ascending=[True, True])
+                    
                     print(f"📋 SEGMENTS DATA TABLE ({len(df)} rows):")
-                    print("-" * 120)
+                    print("-" * 150)
                     print(df.to_string(index=False))
                     
                     # Save to CSV
