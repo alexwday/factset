@@ -13,6 +13,7 @@ from dateutil.parser import parse as dateutil_parser
 import os
 from urllib.parse import quote
 from datetime import datetime, timedelta
+import pytz
 import tempfile
 import io
 from smb.SMBConnection import SMBConnection
@@ -175,7 +176,18 @@ def check_upcoming_events(api_instance: calendar_events_api.CalendarEventsApi,
                 if ticker in monitored_tickers:
                     upcoming_events.append((event, ticker))
                     event_datetime = event.get('event_date_time', 'Unknown')
-                    event_date_str = event_datetime.strftime('%Y-%m-%d') if hasattr(event_datetime, 'strftime') else str(event_datetime)
+                    if hasattr(event_datetime, 'strftime'):
+                        # Convert to Atlantic Standard Time for display
+                        ast_tz = pytz.timezone('America/Halifax')
+                        if event_datetime.tzinfo is not None:
+                            event_datetime_ast = event_datetime.astimezone(ast_tz)
+                        else:
+                            utc_tz = pytz.UTC
+                            event_datetime_utc = utc_tz.localize(event_datetime)
+                            event_datetime_ast = event_datetime_utc.astimezone(ast_tz)
+                        event_date_str = event_datetime_ast.strftime('%Y-%m-%d %H:%M AST')
+                    else:
+                        event_date_str = str(event_datetime)
                     print(f"  ✅ {ticker}: {event.get('event_type', 'Unknown')} on {event_date_str}")
         else:
             print(f"📭 No events found for the specified date range")
@@ -194,8 +206,20 @@ def format_event_info(event: Dict[str, Any], ticker: str) -> str:
     event_datetime = event.get('event_date_time', 'Unknown')
     
     if hasattr(event_datetime, 'strftime'):
-        event_date = event_datetime.strftime('%Y-%m-%d')
-        event_time = event_datetime.strftime('%H:%M')
+        # Convert to Atlantic Standard Time (UTC-4)
+        ast_tz = pytz.timezone('America/Halifax')  # Atlantic Standard Time
+        
+        # If datetime is timezone-aware, convert to AST
+        if event_datetime.tzinfo is not None:
+            event_datetime_ast = event_datetime.astimezone(ast_tz)
+        else:
+            # Assume UTC if no timezone info
+            utc_tz = pytz.UTC
+            event_datetime_utc = utc_tz.localize(event_datetime)
+            event_datetime_ast = event_datetime_utc.astimezone(ast_tz)
+        
+        event_date = event_datetime_ast.strftime('%Y-%m-%d')
+        event_time = event_datetime_ast.strftime('%H:%M AST')
     else:
         event_date = 'Unknown'
         event_time = 'Unknown'
@@ -261,12 +285,24 @@ def main():
             print("-" * 60)
             
             if upcoming_events:
-                # Group by date
+                # Group by date and convert to AST
                 by_date = {}
+                ast_tz = pytz.timezone('America/Halifax')
+                
                 for event, ticker in upcoming_events:
                     event_datetime = event.get('event_date_time', 'Unknown')
                     if hasattr(event_datetime, 'strftime'):
-                        event_date = event_datetime.strftime('%Y-%m-%d')
+                        # Convert to Atlantic Standard Time
+                        if event_datetime.tzinfo is not None:
+                            event_datetime_ast = event_datetime.astimezone(ast_tz)
+                        else:
+                            utc_tz = pytz.UTC
+                            event_datetime_utc = utc_tz.localize(event_datetime)
+                            event_datetime_ast = event_datetime_utc.astimezone(ast_tz)
+                        
+                        event_date = event_datetime_ast.strftime('%Y-%m-%d')
+                        # Store the AST datetime for sorting by time
+                        event['event_datetime_ast'] = event_datetime_ast
                     else:
                         event_date = 'Unknown'
                     
@@ -282,7 +318,16 @@ def main():
                 
                 for date in sorted_dates:
                     events_on_date = by_date[date]
-                    print(f"📅 {date} ({len(events_on_date)} events):")
+                    
+                    # Sort events by start time within each date
+                    events_on_date.sort(key=lambda x: x[0].get('event_datetime_ast', datetime.min))
+                    
+                    # Get day of week name
+                    if events_on_date and hasattr(events_on_date[0][0].get('event_datetime_ast'), 'strftime'):
+                        day_of_week = events_on_date[0][0]['event_datetime_ast'].strftime('%A')
+                        print(f"📅 {day_of_week}, {date} ({len(events_on_date)} events):")
+                    else:
+                        print(f"📅 {date} ({len(events_on_date)} events):")
                     
                     for event, ticker in events_on_date:
                         institution_name = config['monitored_institutions'].get(ticker, {}).get('name', ticker)
