@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Daily Feed Checker
-Quick check of today's earnings transcripts without downloading anything.
-Perfect for testing and seeing what's available.
+Shows ALL earnings transcripts available today (not just monitored banks).
+Perfect for discovering new companies to add to your config for testing.
 """
 
 import pandas as pd
@@ -130,7 +130,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection, ssl_cert_path: str) -> Option
 def check_daily_feed(api_instance: transcripts_api.TranscriptsApi, 
                     check_date: datetime.date, 
                     monitored_tickers: List[str]) -> List[Tuple[Dict[str, Any], str]]:
-    """Get all transcripts for check date and filter to monitored institutions."""
+    """Get ALL earnings transcripts for check date to discover potential new banks."""
     try:
         print(f"🔍 Querying transcripts for date: {check_date}")
         
@@ -149,8 +149,7 @@ def check_daily_feed(api_instance: transcripts_api.TranscriptsApi,
         all_transcripts = [transcript.to_dict() for transcript in response.data]
         print(f"📊 Found {len(all_transcripts)} total transcripts for date: {check_date}")
         
-        # Filter to monitored institutions and earnings transcripts
-        filtered_transcripts = []
+        # Filter to ALL earnings transcripts (not just monitored banks)
         earnings_transcripts = []
         
         for transcript in all_transcripts:
@@ -160,16 +159,12 @@ def check_daily_feed(api_instance: transcripts_api.TranscriptsApi,
             if not isinstance(primary_ids, list):
                 continue
             
-            # Check if exactly one primary ID and it's one of our monitored tickers
-            if len(primary_ids) == 1 and primary_ids[0] in monitored_tickers:
-                filtered_transcripts.append((transcript, primary_ids[0]))
-                
-                # Also check if it's an earnings transcript
+            # Check if exactly one primary ID (anti-contamination) and it's an earnings transcript
+            if len(primary_ids) == 1:
                 if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', '')):
                     earnings_transcripts.append((transcript, primary_ids[0]))
         
-        print(f"🏦 Found {len(filtered_transcripts)} transcripts for monitored institutions")
-        print(f"💰 Found {len(earnings_transcripts)} earnings transcripts for monitored institutions")
+        print(f"💰 Found {len(earnings_transcripts)} earnings transcripts (ALL companies)")
         
         return earnings_transcripts
         
@@ -238,7 +233,7 @@ def main():
             # Get today's earnings transcripts
             earnings_transcripts = check_daily_feed(api_instance, check_date, monitored_tickers)
             
-            print(f"\n📋 RESULTS FOR {check_date}")
+            print(f"\n📋 ALL EARNINGS TRANSCRIPTS FOR {check_date}")
             print("-" * 60)
             
             if earnings_transcripts:
@@ -249,18 +244,47 @@ def main():
                         by_ticker[ticker] = []
                     by_ticker[ticker].append(transcript)
                 
-                print(f"✅ Found earnings transcripts for {len(by_ticker)} monitored banks:")
+                print(f"✅ Found earnings transcripts for {len(by_ticker)} companies:")
                 print()
                 
+                # Separate monitored vs unmonitored
+                monitored_companies = []
+                new_companies = []
+                
                 for ticker, transcripts in by_ticker.items():
-                    institution_name = config['monitored_institutions'][ticker]['name']
-                    print(f"🏦 {institution_name} ({ticker}) - {len(transcripts)} transcript(s):")
+                    if ticker in monitored_tickers:
+                        monitored_companies.append((ticker, transcripts))
+                    else:
+                        new_companies.append((ticker, transcripts))
+                
+                # Show monitored companies first
+                if monitored_companies:
+                    print("🏦 ALREADY MONITORED COMPANIES:")
+                    for ticker, transcripts in monitored_companies:
+                        institution_name = config['monitored_institutions'][ticker]['name']
+                        print(f"  ✅ {institution_name} ({ticker}) - {len(transcripts)} transcript(s):")
+                        
+                        for transcript in transcripts:
+                            print(f"    {format_transcript_info(transcript, ticker)}")
+                        print()
+                
+                # Show new companies (these are candidates to add)
+                if new_companies:
+                    print("🆕 NEW COMPANIES (not currently monitored):")
+                    for ticker, transcripts in new_companies:
+                        print(f"  ⭐ {ticker} - {len(transcripts)} transcript(s):")
+                        
+                        for transcript in transcripts:
+                            print(f"    {format_transcript_info(transcript, ticker)}")
+                        print()
                     
-                    for transcript in transcripts:
-                        print(format_transcript_info(transcript, ticker))
-                    print()
+                    print("💡 Add any of these tickers to your config.json to monitor them!")
+                    print("💡 Then run the earnings monitor to see notifications for these companies.")
+                else:
+                    print("🔍 No new companies found - all earnings transcripts are from monitored banks")
+                    
             else:
-                print("📭 No earnings transcripts found for monitored banks today")
+                print("📭 No earnings transcripts found today")
                 print("💡 This is normal on non-earnings days")
             
             print("-" * 60)
