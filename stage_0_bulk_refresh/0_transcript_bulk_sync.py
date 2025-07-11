@@ -219,7 +219,7 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
     
     # Validate ticker formats for security
     for ticker in config['monitored_institutions'].keys():
-        if not re.match(r'^[A-Z0-9-]+$', ticker):
+        if not re.match(r'^[A-Z0-9.-]+$', ticker):
             raise ValueError(f"Invalid ticker format: {ticker}")
     
     logger.info("Configuration validation successful")
