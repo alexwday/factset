@@ -175,95 +175,85 @@ class EnhancedTranscriptComparer:
         
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == 'equal':
-                # Check if truly equal or just similar after normalization
-                pdf_text = ' '.join(pdf_tokens[i1:i2])
-                html_text = ' '.join(html_tokens[j1:j2])
-                
-                # Split into smaller chunks if it's a large block
-                if i2 - i1 > 20:  # Large block, split it
-                    chunk_size = 10
-                    for i in range(i1, i2, chunk_size):
-                        chunk_end = min(i + chunk_size, i2)
-                        pdf_chunk = ' '.join(pdf_tokens[i:chunk_end])
-                        html_chunk = ' '.join(html_tokens[j1 + (i - i1):j1 + (chunk_end - i1)])
-                        
-                        if pdf_chunk.lower() == html_chunk.lower():
-                            alignment_type = AlignmentType.MATCH
-                        else:
-                            alignment_type = AlignmentType.SIMILAR
-                        
+                # For equal blocks, check each token pair to see if they're EXACTLY equal
+                for i in range(i1, i2):
+                    j = j1 + (i - i1)
+                    if pdf_tokens[i] == html_tokens[j]:
+                        # Exact match
                         segments.append(AlignedSegment(
-                            alignment_type=alignment_type,
-                            pdf_text=pdf_chunk,
-                            html_text=html_chunk,
+                            alignment_type=AlignmentType.MATCH,
+                            pdf_text=pdf_tokens[i],
+                            html_text=html_tokens[j],
                             similarity=1.0
                         ))
-                else:
-                    # Small block, keep as is
-                    if pdf_text.lower() == html_text.lower():
-                        alignment_type = AlignmentType.MATCH
                     else:
-                        alignment_type = AlignmentType.SIMILAR
-                    
-                    segments.append(AlignedSegment(
-                        alignment_type=alignment_type,
-                        pdf_text=pdf_text,
-                        html_text=html_text,
-                        similarity=1.0
-                    ))
+                        # Similar after normalization
+                        segments.append(AlignedSegment(
+                            alignment_type=AlignmentType.SIMILAR,
+                            pdf_text=pdf_tokens[i],
+                            html_text=html_tokens[j],
+                            similarity=0.9
+                        ))
                 
             elif tag == 'replace':
-                # For replacements, try to find exact differences
-                pdf_text = ' '.join(pdf_tokens[i1:i2])
-                html_text = ' '.join(html_tokens[j1:j2])
+                # For replacements, do word-by-word alignment
+                pdf_words = pdf_tokens[i1:i2]
+                html_words = html_tokens[j1:j2]
                 
-                # If it's a small difference, mark as similar
-                if (i2 - i1) <= 3 and (j2 - j1) <= 3:
-                    segments.append(AlignedSegment(
-                        alignment_type=AlignmentType.SIMILAR,
-                        pdf_text=pdf_text,
-                        html_text=html_text,
-                        similarity=0.8
-                    ))
-                else:
-                    # For larger replacements, try to align word by word
-                    pdf_words = pdf_tokens[i1:i2]
-                    html_words = html_tokens[j1:j2]
-                    
-                    # Simple word-by-word alignment
-                    word_matcher = SequenceMatcher(None, 
-                                                 [self.normalize_for_comparison(w) for w in pdf_words],
-                                                 [self.normalize_for_comparison(w) for w in html_words])
-                    
-                    for wtag, wi1, wi2, wj1, wj2 in word_matcher.get_opcodes():
-                        if wtag == 'equal':
-                            segments.append(AlignedSegment(
-                                alignment_type=AlignmentType.MATCH,
-                                pdf_text=' '.join(pdf_words[wi1:wi2]),
-                                html_text=' '.join(html_words[wj1:wj2]),
-                                similarity=1.0
-                            ))
-                        elif wtag == 'replace':
-                            segments.append(AlignedSegment(
-                                alignment_type=AlignmentType.SIMILAR,
-                                pdf_text=' '.join(pdf_words[wi1:wi2]) if wi1 < wi2 else '',
-                                html_text=' '.join(html_words[wj1:wj2]) if wj1 < wj2 else '',
-                                similarity=0.5
-                            ))
-                        elif wtag == 'delete':
+                # Align the replacement section word by word
+                word_matcher = SequenceMatcher(None, 
+                                             [self.normalize_for_comparison(w) for w in pdf_words],
+                                             [self.normalize_for_comparison(w) for w in html_words])
+                
+                for wtag, wi1, wi2, wj1, wj2 in word_matcher.get_opcodes():
+                    if wtag == 'equal':
+                        # Check if actually equal or just normalized equal
+                        for wi in range(wi1, wi2):
+                            wj = wj1 + (wi - wi1)
+                            if wi < len(pdf_words) and wj < len(html_words):
+                                if pdf_words[wi] == html_words[wj]:
+                                    segments.append(AlignedSegment(
+                                        alignment_type=AlignmentType.MATCH,
+                                        pdf_text=pdf_words[wi],
+                                        html_text=html_words[wj],
+                                        similarity=1.0
+                                    ))
+                                else:
+                                    segments.append(AlignedSegment(
+                                        alignment_type=AlignmentType.SIMILAR,
+                                        pdf_text=pdf_words[wi],
+                                        html_text=html_words[wj],
+                                        similarity=0.9
+                                    ))
+                    elif wtag == 'replace':
+                        if wi1 < wi2:
                             segments.append(AlignedSegment(
                                 alignment_type=AlignmentType.HTML_GAP,
                                 pdf_text=' '.join(pdf_words[wi1:wi2]),
                                 html_text='',
                                 similarity=0
                             ))
-                        elif wtag == 'insert':
+                        if wj1 < wj2:
                             segments.append(AlignedSegment(
                                 alignment_type=AlignmentType.PDF_GAP,
                                 pdf_text='',
                                 html_text=' '.join(html_words[wj1:wj2]),
                                 similarity=0
                             ))
+                    elif wtag == 'delete':
+                        segments.append(AlignedSegment(
+                            alignment_type=AlignmentType.HTML_GAP,
+                            pdf_text=' '.join(pdf_words[wi1:wi2]),
+                            html_text='',
+                            similarity=0
+                        ))
+                    elif wtag == 'insert':
+                        segments.append(AlignedSegment(
+                            alignment_type=AlignmentType.PDF_GAP,
+                            pdf_text='',
+                            html_text=' '.join(html_words[wj1:wj2]),
+                            similarity=0
+                        ))
                 
             elif tag == 'delete':
                 pdf_text = ' '.join(pdf_tokens[i1:i2])
