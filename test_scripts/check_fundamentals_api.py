@@ -196,8 +196,6 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
             ids=ids_instance,
             metrics=metrics_instance,
             periodicity=periodicity_instance,
-            fiscal_period_start=start_date.strftime('%Y-%m-%d'),
-            fiscal_period_end=end_date.strftime('%Y-%m-%d'),
             currency=currency,
             update_type=update_type_instance
         )
