@@ -1010,7 +1010,6 @@ def main() -> None:
         logger.info(f"Date range: {target_dates[-1]} to {target_dates[0]} ({len(target_dates)} days)")
         
         institutions_with_transcripts = []
-        institutions_without_transcripts = []
         monitored_tickers = list(config['monitored_institutions'].keys())
         
         with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
@@ -1061,13 +1060,7 @@ def main() -> None:
                             'type': institution_info['type'],
                             'downloaded': bank_downloads['total']
                         })
-                else:
-                    # No transcripts found for this bank - skip processing
-                    institutions_without_transcripts.append({
-                        'ticker': ticker,
-                        'name': institution_info['name'],
-                        'type': institution_info['type']
-                    })
+                # No else clause needed - we only care about banks with transcripts
                 
                 # No artificial delays between banks - we already have all the data
         
@@ -1078,15 +1071,13 @@ def main() -> None:
         logger.info(f"Total new transcripts downloaded: {total_downloaded}")
         logger.info(f"Execution time: {execution_time}")
         
-        # Log summary of institutions processed
-        logger.info(f"Institutions with transcripts found: {len(institutions_with_transcripts)}")
-        for inst in institutions_with_transcripts:
-            logger.info(f"  {inst['ticker']} ({inst['type']}): {inst['downloaded']} transcripts downloaded")
-        
-        if institutions_without_transcripts:
-            logger.warning(f"Institutions with NO transcripts found: {len(institutions_without_transcripts)}")
-            for inst in institutions_without_transcripts:
-                logger.warning(f"  {inst['ticker']} - {inst['name']} ({inst['type']}): No earnings transcripts or ticker not found")
+        # Log summary of institutions with activity
+        if institutions_with_transcripts:
+            logger.info(f"Institutions with transcripts found: {len(institutions_with_transcripts)}")
+            for inst in institutions_with_transcripts:
+                logger.info(f"  {inst['ticker']} ({inst['type']}): {inst['downloaded']} transcripts downloaded")
+        else:
+            logger.info("No new transcripts found for any monitored institutions")
         
         # Upload log file to NAS - properly close logging first
         try:
