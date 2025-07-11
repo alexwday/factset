@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-All-in-one transcript comparison tool.
-Compares PDF/text transcripts with HTML transcripts and generates a visual HTML report.
+Enhanced transcript comparison tool with improved normalization and commenting.
 
 Usage: python transcript_compare.py <pdf/txt file> <html file> [output.html]
 """
 
 import re
 import sys
+import json
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict
@@ -34,7 +34,7 @@ except ImportError:
 class AlignmentType(Enum):
     """Types of alignment between transcript segments."""
     MATCH = "match"
-    SUBSTITUTION = "substitution"
+    SIMILAR = "similar"      # High similarity but not exact
     PDF_GAP = "pdf_gap"      # Content only in HTML
     HTML_GAP = "html_gap"    # Content only in PDF
 
@@ -45,51 +45,26 @@ class AlignedSegment:
     alignment_type: AlignmentType
     pdf_text: str
     html_text: str
-    score: float = 1.0
+    similarity: float = 1.0
 
 
-class TranscriptComparer:
-    """Complete transcript comparison tool."""
+class EnhancedTranscriptComparer:
+    """Enhanced transcript comparison with better normalization."""
     
     def __init__(self):
-        # Common number substitutions
+        # Number to word mappings
         self.number_map = {
             '1': 'one', '2': 'two', '3': 'three', '4': 'four', '5': 'five',
             '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine', '10': 'ten',
-            '11': 'eleven', '12': 'twelve', '13': 'thirteen', '14': 'fourteen',
-            '15': 'fifteen', '16': 'sixteen', '17': 'seventeen', '18': 'eighteen',
-            '19': 'nineteen', '20': 'twenty', '21': 'twenty one', '22': 'twenty two',
-            '23': 'twenty three', '24': 'twenty four', '25': 'twenty five',
-            '30': 'thirty', '40': 'forty', '50': 'fifty', '60': 'sixty',
-            '70': 'seventy', '80': 'eighty', '90': 'ninety', '100': 'one hundred',
-            '125': 'one hundred twenty five', '150': 'one hundred fifty',
-            '200': 'two hundred', '250': 'two hundred fifty',
-            '300': 'three hundred', '400': 'four hundred',
-            '425': 'four hundred twenty five', '500': 'five hundred',
-            '1000': 'one thousand', '2000': 'two thousand',
-            '2023': 'twenty twenty three', '2024': 'twenty twenty four'
+            'ii': 'two',  # Roman numeral
         }
         
-        # Common abbreviations
-        self.abbrev_map = {
-            'ceo': 'chief executive officer',
-            'cfo': 'chief financial officer',
-            'coo': 'chief operating officer',
-            'cto': 'chief technology officer',
-            'evp': 'executive vice president',
-            'svp': 'senior vice president',
-            'vp': 'vice president',
-            'q1': 'first quarter',
-            'q2': 'second quarter',
-            'q3': 'third quarter',
-            'q4': 'fourth quarter',
-            'yoy': 'year over year',
-            'ytd': 'year to date',
-            'qoq': 'quarter over quarter',
-            'b': 'billion',
-            'm': 'million',
-            'k': 'thousand'
-        }
+        # Currency normalization (CAD/$ are equivalent by default)
+        self.currency_patterns = [
+            (r'\$\s*(\d+(?:\.\d+)?)', r'cad \1'),  # $150 -> cad 150
+            (r'cad\s+(\d+(?:\.\d+)?)', r'cad \1'),  # CAD 150 -> cad 150
+            (r'usd\s+(\d+(?:\.\d+)?)', r'usd \1'),  # USD 150 -> usd 150
+        ]
     
     def extract_pdf_text(self, pdf_path: str) -> str:
         """Extract text from PDF or text file."""
@@ -98,7 +73,7 @@ class TranscriptComparer:
                 return f.read()
         
         if not PDFPLUMBER_AVAILABLE:
-            raise ImportError("pdfplumber required for PDF files. Install with: pip install pdfplumber")
+            raise ImportError("pdfplumber required for PDF files")
         
         text_parts = []
         with pdfplumber.open(pdf_path) as pdf:
@@ -123,144 +98,195 @@ class TranscriptComparer:
         lines = [line.strip() for line in text.splitlines()]
         return '\n'.join(line for line in lines if line)
     
-    def normalize_token(self, token: str) -> str:
+    def normalize_for_comparison(self, token: str) -> str:
         """
-        Normalize a token for comparison.
-        This is where the magic happens for recognizing equivalents.
+        Enhanced normalization with all requested improvements.
         """
-        # Remove punctuation
-        clean = re.sub(r'[.,;:!?\'"\-()]', '', token).lower()
+        # Convert to lowercase (case insensitive)
+        normalized = token.lower()
         
-        # Check if it's a number that should be spelled out
-        if clean in self.number_map:
-            return self.number_map[clean]
+        # Remove hyphens within words (FX-trading -> FXtrading)
+        normalized = re.sub(r'(\w)-(\w)', r'\1\2', normalized)
         
-        # Handle percentages: "15%" -> "fifteen percent"
-        if clean.endswith('%'):
-            number = clean[:-1]
-            if number in self.number_map:
-                return self.number_map[number] + ' percent'
-            return number + ' percent'
+        # Remove possessive 's (Banking's -> Banking)
+        normalized = re.sub(r"'s\b", '', normalized)
         
-        # Handle currency: "$2.5" -> "2.5 dollars"
-        if clean.startswith('$'):
-            amount = clean[1:]
-            # Handle decimals
-            if '.' in amount:
-                parts = amount.split('.')
-                if parts[0] in self.number_map:
-                    result = self.number_map[parts[0]] + ' point ' + parts[1]
-                else:
-                    result = amount
+        # Normalize currency ($ -> cad by default)
+        for pattern, replacement in self.currency_patterns:
+            normalized = re.sub(pattern, replacement, normalized)
+        
+        # Normalize numbers 1-10 and roman numerals
+        words = normalized.split()
+        normalized_words = []
+        for word in words:
+            clean_word = re.sub(r'[^\w]', '', word)  # Remove punctuation for lookup
+            if clean_word in self.number_map:
+                normalized_words.append(self.number_map[clean_word])
             else:
-                if amount in self.number_map:
-                    result = self.number_map[amount]
-                else:
-                    result = amount
-            return result + ' dollars'
+                normalized_words.append(word)
+        normalized = ' '.join(normalized_words)
         
-        # Handle common abbreviations
-        if clean in self.abbrev_map:
-            return self.abbrev_map[clean]
+        # Remove punctuation (including periods and commas for better alignment)
+        # But keep spaces and alphanumeric
+        normalized = re.sub(r'[.,;:!?\'"()]', '', normalized)
         
-        # Handle compound numbers like "2.5" -> "two point five"
-        if '.' in clean and clean.replace('.', '').isdigit():
-            parts = clean.split('.')
-            normalized_parts = []
-            for part in parts:
-                if part in self.number_map:
-                    normalized_parts.append(self.number_map[part])
-                else:
-                    normalized_parts.append(part)
-            return ' point '.join(normalized_parts)
+        # Normalize percent symbol
+        normalized = normalized.replace('%', ' percent')
         
-        return clean
+        # Clean up extra spaces
+        normalized = ' '.join(normalized.split())
+        
+        return normalized.strip()
     
-    def tokenize_and_normalize(self, text: str) -> Tuple[List[str], List[str]]:
-        """
-        Tokenize text and return both original and normalized versions.
-        """
-        # Split on whitespace but preserve original tokens
-        original_tokens = re.findall(r'\S+', text)
-        normalized_tokens = [self.normalize_token(token) for token in original_tokens]
-        
-        return original_tokens, normalized_tokens
+    def tokenize(self, text: str) -> List[str]:
+        """Simple tokenization preserving original tokens."""
+        return re.findall(r'\S+', text)
     
-    def align_sequences(self, pdf_orig: List[str], pdf_norm: List[str],
-                       html_orig: List[str], html_norm: List[str]) -> List[AlignedSegment]:
+    def calculate_similarity(self, token1: str, token2: str) -> float:
+        """Calculate similarity between tokens."""
+        norm1 = self.normalize_for_comparison(token1)
+        norm2 = self.normalize_for_comparison(token2)
+        
+        if norm1 == norm2:
+            return 1.0
+        
+        # Check for high character-level similarity
+        if len(norm1) > 2 and len(norm2) > 2:
+            matcher = SequenceMatcher(None, norm1, norm2)
+            ratio = matcher.ratio()
+            if ratio > 0.85:  # 85% similar
+                return ratio
+        
+        return 0.0
+    
+    def align_sequences_granular(self, pdf_tokens: List[str], html_tokens: List[str]) -> List[AlignedSegment]:
         """
-        Align sequences using SequenceMatcher on normalized tokens.
+        Granular alignment that avoids large yellow blocks.
+        Creates smaller segments to better highlight actual differences.
         """
-        matcher = SequenceMatcher(None, pdf_norm, html_norm)
         segments = []
+        
+        # Create normalized versions
+        pdf_normalized = [self.normalize_for_comparison(t) for t in pdf_tokens]
+        html_normalized = [self.normalize_for_comparison(t) for t in html_tokens]
+        
+        # Use SequenceMatcher
+        matcher = SequenceMatcher(None, pdf_normalized, html_normalized)
         
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == 'equal':
-                # Perfect match
-                pdf_text = ' '.join(pdf_orig[i1:i2])
-                html_text = ' '.join(html_orig[j1:j2])
+                # Check if truly equal or just similar after normalization
+                pdf_text = ' '.join(pdf_tokens[i1:i2])
+                html_text = ' '.join(html_tokens[j1:j2])
                 
-                segments.append(AlignedSegment(
-                    alignment_type=AlignmentType.MATCH,
-                    pdf_text=pdf_text,
-                    html_text=html_text,
-                    score=1.0
-                ))
-                
-            elif tag == 'replace':
-                # Substitution - check if it's a small variation
-                pdf_text = ' '.join(pdf_orig[i1:i2])
-                html_text = ' '.join(html_orig[j1:j2])
-                
-                # For small replacements, show as substitution
-                if (i2 - i1) <= 3 and (j2 - j1) <= 3:
+                # Split into smaller chunks if it's a large block
+                if i2 - i1 > 20:  # Large block, split it
+                    chunk_size = 10
+                    for i in range(i1, i2, chunk_size):
+                        chunk_end = min(i + chunk_size, i2)
+                        pdf_chunk = ' '.join(pdf_tokens[i:chunk_end])
+                        html_chunk = ' '.join(html_tokens[j1 + (i - i1):j1 + (chunk_end - i1)])
+                        
+                        if pdf_chunk.lower() == html_chunk.lower():
+                            alignment_type = AlignmentType.MATCH
+                        else:
+                            alignment_type = AlignmentType.SIMILAR
+                        
+                        segments.append(AlignedSegment(
+                            alignment_type=alignment_type,
+                            pdf_text=pdf_chunk,
+                            html_text=html_chunk,
+                            similarity=1.0
+                        ))
+                else:
+                    # Small block, keep as is
+                    if pdf_text.lower() == html_text.lower():
+                        alignment_type = AlignmentType.MATCH
+                    else:
+                        alignment_type = AlignmentType.SIMILAR
+                    
                     segments.append(AlignedSegment(
-                        alignment_type=AlignmentType.SUBSTITUTION,
+                        alignment_type=alignment_type,
                         pdf_text=pdf_text,
                         html_text=html_text,
-                        score=0.5
+                        similarity=1.0
+                    ))
+                
+            elif tag == 'replace':
+                # For replacements, try to find exact differences
+                pdf_text = ' '.join(pdf_tokens[i1:i2])
+                html_text = ' '.join(html_tokens[j1:j2])
+                
+                # If it's a small difference, mark as similar
+                if (i2 - i1) <= 3 and (j2 - j1) <= 3:
+                    segments.append(AlignedSegment(
+                        alignment_type=AlignmentType.SIMILAR,
+                        pdf_text=pdf_text,
+                        html_text=html_text,
+                        similarity=0.8
                     ))
                 else:
-                    # Large replacement - show as separate gaps
-                    if i2 > i1:
-                        segments.append(AlignedSegment(
-                            alignment_type=AlignmentType.HTML_GAP,
-                            pdf_text=pdf_text,
-                            html_text='',
-                            score=0
-                        ))
-                    if j2 > j1:
-                        segments.append(AlignedSegment(
-                            alignment_type=AlignmentType.PDF_GAP,
-                            pdf_text='',
-                            html_text=html_text,
-                            score=0
-                        ))
+                    # For larger replacements, try to align word by word
+                    pdf_words = pdf_tokens[i1:i2]
+                    html_words = html_tokens[j1:j2]
+                    
+                    # Simple word-by-word alignment
+                    word_matcher = SequenceMatcher(None, 
+                                                 [self.normalize_for_comparison(w) for w in pdf_words],
+                                                 [self.normalize_for_comparison(w) for w in html_words])
+                    
+                    for wtag, wi1, wi2, wj1, wj2 in word_matcher.get_opcodes():
+                        if wtag == 'equal':
+                            segments.append(AlignedSegment(
+                                alignment_type=AlignmentType.MATCH,
+                                pdf_text=' '.join(pdf_words[wi1:wi2]),
+                                html_text=' '.join(html_words[wj1:wj2]),
+                                similarity=1.0
+                            ))
+                        elif wtag == 'replace':
+                            segments.append(AlignedSegment(
+                                alignment_type=AlignmentType.SIMILAR,
+                                pdf_text=' '.join(pdf_words[wi1:wi2]) if wi1 < wi2 else '',
+                                html_text=' '.join(html_words[wj1:wj2]) if wj1 < wj2 else '',
+                                similarity=0.5
+                            ))
+                        elif wtag == 'delete':
+                            segments.append(AlignedSegment(
+                                alignment_type=AlignmentType.HTML_GAP,
+                                pdf_text=' '.join(pdf_words[wi1:wi2]),
+                                html_text='',
+                                similarity=0
+                            ))
+                        elif wtag == 'insert':
+                            segments.append(AlignedSegment(
+                                alignment_type=AlignmentType.PDF_GAP,
+                                pdf_text='',
+                                html_text=' '.join(html_words[wj1:wj2]),
+                                similarity=0
+                            ))
                 
             elif tag == 'delete':
-                # PDF only
-                pdf_text = ' '.join(pdf_orig[i1:i2])
+                pdf_text = ' '.join(pdf_tokens[i1:i2])
                 segments.append(AlignedSegment(
                     alignment_type=AlignmentType.HTML_GAP,
                     pdf_text=pdf_text,
                     html_text='',
-                    score=0
+                    similarity=0
                 ))
                 
             elif tag == 'insert':
-                # HTML only
-                html_text = ' '.join(html_orig[j1:j2])
+                html_text = ' '.join(html_tokens[j1:j2])
                 segments.append(AlignedSegment(
                     alignment_type=AlignmentType.PDF_GAP,
                     pdf_text='',
                     html_text=html_text,
-                    score=0
+                    similarity=0
                 ))
         
         return segments
     
-    def merge_small_segments(self, segments: List[AlignedSegment]) -> List[AlignedSegment]:
-        """Merge small adjacent segments of the same type for cleaner output."""
+    def merge_tiny_segments(self, segments: List[AlignedSegment]) -> List[AlignedSegment]:
+        """Merge very small adjacent segments of the same type."""
         if not segments:
             return segments
         
@@ -268,36 +294,31 @@ class TranscriptComparer:
         current = segments[0]
         
         for next_seg in segments[1:]:
-            # Merge if same type and both are small
+            # Only merge if both are tiny (1-2 words) and same type
             if (current.alignment_type == next_seg.alignment_type and
-                len(current.pdf_text.split()) < 5 and
-                len(next_seg.pdf_text.split()) < 5):
+                len(current.pdf_text.split()) <= 2 and
+                len(next_seg.pdf_text.split()) <= 2):
                 
                 # Merge texts
                 if current.pdf_text and next_seg.pdf_text:
                     current.pdf_text += ' ' + next_seg.pdf_text
-                else:
-                    current.pdf_text += next_seg.pdf_text
+                elif next_seg.pdf_text:
+                    current.pdf_text = next_seg.pdf_text
                     
                 if current.html_text and next_seg.html_text:
                     current.html_text += ' ' + next_seg.html_text
-                else:
-                    current.html_text += next_seg.html_text
-                    
+                elif next_seg.html_text:
+                    current.html_text = next_seg.html_text
             else:
-                # Can't merge, save current and move to next
                 merged.append(current)
                 current = next_seg
         
-        # Don't forget the last segment
         merged.append(current)
-        
         return merged
     
     def generate_html_report(self, results: Dict[str, any], output_path: str):
-        """Generate the two-column HTML comparison report."""
+        """Generate HTML report with comment functionality."""
         
-        # HTML template with improved styling
         html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -320,7 +341,7 @@ class TranscriptComparer:
         }}
         
         .header {{
-            background: #2c3e50;
+            background: #1a1a2e;
             color: white;
             padding: 20px 30px;
         }}
@@ -338,11 +359,11 @@ class TranscriptComparer:
         }}
         
         .stats {{
-            background: #ecf0f1;
+            background: #f0f0f0;
             padding: 20px 30px;
             display: flex;
             justify-content: space-around;
-            border-bottom: 1px solid #bdc3c7;
+            border-bottom: 1px solid #ddd;
         }}
         
         .stat {{
@@ -352,13 +373,54 @@ class TranscriptComparer:
         .stat-value {{
             font-size: 28px;
             font-weight: bold;
-            color: #2c3e50;
+            color: #1a1a2e;
         }}
         
         .stat-label {{
             font-size: 14px;
-            color: #7f8c8d;
+            color: #666;
             margin-top: 5px;
+        }}
+        
+        /* Comment section */
+        .comment-section {{
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-bottom: 2px solid #dee2e6;
+        }}
+        
+        .comment-box {{
+            width: 100%;
+            min-height: 100px;
+            padding: 10px;
+            font-size: 14px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-family: inherit;
+        }}
+        
+        .comment-display {{
+            background: #e7f3ff;
+            border-left: 4px solid #0066cc;
+            padding: 15px 20px;
+            margin: 20px 30px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+        }}
+        
+        .save-button {{
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }}
+        
+        .save-button:hover {{
+            background: #0052a3;
         }}
         
         .alignment-container {{
@@ -377,15 +439,15 @@ class TranscriptComparer:
         .alignment-table td {{
             padding: 12px 20px;
             vertical-align: top;
-            border-bottom: 1px solid #ecf0f1;
+            border-bottom: 1px solid #eee;
         }}
         
         .alignment-table td:first-child {{
             width: 50%;
-            border-right: 2px solid #ecf0f1;
+            border-right: 2px solid #eee;
         }}
         
-        /* Match - both columns green */
+        /* Match - green */
         .match-row {{
             background-color: #d4edda;
         }}
@@ -394,50 +456,49 @@ class TranscriptComparer:
             color: #155724;
         }}
         
-        /* Substitution - both columns yellow */
-        .substitution-row {{
-            background-color: #fff3cd;
+        /* Similar - light yellow */
+        .similar-row {{
+            background-color: #fff9e6;
         }}
         
-        .substitution-row td {{
-            color: #856404;
-            font-weight: 500;
+        .similar-row td {{
+            color: #664d00;
         }}
         
-        /* PDF only - entire row light red */
+        /* PDF only - light red */
         .pdf-only-row {{
-            background-color: #f8d7da;
+            background-color: #fee;
         }}
         
         .pdf-only-row td:first-child {{
-            color: #721c24;
+            color: #c00;
         }}
         
         .pdf-only-row td:last-child {{
-            color: #721c24;
+            color: #c00;
             text-align: center;
             font-style: italic;
-            opacity: 0.6;
+            opacity: 0.5;
         }}
         
-        /* HTML only - entire row light blue */
+        /* HTML only - light blue */
         .html-only-row {{
-            background-color: #cfe2ff;
+            background-color: #e6f3ff;
         }}
         
         .html-only-row td:first-child {{
-            color: #084298;
+            color: #004085;
             text-align: center;
             font-style: italic;
-            opacity: 0.6;
+            opacity: 0.5;
         }}
         
         .html-only-row td:last-child {{
-            color: #084298;
+            color: #004085;
         }}
         
         .column-header {{
-            background: #34495e;
+            background: #2c3e50;
             color: white;
             font-weight: bold;
             text-align: center;
@@ -473,31 +534,60 @@ class TranscriptComparer:
             color: #155724;
         }}
         
-        .legend-substitution {{
-            background-color: #fff3cd;
-            color: #856404;
+        .legend-similar {{
+            background-color: #fff9e6;
+            color: #664d00;
         }}
         
         .legend-pdf-only {{
-            background-color: #f8d7da;
-            color: #721c24;
+            background-color: #fee;
+            color: #c00;
         }}
         
         .legend-html-only {{
-            background-color: #cfe2ff;
-            color: #084298;
+            background-color: #e6f3ff;
+            color: #004085;
         }}
         
-        .empty-cell {{
-            opacity: 0.6;
-            font-style: italic;
-        }}
-        
-        /* Improve readability */
         .alignment-table tr:hover {{
             filter: brightness(0.95);
         }}
+        
+        .normalization-info {{
+            background: #e8f4f8;
+            border-left: 4px solid #17a2b8;
+            padding: 15px 20px;
+            margin: 20px 30px;
+            font-size: 13px;
+            color: #004085;
+        }}
+        
+        @media print {{
+            .comment-section {{
+                display: none;
+            }}
+            .save-button {{
+                display: none;
+            }}
+        }}
     </style>
+    <script>
+        function saveComment() {{
+            const comment = document.getElementById('commentBox').value;
+            const blob = new Blob([document.documentElement.outerHTML.replace(
+                /<textarea[^>]*id="commentBox"[^>]*>.*?<\\/textarea>/,
+                '<div class="comment-display"><strong>Reviewer Comments:</strong>\\n' + comment + '</div>'
+            ).replace(
+                /<div class="comment-section">.*?<\\/div>\\s*<\\/div>/s,
+                ''
+            )], {{type: 'text/html'}});
+            
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'transcript_comparison_with_comments.html';
+            a.click();
+        }}
+    </script>
 </head>
 <body>
     <div class="container">
@@ -508,8 +598,8 @@ class TranscriptComparer:
         
         <div class="stats">
             <div class="stat">
-                <div class="stat-value">{results['alignment_rate']:.1f}%</div>
-                <div class="stat-label">Alignment Rate</div>
+                <div class="stat-value">{results['match_rate']:.1f}%</div>
+                <div class="stat-label">Match Rate</div>
             </div>
             <div class="stat">
                 <div class="stat-value">{results['total_pdf_tokens']:,}</div>
@@ -520,9 +610,28 @@ class TranscriptComparer:
                 <div class="stat-label">HTML Tokens</div>
             </div>
             <div class="stat">
-                <div class="stat-value">{results['aligned_tokens']:,}</div>
-                <div class="stat-label">Aligned Tokens</div>
+                <div class="stat-value">{results['exact_matches']:,}</div>
+                <div class="stat-label">Exact Matches</div>
             </div>
+        </div>
+        
+        <div class="comment-section">
+            <h3>Add Comments</h3>
+            <textarea id="commentBox" class="comment-box" placeholder="Add your comments here..."></textarea>
+            <button class="save-button" onclick="saveComment()">Save Report with Comments</button>
+        </div>
+        
+        <div class="normalization-info">
+            <strong>Normalization Applied:</strong>
+            <ul style="margin: 5px 0; padding-left: 20px;">
+                <li>$ and CAD treated as equivalent</li>
+                <li>Case insensitive matching</li>
+                <li>Hyphens ignored (FX-trading = FX trading)</li>
+                <li>Possessives removed (Banking's = Banking)</li>
+                <li>Numbers 1-10 normalized to words</li>
+                <li>Punctuation normalized (. , ; : removed)</li>
+                <li>% normalized to "percent"</li>
+            </ul>
         </div>
         
         <div class="alignment-container">
@@ -543,9 +652,9 @@ class TranscriptComparer:
                 </tr>
                 """
             
-            elif segment.alignment_type == AlignmentType.SUBSTITUTION:
+            elif segment.alignment_type == AlignmentType.SIMILAR:
                 html_content += f"""
-                <tr class="substitution-row">
+                <tr class="similar-row">
                     <td>{html_module.escape(segment.pdf_text)}</td>
                     <td>{html_module.escape(segment.html_text)}</td>
                 </tr>
@@ -567,62 +676,67 @@ class TranscriptComparer:
                 </tr>
                 """
         
-        # Close HTML
         html_content += """
             </table>
         </div>
         
         <div class="legend">
             <h3>Legend</h3>
-            <span class="legend-item legend-match">✓ Exact Match</span>
-            <span class="legend-item legend-substitution">≈ Similar Content</span>
-            <span class="legend-item legend-pdf-only">− PDF Only</span>
-            <span class="legend-item legend-html-only">+ HTML Only</span>
+            <span class="legend-item legend-match">Exact Match</span>
+            <span class="legend-item legend-similar">Similar (normalized)</span>
+            <span class="legend-item legend-pdf-only">PDF Only</span>
+            <span class="legend-item legend-html-only">HTML Only</span>
         </div>
     </div>
 </body>
 </html>
 """
         
-        # Write file
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
     
     def compare(self, pdf_path: str, html_path: str) -> Dict[str, any]:
-        """
-        Main comparison method.
-        """
+        """Main comparison method."""
         # Extract text
         pdf_text = self.extract_pdf_text(pdf_path)
         html_text = self.extract_html_text(html_path)
         
-        # Tokenize and normalize
-        pdf_orig, pdf_norm = self.tokenize_and_normalize(pdf_text)
-        html_orig, html_norm = self.tokenize_and_normalize(html_text)
+        # Tokenize
+        pdf_tokens = self.tokenize(pdf_text)
+        html_tokens = self.tokenize(html_text)
         
-        # Align sequences
-        segments = self.align_sequences(pdf_orig, pdf_norm, html_orig, html_norm)
+        # Align with granular approach
+        segments = self.align_sequences_granular(pdf_tokens, html_tokens)
         
-        # Merge small segments for cleaner output
-        segments = self.merge_small_segments(segments)
+        # Merge only tiny segments
+        segments = self.merge_tiny_segments(segments)
         
         # Calculate statistics
-        total_pdf_tokens = len(pdf_orig)
-        total_html_tokens = len(html_orig)
+        total_pdf_tokens = len(pdf_tokens)
+        total_html_tokens = len(html_tokens)
         
-        matched_tokens = sum(
+        exact_matches = sum(
             len(seg.pdf_text.split()) 
             for seg in segments 
-            if seg.alignment_type in [AlignmentType.MATCH, AlignmentType.SUBSTITUTION]
+            if seg.alignment_type == AlignmentType.MATCH
         )
+        
+        similar_matches = sum(
+            len(seg.pdf_text.split()) 
+            for seg in segments 
+            if seg.alignment_type == AlignmentType.SIMILAR
+        )
+        
+        total_matches = exact_matches + similar_matches
         
         return {
             'pdf_path': pdf_path,
             'html_path': html_path,
             'total_pdf_tokens': total_pdf_tokens,
             'total_html_tokens': total_html_tokens,
-            'aligned_tokens': matched_tokens,
-            'alignment_rate': matched_tokens / max(total_pdf_tokens, total_html_tokens) * 100,
+            'exact_matches': exact_matches,
+            'similar_matches': similar_matches,
+            'match_rate': total_matches / max(total_pdf_tokens, total_html_tokens) * 100,
             'segments': segments
         }
 
@@ -631,16 +745,19 @@ def main():
     """Main entry point."""
     if len(sys.argv) < 3:
         print("Usage: python transcript_compare.py <pdf/txt file> <html file> [output.html]")
-        print("\nExample:")
-        print("  python transcript_compare.py earnings.pdf earnings.html")
-        print("  python transcript_compare.py earnings.txt earnings.html report.html")
+        print("\nEnhanced normalization includes:")
+        print("  - $ and CAD treated as equivalent")
+        print("  - Case insensitive")
+        print("  - Ignores hyphens (FX-trading = FX trading)")
+        print("  - Numbers 1-10 normalized to words")
+        print("  - Comment functionality for sharing")
         sys.exit(1)
     
     pdf_path = sys.argv[1]
     html_path = sys.argv[2]
     output_path = sys.argv[3] if len(sys.argv) > 3 else "comparison_report.html"
     
-    # Validate input files
+    # Validate files
     if not Path(pdf_path).exists():
         print(f"Error: File not found: {pdf_path}")
         sys.exit(1)
@@ -651,32 +768,19 @@ def main():
     
     # Run comparison
     print(f"Comparing transcripts...")
-    print(f"  PDF/Text: {pdf_path}")
-    print(f"  HTML: {html_path}")
-    
-    comparer = TranscriptComparer()
+    comparer = EnhancedTranscriptComparer()
     results = comparer.compare(pdf_path, html_path)
     
-    # Generate HTML report
+    # Generate report
     comparer.generate_html_report(results, output_path)
     
     # Print summary
     print(f"\n✅ Comparison complete!")
-    print(f"  Alignment rate: {results['alignment_rate']:.1f}%")
-    print(f"  Total segments: {len(results['segments'])}")
+    print(f"  Match rate: {results['match_rate']:.1f}%")
+    print(f"  Exact matches: {results['exact_matches']} tokens")
+    print(f"  Similar matches: {results['similar_matches']} tokens")
     print(f"  Report saved to: {output_path}")
-    
-    # Show breakdown
-    match_count = sum(1 for s in results['segments'] if s.alignment_type == AlignmentType.MATCH)
-    sub_count = sum(1 for s in results['segments'] if s.alignment_type == AlignmentType.SUBSTITUTION)
-    pdf_only = sum(1 for s in results['segments'] if s.alignment_type == AlignmentType.HTML_GAP)
-    html_only = sum(1 for s in results['segments'] if s.alignment_type == AlignmentType.PDF_GAP)
-    
-    print(f"\n  Segment breakdown:")
-    print(f"    - Exact matches: {match_count}")
-    print(f"    - Substitutions: {sub_count}")
-    print(f"    - PDF only: {pdf_only}")
-    print(f"    - HTML only: {html_only}")
+    print(f"\n  You can add comments and save a shareable version from the report.")
 
 
 if __name__ == "__main__":
