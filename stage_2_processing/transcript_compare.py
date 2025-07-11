@@ -285,8 +285,8 @@ class EnhancedTranscriptComparer:
         
         return segments
     
-    def merge_tiny_segments(self, segments: List[AlignedSegment]) -> List[AlignedSegment]:
-        """Merge very small adjacent segments of the same type."""
+    def merge_adjacent_segments(self, segments: List[AlignedSegment]) -> List[AlignedSegment]:
+        """Merge all adjacent segments of the same type."""
         if not segments:
             return segments
         
@@ -294,11 +294,8 @@ class EnhancedTranscriptComparer:
         current = segments[0]
         
         for next_seg in segments[1:]:
-            # Only merge if both are tiny (1-2 words) and same type
-            if (current.alignment_type == next_seg.alignment_type and
-                len(current.pdf_text.split()) <= 2 and
-                len(next_seg.pdf_text.split()) <= 2):
-                
+            # Merge if same type (regardless of size)
+            if current.alignment_type == next_seg.alignment_type:
                 # Merge texts
                 if current.pdf_text and next_seg.pdf_text:
                     current.pdf_text += ' ' + next_seg.pdf_text
@@ -309,6 +306,10 @@ class EnhancedTranscriptComparer:
                     current.html_text += ' ' + next_seg.html_text
                 elif next_seg.html_text:
                     current.html_text = next_seg.html_text
+                    
+                # Keep the average similarity for merged segments
+                if hasattr(current, 'similarity') and hasattr(next_seg, 'similarity'):
+                    current.similarity = (current.similarity + next_seg.similarity) / 2
             else:
                 merged.append(current)
                 current = next_seg
@@ -317,7 +318,7 @@ class EnhancedTranscriptComparer:
         return merged
     
     def generate_html_report(self, results: Dict[str, any], output_path: str):
-        """Generate HTML report with comment functionality."""
+        """Generate HTML report with clean visualization."""
         
         html_content = f"""<!DOCTYPE html>
 <html>
@@ -382,46 +383,6 @@ class EnhancedTranscriptComparer:
             margin-top: 5px;
         }}
         
-        /* Comment section */
-        .comment-section {{
-            background: #f8f9fa;
-            padding: 20px 30px;
-            border-bottom: 2px solid #dee2e6;
-        }}
-        
-        .comment-box {{
-            width: 100%;
-            min-height: 100px;
-            padding: 10px;
-            font-size: 14px;
-            border: 1px solid #ced4da;
-            border-radius: 4px;
-            font-family: inherit;
-        }}
-        
-        .comment-display {{
-            background: #e7f3ff;
-            border-left: 4px solid #0066cc;
-            padding: 15px 20px;
-            margin: 20px 30px;
-            border-radius: 4px;
-            white-space: pre-wrap;
-        }}
-        
-        .save-button {{
-            background: #0066cc;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            font-size: 14px;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-top: 10px;
-        }}
-        
-        .save-button:hover {{
-            background: #0052a3;
-        }}
         
         .alignment-container {{
             padding: 20px;
@@ -447,16 +408,16 @@ class EnhancedTranscriptComparer:
             border-right: 2px solid #eee;
         }}
         
-        /* Match - green */
+        /* Match - no color */
         .match-row {{
-            background-color: #d4edda;
+            background-color: white;
         }}
         
         .match-row td {{
-            color: #155724;
+            color: #333;
         }}
         
-        /* Similar - light yellow */
+        /* Similar - yellow */
         .similar-row {{
             background-color: #fff9e6;
         }}
@@ -465,36 +426,13 @@ class EnhancedTranscriptComparer:
             color: #664d00;
         }}
         
-        /* PDF only - light red */
-        .pdf-only-row {{
+        /* Missing - red for both columns */
+        .missing-row {{
             background-color: #fee;
         }}
         
-        .pdf-only-row td:first-child {{
+        .missing-row td {{
             color: #c00;
-        }}
-        
-        .pdf-only-row td:last-child {{
-            color: #c00;
-            text-align: center;
-            font-style: italic;
-            opacity: 0.5;
-        }}
-        
-        /* HTML only - light blue */
-        .html-only-row {{
-            background-color: #e6f3ff;
-        }}
-        
-        .html-only-row td:first-child {{
-            color: #004085;
-            text-align: center;
-            font-style: italic;
-            opacity: 0.5;
-        }}
-        
-        .html-only-row td:last-child {{
-            color: #004085;
         }}
         
         .column-header {{
@@ -530,8 +468,9 @@ class EnhancedTranscriptComparer:
         }}
         
         .legend-match {{
-            background-color: #d4edda;
-            color: #155724;
+            background-color: white;
+            color: #333;
+            border: 1px solid #ddd;
         }}
         
         .legend-similar {{
@@ -539,55 +478,36 @@ class EnhancedTranscriptComparer:
             color: #664d00;
         }}
         
-        .legend-pdf-only {{
+        .legend-missing {{
             background-color: #fee;
             color: #c00;
-        }}
-        
-        .legend-html-only {{
-            background-color: #e6f3ff;
-            color: #004085;
         }}
         
         .alignment-table tr:hover {{
             filter: brightness(0.95);
         }}
         
-        .normalization-info {{
-            background: #e8f4f8;
-            border-left: 4px solid #17a2b8;
-            padding: 15px 20px;
+        .info-section {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
             margin: 20px 30px;
-            font-size: 13px;
-            color: #004085;
         }}
         
-        @media print {{
-            .comment-section {{
-                display: none;
-            }}
-            .save-button {{
-                display: none;
-            }}
+        .info-box {{
+            background: #f8f9fa;
+            border-left: 4px solid #17a2b8;
+            padding: 15px 20px;
+            font-size: 13px;
+            color: #333;
+        }}
+        
+        .info-box h4 {{
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #17a2b8;
         }}
     </style>
-    <script>
-        function saveComment() {{
-            const comment = document.getElementById('commentBox').value;
-            const blob = new Blob([document.documentElement.outerHTML.replace(
-                /<textarea[^>]*id="commentBox"[^>]*>.*?<\\/textarea>/,
-                '<div class="comment-display"><strong>Reviewer Comments:</strong>\\n' + comment + '</div>'
-            ).replace(
-                /<div class="comment-section">.*?<\\/div>\\s*<\\/div>/s,
-                ''
-            )], {{type: 'text/html'}});
-            
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'transcript_comparison_with_comments.html';
-            a.click();
-        }}
-    </script>
 </head>
 <body>
     <div class="container">
@@ -615,23 +535,31 @@ class EnhancedTranscriptComparer:
             </div>
         </div>
         
-        <div class="comment-section">
-            <h3>Add Comments</h3>
-            <textarea id="commentBox" class="comment-box" placeholder="Add your comments here..."></textarea>
-            <button class="save-button" onclick="saveComment()">Save Report with Comments</button>
-        </div>
-        
-        <div class="normalization-info">
-            <strong>Normalization Applied:</strong>
-            <ul style="margin: 5px 0; padding-left: 20px;">
-                <li>$ and CAD treated as equivalent</li>
-                <li>Case insensitive matching</li>
-                <li>Hyphens ignored (FX-trading = FX trading)</li>
-                <li>Possessives removed (Banking's = Banking)</li>
-                <li>Numbers 1-10 normalized to words</li>
-                <li>Punctuation normalized (. , ; : removed)</li>
-                <li>% normalized to "percent"</li>
-            </ul>
+        <div class="info-section">
+            <div class="info-box">
+                <h4>Normalization Applied</h4>
+                <ul style="margin: 5px 0; padding-left: 20px;">
+                    <li>$ and CAD treated as equivalent</li>
+                    <li>Case insensitive matching</li>
+                    <li>Hyphens ignored (FX-trading = FX trading)</li>
+                    <li>Possessives removed (Banking's = Banking)</li>
+                    <li>Numbers 1-10 and II normalized to words</li>
+                    <li>Punctuation normalized (. , ; : removed)</li>
+                    <li>% normalized to "percent"</li>
+                </ul>
+            </div>
+            <div class="info-box">
+                <h4>Algorithm Used</h4>
+                <p><strong>Sequence Alignment with Normalization</strong></p>
+                <p>The algorithm uses dynamic programming sequence alignment (similar to DNA sequencing) to find optimal matches between transcripts:</p>
+                <ul style="margin: 5px 0; padding-left: 20px;">
+                    <li>Tokenizes both documents into words</li>
+                    <li>Normalizes tokens using the rules shown</li>
+                    <li>Aligns sequences to maximize matches</li>
+                    <li>Groups consecutive segments of the same type</li>
+                    <li>Handles insertions, deletions, and substitutions</li>
+                </ul>
+            </div>
         </div>
         
         <div class="alignment-container">
@@ -662,16 +590,16 @@ class EnhancedTranscriptComparer:
             
             elif segment.alignment_type == AlignmentType.HTML_GAP:
                 html_content += f"""
-                <tr class="pdf-only-row">
+                <tr class="missing-row">
                     <td>{html_module.escape(segment.pdf_text)}</td>
-                    <td class="empty-cell">[not in HTML]</td>
+                    <td></td>
                 </tr>
                 """
             
             elif segment.alignment_type == AlignmentType.PDF_GAP:
                 html_content += f"""
-                <tr class="html-only-row">
-                    <td class="empty-cell">[not in PDF]</td>
+                <tr class="missing-row">
+                    <td></td>
                     <td>{html_module.escape(segment.html_text)}</td>
                 </tr>
                 """
@@ -684,8 +612,7 @@ class EnhancedTranscriptComparer:
             <h3>Legend</h3>
             <span class="legend-item legend-match">Exact Match</span>
             <span class="legend-item legend-similar">Similar (normalized)</span>
-            <span class="legend-item legend-pdf-only">PDF Only</span>
-            <span class="legend-item legend-html-only">HTML Only</span>
+            <span class="legend-item legend-missing">Missing Content</span>
         </div>
     </div>
 </body>
@@ -708,8 +635,8 @@ class EnhancedTranscriptComparer:
         # Align with granular approach
         segments = self.align_sequences_granular(pdf_tokens, html_tokens)
         
-        # Merge only tiny segments
-        segments = self.merge_tiny_segments(segments)
+        # Merge all adjacent segments of the same type
+        segments = self.merge_adjacent_segments(segments)
         
         # Calculate statistics
         total_pdf_tokens = len(pdf_tokens)
@@ -780,7 +707,6 @@ def main():
     print(f"  Exact matches: {results['exact_matches']} tokens")
     print(f"  Similar matches: {results['similar_matches']} tokens")
     print(f"  Report saved to: {output_path}")
-    print(f"\n  You can add comments and save a shareable version from the report.")
 
 
 if __name__ == "__main__":
