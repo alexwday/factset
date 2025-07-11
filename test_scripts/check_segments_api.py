@@ -254,6 +254,24 @@ def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str) -> Option
         
     return None
 
+def convert_dates_to_strings(obj):
+    """Convert date objects to strings for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: convert_dates_to_strings(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_dates_to_strings(item) for item in obj]
+    elif isinstance(obj, (datetime.datetime, datetime.date, timedelta)):
+        return obj.isoformat()
+    elif hasattr(obj, 'date') and callable(getattr(obj, 'date')):
+        try:
+            return obj.date().isoformat()
+        except:
+            return str(obj)
+    elif hasattr(obj, '__dict__'):
+        return str(obj)
+    else:
+        return obj
+
 def analyze_segments_data(segments_data: Any) -> Dict[str, Any]:
     """Analyze and format segments data."""
     print("📈 Analyzing segments data structure...")
@@ -282,16 +300,17 @@ def analyze_segments_data(segments_data: Any) -> Dict[str, Any]:
                 # Try to extract common segment attributes
                 if hasattr(segment, 'to_dict'):
                     segment_dict = segment.to_dict()
-                    segment_info["data"] = segment_dict
+                    # Convert any date objects to strings for JSON serialization
+                    segment_info["data"] = convert_dates_to_strings(segment_dict)
                 elif hasattr(segment, '__dict__'):
-                    segment_info["data"] = segment.__dict__
+                    segment_info["data"] = convert_dates_to_strings(segment.__dict__)
                 
                 analysis["segments_details"].append(segment_info)
                 
         elif hasattr(segments_data, 'to_dict'):
             segment_dict = segments_data.to_dict()
             analysis["segments_found"] = 1
-            analysis["segments_details"] = [segment_dict]
+            analysis["segments_details"] = [convert_dates_to_strings(segment_dict)]
             
         else:
             analysis["raw_data"] = str(segments_data)
@@ -405,7 +424,7 @@ def generate_segments_report(ticker: str, segments_analysis: Dict[str, Any]) -> 
                 <h4>Segment {segment.get('index', 'Unknown')}</h4>
                 <p><strong>Type:</strong> <span class="code">{segment.get('type', 'Unknown')}</span></p>
                 
-                {f'<p><strong>Data:</strong></p><pre class="code">{json.dumps(segment.get("data", {}), indent=2)}</pre>' if segment.get('data') else ''}
+                {f'<p><strong>Data:</strong></p><pre class="code">{json.dumps(segment.get("data", {}), indent=2, default=str)}</pre>' if segment.get('data') else ''}
             </div>
             """
         
