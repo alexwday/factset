@@ -250,12 +250,33 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
         
         request = FundamentalsRequest(data=request_data)
         
-        response = fund_api.get_fds_fundamentals_for_list(request)
+        response_wrapper = fund_api.get_fds_fundamentals_for_list(request)
+        
+        # Unwrap the response as shown in API documentation
+        if hasattr(response_wrapper, 'get_response_200'):
+            response = response_wrapper.get_response_200()
+        else:
+            response = response_wrapper
         
         # Debug: Print response details
         print(f"    🔍 Response received: {response is not None}")
         if response:
+            print(f"    🔍 Response type: {type(response)}")
+            print(f"    🔍 Response attributes: {dir(response)}")
             print(f"    🔍 Response has data attribute: {hasattr(response, 'data')}")
+            
+            # Check if it's a wrapper that needs to be unwrapped
+            if hasattr(response, 'get_response_200'):
+                print(f"    🔍 Response has get_response_200 method - unwrapping...")
+                actual_response = response.get_response_200()
+                print(f"    🔍 Unwrapped response type: {type(actual_response)}")
+                print(f"    🔍 Unwrapped response attributes: {dir(actual_response)}")
+                if hasattr(actual_response, 'data'):
+                    print(f"    🔍 Unwrapped response has data: {actual_response.data is not None}")
+                    if actual_response.data:
+                        print(f"    🔍 Unwrapped response data length: {len(actual_response.data)}")
+                        response = actual_response  # Use the unwrapped response
+            
             if hasattr(response, 'data'):
                 print(f"    🔍 Response data is not None: {response.data is not None}")
                 if response.data:
