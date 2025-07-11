@@ -73,14 +73,19 @@ Each stage is a standalone Python script:
 # Stage 0: Bulk historical sync (implemented)
 python stage_0_bulk_refresh/0_transcript_bulk_sync.py
 
-# Stage 1: Daily incremental sync (planned)
+# Stage 1: Daily incremental sync (implemented)
 python stage_1_daily_sync/1_transcript_daily_sync.py
+
+# Stage 1: With earnings monitor (runs every 5 minutes with notifications)
+python stage_1_daily_sync/earnings_monitor.py
 
 # Stage 2: Processing & analysis (planned - future development)
 # python stage_2_processing/2_transcript_processing.py
 ```
 
-**Current Status**: Stage 0 is production-ready with all security issues resolved ✅. Stage 1 is planned for future development.
+**Current Status**: 
+- Stage 0 is production-ready with all security issues resolved ✅
+- Stage 1 is production-ready with date-based queries and optional earnings monitor ✅
 
 ## Testing from Work Environment
 
@@ -281,10 +286,18 @@ Provides detailed summary including:
 - **Automatic Cleanup**: Removes old versions and keeps only latest version of each transcript
 - **Audit Trail**: Comprehensive logging with timestamped execution logs uploaded to NAS
 
-### Stage 1: Daily Sync (Scheduled)
-- **Purpose**: Check for new transcripts daily and download incrementally
-- **When to use**: Regular scheduled operations
+### Stage 1: Daily Sync ✅ PRODUCTION READY
+- **Purpose**: Check for new transcripts daily and download incrementally using efficient date-based queries
+- **When to use**: Regular scheduled operations or earnings day monitoring
 - **Output**: New transcripts added to existing repository
+- **Features**: 
+  - Date-based API queries (single call per date vs 15 company calls)
+  - Configurable lookback period (sync_date_range)
+  - Same security and version management as Stage 0
+  - Optional earnings monitor with real-time macOS notifications
+- **Usage**: 
+  - Manual: `python stage_1_daily_sync/1_transcript_daily_sync.py`
+  - Monitor: `python stage_1_daily_sync/earnings_monitor.py` (runs every 5 minutes with popups)
 
 ### Stage 2: Processing (Future Development)
 - **Purpose**: Process, enrich, and analyze downloaded transcripts
@@ -301,10 +314,10 @@ Provides detailed summary including:
 - Variables: API credentials, proxy settings, NAS connection details
 
 ### Operational Settings (NAS config files)
-- Stored on NAS in `Inputs/config/` folder
-- Stage-specific: `stage_0_config.json`, `stage_1_config.json`, etc.
+- Stored on NAS in `Inputs/config/config.json` (single file with stage-specific sections)
 - Contains monitored institutions, API settings, processing parameters
 - Downloaded by each script at runtime from NAS
+- Stage 1 requires `stage_1` section with `sync_date_range` parameter
 
 ## Monitored Institutions
 
@@ -328,6 +341,41 @@ Provides detailed summary including:
 - Manulife Financial Corporation (MFC-CA)
 - Sun Life Financial Inc. (SLF-CA)
 - UnitedHealth Group Incorporated (UNH-US)
+
+## Earnings Monitor (Stage 1)
+
+### Overview
+The earnings monitor runs Stage 1 automatically every 5 minutes and provides real-time macOS notifications when new transcripts are detected. Perfect for earnings season monitoring!
+
+### Usage
+```bash
+# Start the monitor
+python stage_1_daily_sync/earnings_monitor.py
+```
+
+### Features
+- ✅ Runs Stage 1 every 5 minutes automatically
+- ✅ Popup notification for EACH new transcript found
+- ✅ Shows bank name, date, and transcript type in notifications
+- ✅ Summary notifications after each sync run
+- ✅ Tracks session statistics and history
+- ✅ Graceful shutdown with Ctrl+C
+
+### Notification Examples
+- **Individual Transcript**: "New Transcript: RY-CA" → "Corrected transcript for 2024-01-25"
+- **Multiple Found**: "Found Transcripts: TD-CA" → "3 new, 1 updated Raw transcripts"
+- **Sync Summary**: "Sync Complete - New Transcripts!" → "Total: 5 transcripts downloaded"
+
+### Requirements
+- macOS (for notifications)
+- NAS config.json with `stage_1` section
+- All Stage 1 authentication configured
+
+### Best Practices for Earnings Days
+1. Start monitor in the morning before market open
+2. Keep terminal visible but minimized
+3. Monitor typically finds most activity 5-9 PM (after-hours earnings calls)
+4. Press Ctrl+C to stop at end of day
 
 ## Troubleshooting
 
