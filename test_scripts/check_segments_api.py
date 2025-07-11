@@ -390,16 +390,23 @@ def analyze_segments_data(segments_data: Any) -> Dict[str, Any]:
 def generate_interactive_html_table(df: pd.DataFrame, ticker: str) -> str:
     """Generate interactive HTML table with filtering, sorting, and expandable descriptions."""
     
-    # Format values as floats for display
-    df_formatted = df.copy()
-    df_formatted['Value'] = pd.to_numeric(df_formatted['Value'], errors='coerce').apply(
-        lambda x: f"{x:,.2f}" if pd.notna(x) else "N/A"
-    )
+    def format_value(value):
+        """Format a single value as float with commas."""
+        try:
+            num_value = pd.to_numeric(value, errors='coerce')
+            if pd.notna(num_value):
+                return f"{num_value:,.2f}"
+            else:
+                return str(value) if value != 'N/A' else "N/A"
+        except:
+            return str(value)
     
-    # Truncate descriptions for initial display
-    df_formatted['Description_Short'] = df_formatted['Description'].apply(
-        lambda x: x.split('.')[0] + '...' if len(x) > 50 else x
-    )
+    def truncate_description(desc):
+        """Truncate description for initial display."""
+        if len(str(desc)) > 50:
+            return str(desc).split('.')[0] + '...'
+        else:
+            return str(desc)
     
     html_content = f"""
     <!DOCTYPE html>
@@ -522,8 +529,11 @@ def generate_interactive_html_table(df: pd.DataFrame, ticker: str) -> str:
                 <tbody>
     """
     
-    # Add table rows
-    for _, row in df_formatted.iterrows():
+    # Add table rows using original DataFrame
+    for _, row in df.iterrows():
+        formatted_value = format_value(row['Value'])
+        truncated_desc = truncate_description(row['Description'])
+        
         html_content += f"""
                     <tr>
                         <td>{row['Ticker']}</td>
@@ -532,13 +542,13 @@ def generate_interactive_html_table(df: pd.DataFrame, ticker: str) -> str:
                         <td>{row['Metric']}</td>
                         <td class="description-cell">
                             <span class="description-short" onclick="toggleDescription(this)">
-                                {row['Description_Short']}
+                                {truncated_desc}
                             </span>
                             <div class="description-full">
                                 {row['Description']}
                             </div>
                         </td>
-                        <td class="value-cell">{row['Value']}</td>
+                        <td class="value-cell">{formatted_value}</td>
                         <td>{row['FSYM_ID']}</td>
                     </tr>
         """
