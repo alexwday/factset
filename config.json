@@ -293,8 +293,8 @@
     "description": "Bulk historical download from 2023-present"
   },
   "stage_1": {
-    "sync_days_back": 7,
-    "description": "Daily incremental sync with lookback period"
+    "sync_date_range": 1,
+    "description": "Daily incremental sync of new transcripts"
   },
   "stage_2": {
     "processing_enabled": true,
