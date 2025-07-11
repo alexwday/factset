@@ -605,34 +605,18 @@ def main():
                     if len(table_data) < 3:
                         print(f"\n🔍 Segment {len(table_data)+1} fields: {list(segment_dict.keys())}")
                     
-                    # Try different possible field names for segment identification
-                    segment_name = (
-                        segment_dict.get('segment') or 
-                        segment_dict.get('segment_name') or
-                        segment_dict.get('label') or
-                        segment_dict.get('segment_label') or
-                        segment_dict.get('description') or
-                        segment_dict.get('name') or
-                        'Unknown'
-                    )
+                    # Use the correct field names based on actual API response structure
+                    segment_name = segment_dict.get('label', 'Unknown')
+                    date_value = segment_dict.get('date', 'Unknown')
                     
-                    # Try different possible field names for date
-                    date_value = (
-                        segment_dict.get('date') or
-                        segment_dict.get('fiscal_end_date') or
-                        segment_dict.get('report_date') or
-                        segment_dict.get('period_end_date') or
-                        'Unknown'
-                    )
-                    
-                    # Extract key fields for table
+                    # Extract key fields for table (based on actual API response structure)
                     table_row = {
-                        'Ticker': TEST_TICKER,
+                        'Ticker': segment_dict.get('request_id', TEST_TICKER),
                         'Segment': segment_name,
                         'Date': date_value,
                         'Metric': segment_dict.get('metric', 'Unknown'),
-                        'Description': segment_dict.get('description', 'N/A'),
-                        'Value': segment_dict.get('value', 'N/A')
+                        'Value': segment_dict.get('value', 'N/A'),
+                        'FSYM_ID': segment_dict.get('fsym_id', 'N/A')
                     }
                     table_data.append(table_row)
                 
