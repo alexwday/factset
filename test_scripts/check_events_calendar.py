@@ -174,12 +174,14 @@ def check_upcoming_events(api_instance: calendar_events_api.CalendarEventsApi,
                 ticker = event.get('ticker', 'Unknown')
                 if ticker in monitored_tickers:
                     upcoming_events.append((event, ticker))
-                    print(f"  ✅ {ticker}: {event.get('event_type', 'Unknown')} on {event.get('event_date_time', 'Unknown')[:10]}")
+                    event_datetime = event.get('event_date_time', 'Unknown')
+                    event_date_str = event_datetime.strftime('%Y-%m-%d') if hasattr(event_datetime, 'strftime') else str(event_datetime)
+                    print(f"  ✅ {ticker}: {event.get('event_type', 'Unknown')} on {event_date_str}")
         else:
             print(f"📭 No events found for the specified date range")
         
         # Sort by event date
-        upcoming_events.sort(key=lambda x: x[0].get('event_date_time', ''))
+        upcoming_events.sort(key=lambda x: x[0].get('event_date_time', datetime.min))
         
         return upcoming_events
         
@@ -190,8 +192,14 @@ def check_upcoming_events(api_instance: calendar_events_api.CalendarEventsApi,
 def format_event_info(event: Dict[str, Any], ticker: str) -> str:
     """Format event information for display."""
     event_datetime = event.get('event_date_time', 'Unknown')
-    event_date = event_datetime[:10] if len(event_datetime) > 10 else 'Unknown'
-    event_time = event_datetime[11:16] if len(event_datetime) > 10 else 'Unknown'
+    
+    if hasattr(event_datetime, 'strftime'):
+        event_date = event_datetime.strftime('%Y-%m-%d')
+        event_time = event_datetime.strftime('%H:%M')
+    else:
+        event_date = 'Unknown'
+        event_time = 'Unknown'
+    
     event_type = event.get('event_type', 'Unknown')
     event_id = event.get('event_id', 'Unknown')
     webcast_status = event.get('webcast_status', 'Unknown')
@@ -256,7 +264,12 @@ def main():
                 # Group by date
                 by_date = {}
                 for event, ticker in upcoming_events:
-                    event_date = event.get('event_date_time', 'Unknown')[:10]
+                    event_datetime = event.get('event_date_time', 'Unknown')
+                    if hasattr(event_datetime, 'strftime'):
+                        event_date = event_datetime.strftime('%Y-%m-%d')
+                    else:
+                        event_date = 'Unknown'
+                    
                     if event_date not in by_date:
                         by_date[event_date] = []
                     by_date[event_date].append((event, ticker))
