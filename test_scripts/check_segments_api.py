@@ -18,7 +18,7 @@ from fds.sdk.FactSetFundamentals.model.fiscal_period import FiscalPeriod
 from fds.sdk.FactSetFundamentals.model.batch import Batch
 import os
 from urllib.parse import quote
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import tempfile
 import io
 from smb.SMBConnection import SMBConnection
@@ -260,7 +260,7 @@ def convert_dates_to_strings(obj):
         return {k: convert_dates_to_strings(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [convert_dates_to_strings(item) for item in obj]
-    elif isinstance(obj, (datetime.datetime, datetime.date, timedelta)):
+    elif isinstance(obj, (datetime, date, timedelta)):
         return obj.isoformat()
     elif hasattr(obj, 'date') and callable(getattr(obj, 'date')):
         try:
