@@ -23,8 +23,13 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 ## Key Technical Requirements
 
 ### Authentication & Configuration
-- **Environment Variables (.env)**: API credentials, proxy settings, NAS connection details
-- **NAS Config Files**: Operational settings stored in `Inputs/config/` on NAS
+- **Environment Variables (.env)**: 12 required variables
+  - API_USERNAME, API_PASSWORD (FactSet API)
+  - PROXY_USER, PROXY_PASSWORD, PROXY_URL, PROXY_DOMAIN (Corporate proxy)
+  - NAS_USERNAME, NAS_PASSWORD, NAS_SERVER_IP, NAS_SERVER_NAME (NAS connection)
+  - NAS_SHARE_NAME, NAS_BASE_PATH (NAS paths)
+  - CONFIG_PATH, CLIENT_MACHINE_NAME (Configuration)
+- **NAS Config Files**: Single `config.json` with stage-specific sections
 - **SSL Certificate**: Downloaded from NAS at runtime for FactSet API connections
 - **Proxy**: Corporate proxy with NTLM authentication required
 
@@ -39,10 +44,10 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 - **Authentication**: NTLM v2 with domain credentials
 - **Folder Structure**:
   - `Inputs/certificate/` - SSL certificates
-  - `Inputs/config/` - Configuration files per stage
-  - `Outputs/data/` - Downloaded transcripts by type and institution
-  - `Outputs/logs/` - Execution logs
-  - `Outputs/listing/` - Inventory JSON files
+  - `Inputs/config/` - Configuration files (single config.json)
+  - `Outputs/Data/` - Downloaded transcripts by type and institution
+  - `Outputs/Logs/` - Execution logs
+  - `Outputs/listing/` - Inventory JSON files (future use)
 
 ### Monitored Institutions
 **Canadian Banks**: RY-CA, TD-CA, BNS-CA, BMO-CA, CM-CA, NA-CA  
@@ -207,16 +212,17 @@ python-dateutil
   - Comprehensive audit trail: Timestamped logs uploaded to NAS
   - Standardized naming: `{ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
 
-### Stage 1: Daily Sync (Future Development)
-- **Purpose**: Incremental daily downloads
+### Stage 1: Daily Sync ✅ PRODUCTION READY
+- **Purpose**: Incremental daily downloads  
 - **Script**: `stage_1_daily_sync/1_transcript_daily_sync.py`
-- **Config**: `Inputs/config/stage_1_config.json` on NAS
-- **When**: Scheduled daily operations
-- **Key Requirements**:
-  - Must inherit version management functions from Stage 0
-  - Must use version-agnostic keys for duplicate detection
-  - Must handle vendor version ID updates intelligently
-  - Must maintain same security and validation standards
+- **Config**: `Inputs/config/config.json` on NAS (uses stage_1 section)
+- **When**: Scheduled daily operations or earnings day monitoring
+- **Key Features**:
+  - Date-based queries using `get_transcripts_dates()` API
+  - Single API call per date (efficient vs Stage 0's 15 calls)
+  - Inherits ALL version management from Stage 0
+  - Optional `earnings_monitor.py` for real-time notifications
+  - Configurable lookback period (sync_date_range)
 
 ### Stage 2: Processing (Future Development)
 - **Purpose**: Process and analyze downloaded transcripts
@@ -321,10 +327,10 @@ Every script MUST pass ALL checks:
 
 ### Testing Commands
 ```bash
-# Lint and typecheck commands (user will specify these)
-npm run lint
-npm run typecheck
-# Or equivalent Python commands
+# Python testing commands
+python -m py_compile stage_X/*.py  # Syntax check
+pylint stage_X/*.py                 # Linting (if configured)
+python -m pytest stage_X/tests/     # Unit tests (if available)
 ```
 
 ### Git Workflow
