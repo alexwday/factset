@@ -387,6 +387,245 @@ def analyze_segments_data(segments_data: Any) -> Dict[str, Any]:
     
     return analysis
 
+def generate_interactive_html_table(df: pd.DataFrame, ticker: str) -> str:
+    """Generate interactive HTML table with filtering, sorting, and expandable descriptions."""
+    
+    # Format values as floats for display
+    df_formatted = df.copy()
+    df_formatted['Value'] = pd.to_numeric(df_formatted['Value'], errors='coerce').apply(
+        lambda x: f"{x:,.2f}" if pd.notna(x) else "N/A"
+    )
+    
+    # Truncate descriptions for initial display
+    df_formatted['Description_Short'] = df_formatted['Description'].apply(
+        lambda x: x.split('.')[0] + '...' if len(x) > 50 else x
+    )
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>FactSet Segments Data - {ticker}</title>
+        
+        <!-- DataTables CSS -->
+        <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+        <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.dataTables.min.css">
+        
+        <!-- jQuery and DataTables JS -->
+        <script type="text/javascript" src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+        <script type="text/javascript" src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+        <script type="text/javascript" src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
+        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+        <script type="text/javascript" src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
+        
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                margin: 20px;
+                background-color: #f8f9fa;
+            }}
+            .header {{
+                background: #fff;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                margin-bottom: 20px;
+                text-align: center;
+            }}
+            .table-container {{
+                background: #fff;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                overflow-x: auto;
+            }}
+            .description-cell {{
+                max-width: 200px;
+                cursor: pointer;
+                position: relative;
+            }}
+            .description-short {{
+                color: #007bff;
+                text-decoration: underline;
+            }}
+            .description-full {{
+                position: absolute;
+                top: 100%;
+                left: 0;
+                background: #fff;
+                border: 1px solid #ddd;
+                padding: 10px;
+                border-radius: 4px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                z-index: 1000;
+                width: 300px;
+                display: none;
+            }}
+            .value-cell {{
+                text-align: right;
+                font-family: 'Monaco', 'Consolas', monospace;
+                font-weight: bold;
+            }}
+            table.dataTable {{
+                border-collapse: collapse !important;
+            }}
+            table.dataTable thead th {{
+                background-color: #495057;
+                color: white;
+                font-weight: bold;
+            }}
+            table.dataTable tbody tr:nth-child(even) {{
+                background-color: #f8f9fa;
+            }}
+            table.dataTable tbody tr:hover {{
+                background-color: #e9ecef;
+            }}
+            .dt-buttons {{
+                margin-bottom: 10px;
+            }}
+            .dt-button {{
+                background: #007bff;
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 4px;
+                margin-right: 5px;
+                cursor: pointer;
+            }}
+            .dt-button:hover {{
+                background: #0056b3;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>FactSet Segments Data</h1>
+            <h2>{ticker} - Interactive Analysis Table</h2>
+            <p>Click on descriptions to expand • Use column filters to search • Export data with buttons above table</p>
+        </div>
+        
+        <div class="table-container">
+            <table id="segmentsTable" class="display" style="width:100%">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Segment</th>
+                        <th>Date</th>
+                        <th>Metric</th>
+                        <th>Description</th>
+                        <th>Value</th>
+                        <th>FSYM ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+    """
+    
+    # Add table rows
+    for _, row in df_formatted.iterrows():
+        html_content += f"""
+                    <tr>
+                        <td>{row['Ticker']}</td>
+                        <td>{row['Segment']}</td>
+                        <td>{row['Date']}</td>
+                        <td>{row['Metric']}</td>
+                        <td class="description-cell">
+                            <span class="description-short" onclick="toggleDescription(this)">
+                                {row['Description_Short']}
+                            </span>
+                            <div class="description-full">
+                                {row['Description']}
+                            </div>
+                        </td>
+                        <td class="value-cell">{row['Value']}</td>
+                        <td>{row['FSYM_ID']}</td>
+                    </tr>
+        """
+    
+    html_content += f"""
+                </tbody>
+            </table>
+        </div>
+        
+        <script>
+            $(document).ready(function() {{
+                $('#segmentsTable').DataTable({{
+                    dom: 'Bfrtip',
+                    buttons: [
+                        'copy', 'csv', 'excel'
+                    ],
+                    pageLength: 25,
+                    responsive: true,
+                    columnDefs: [
+                        {{ 
+                            targets: [5], // Value column
+                            type: 'num-fmt'
+                        }}
+                    ],
+                    order: [[1, 'asc'], [3, 'asc']], // Sort by Segment, then Metric
+                    initComplete: function () {{
+                        // Add individual column search
+                        this.api().columns().every(function () {{
+                            var column = this;
+                            var title = column.header().textContent;
+                            
+                            if (title !== 'Description' && title !== 'Value') {{
+                                var select = $('<select><option value="">All ' + title + '</option></select>')
+                                    .appendTo($(column.header()))
+                                    .on('change', function () {{
+                                        var val = $.fn.dataTable.util.escapeRegex(
+                                            $(this).val()
+                                        );
+                                        column
+                                            .search(val ? '^' + val + '$' : '', true, false)
+                                            .draw();
+                                    }});
+                                
+                                column.data().unique().sort().each(function (d, j) {{
+                                    if (d) {{
+                                        select.append('<option value="' + d + '">' + d + '</option>');
+                                    }}
+                                }});
+                            }}
+                        }});
+                    }}
+                }});
+            }});
+            
+            function toggleDescription(element) {{
+                var fullDesc = element.nextElementSibling;
+                if (fullDesc.style.display === 'block') {{
+                    fullDesc.style.display = 'none';
+                }} else {{
+                    // Hide all other open descriptions
+                    document.querySelectorAll('.description-full').forEach(function(desc) {{
+                        desc.style.display = 'none';
+                    }});
+                    fullDesc.style.display = 'block';
+                }}
+            }}
+            
+            // Hide description on click outside
+            document.addEventListener('click', function(event) {{
+                if (!event.target.closest('.description-cell')) {{
+                    document.querySelectorAll('.description-full').forEach(function(desc) {{
+                        desc.style.display = 'none';
+                    }});
+                }}
+            }});
+        </script>
+        
+        <div style="text-align: center; margin-top: 20px; color: #6c757d; font-size: 0.9em;">
+            Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 
+            Data contains {len(df)} segment records for {ticker}
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html_content
+
 def generate_segments_report(ticker: str, segments_analysis: Dict[str, Any]) -> str:
     """Generate HTML report for segments analysis."""
     html_content = f"""
@@ -647,16 +886,29 @@ def main():
                     print("-" * 150)
                     print(df.to_string(index=False))
                     
-                    # Save to CSV
+                    # Generate interactive HTML table
+                    print(f"\n📄 GENERATING INTERACTIVE HTML TABLE...")
+                    html_content = generate_interactive_html_table(df, TEST_TICKER)
+                    
+                    # Save HTML and CSV
                     output_dir = Path(__file__).parent / "output"
                     output_dir.mkdir(exist_ok=True)
                     
+                    # Save HTML
+                    html_filename = f"factset_segments_table_{TEST_TICKER}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                    html_path = output_dir / html_filename
+                    with open(html_path, 'w', encoding='utf-8') as f:
+                        f.write(html_content)
+                    
+                    # Save CSV
                     csv_filename = f"factset_segments_data_{TEST_TICKER}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                     csv_path = output_dir / csv_filename
-                    
                     df.to_csv(csv_path, index=False)
-                    print(f"\n✅ Segments data saved to CSV: {csv_path}")
+                    
+                    print(f"✅ Interactive HTML table saved: {html_path}")
+                    print(f"✅ CSV data saved: {csv_path}")
                     print(f"📊 Table contains {len(df)} rows with segment data for {TEST_TICKER}")
+                    print(f"🌐 Open the HTML file in your browser for interactive filtering and sorting")
                 else:
                     print("❌ No segment data found to create table")
             else:
