@@ -13,6 +13,8 @@ from fds.sdk.FactSetFundamentals.model.ids_batch_max30000 import IdsBatchMax3000
 from fds.sdk.FactSetFundamentals.model.metrics import Metrics
 from fds.sdk.FactSetFundamentals.model.periodicity import Periodicity
 from fds.sdk.FactSetFundamentals.model.update_type import UpdateType
+from fds.sdk.FactSetFundamentals.model.fiscal_period import FiscalPeriod
+from fds.sdk.FactSetFundamentals.model.batch import Batch
 import os
 from urllib.parse import quote
 from datetime import datetime, timedelta
@@ -227,12 +229,23 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
         periodicity_instance = Periodicity(periodicity)
         update_type_instance = UpdateType("RP")
         
+        # CRITICAL: Add fiscal_period parameter (required in v2.0.0+)
+        fiscal_period_instance = FiscalPeriod(
+            start=start_date.strftime('%Y-%m-%d'),
+            end=end_date.strftime('%Y-%m-%d')
+        )
+        
+        # Add batch parameter for better performance
+        batch_instance = Batch("N")  # N for non-batch, Y for batch requests
+        
         request_data = FundamentalRequestBody(
             ids=ids_instance,
             metrics=metrics_instance,
             periodicity=periodicity_instance,
+            fiscal_period=fiscal_period_instance,
             currency=currency,
-            update_type=update_type_instance
+            update_type=update_type_instance,
+            batch=batch_instance
         )
         
         request = FundamentalsRequest(data=request_data)
