@@ -172,6 +172,18 @@ def get_available_metrics(data_api: metrics_api.MetricsApi) -> Dict[str, List[Di
     
     return all_metrics
 
+def group_metrics_by_data_type(metrics: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """Group metric codes by their data type for consistent API requests."""
+    grouped = {}
+    for metric in metrics:
+        data_type = metric.get('data_type', 'Unknown')
+        metric_code = metric.get('metric')
+        if data_type not in grouped:
+            grouped[data_type] = []
+        if metric_code:
+            grouped[data_type].append(metric_code)
+    return grouped
+
 def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentalsApi, 
                         ticker: str, 
                         metrics: List[str], 
@@ -588,12 +600,17 @@ def main():
                 print(f"\n🔹 Testing {category} ({len(metrics)} metrics available)")
                 print("-" * 60)
                 
-                # Get metric codes for this category
-                metric_codes = [m.get('metric') for m in metrics if m.get('metric')]
+                # Group metrics by data type to ensure consistent API requests
+                grouped_metrics = group_metrics_by_data_type(metrics)
                 
-                if not metric_codes:
-                    print(f"  ⚠️  No valid metric codes found for {category}")
+                if not grouped_metrics:
+                    print(f"  ⚠️  No valid metrics found for {category}")
                     continue
+                
+                # Display data type breakdown
+                print(f"  📊 Data types found:")
+                for data_type, metric_list in grouped_metrics.items():
+                    print(f"    {data_type}: {len(metric_list)} metrics")
                 
                 # Test with different periodicities and currencies
                 category_data = {}
@@ -602,12 +619,30 @@ def main():
                     for currency in TEST_CURRENCIES:
                         print(f"  🔍 Testing {periodicity} data in {currency}...")
                         
-                        # Limit to first 50 metrics to avoid hitting API limits
-                        test_metrics = metric_codes[:50]
+                        # Test each data type group separately
+                        all_data = []
+                        for data_type, metric_codes in grouped_metrics.items():
+                            if not metric_codes:
+                                continue
+                                
+                            # Limit to first 20 metrics per data type to avoid API limits
+                            test_metrics = metric_codes[:20]
+                            print(f"    📊 Testing {len(test_metrics)} {data_type} metrics...")
+                            
+                            data = get_fundamental_data(
+                                fund_api, TEST_TICKER, test_metrics, periodicity, currency
+                            )
+                            
+                            if data:
+                                all_data.extend(data)
+                                print(f"      ✅ {len(data)} data points for {data_type} metrics")
+                            else:
+                                print(f"      ❌ No data for {data_type} metrics")
+                            
+                            time.sleep(0.5)  # Rate limiting between data type groups
                         
-                        data = get_fundamental_data(
-                            fund_api, TEST_TICKER, test_metrics, periodicity, currency
-                        )
+                        # Process combined data from all data types
+                        data = all_data if all_data else None
                         
                         if data:
                             analysis = analyze_data_coverage(data)
