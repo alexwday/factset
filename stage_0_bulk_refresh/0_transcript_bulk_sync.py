@@ -69,7 +69,7 @@ def setup_logging() -> logging.Logger:
     temp_log_file = tempfile.NamedTemporaryFile(
         mode='w+', 
         suffix='.log', 
-        prefix=f'stage0_sync_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
+        prefix=f'stage_0_bulk_refresh_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
         delete=False
     )
     
@@ -456,13 +456,11 @@ def create_base_directory_structure(nas_conn: SMBConnection) -> None:
     config_path = nas_path_join(inputs_path, "config")
     data_path = nas_path_join(outputs_path, "Data")
     logs_path = nas_path_join(outputs_path, "Logs")
-    listing_path = nas_path_join(outputs_path, "Listing")
     
     nas_create_directory(nas_conn, certificate_path)
     nas_create_directory(nas_conn, config_path)
     nas_create_directory(nas_conn, data_path)
     nas_create_directory(nas_conn, logs_path)
-    nas_create_directory(nas_conn, listing_path)
     
     # Create type-based folders: Canadian, US, European, Insurance
     type_folders = ["Canadian", "US", "European", "Insurance"]
@@ -716,158 +714,6 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
         logger.error(f"Error processing {ticker}: {e}")
         return bank_downloads
 
-def generate_final_inventory(nas_conn: SMBConnection) -> None:
-    """Generate comprehensive inventory index of all downloaded files from NAS."""
-    global logger, config
-    logger.info("Generating comprehensive inventory index from NAS")
-    
-    file_index = []
-    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data")
-    
-    # Iterate through each institution type folder
-    type_folders = ["Canadian", "US", "European", "Insurance"]
-    
-    for institution_type in type_folders:
-        type_path = nas_path_join(data_path, institution_type)
-        
-        try:
-            # Get all ticker folders in this type
-            type_items = nas_conn.listPath(NAS_SHARE_NAME, type_path)
-            ticker_folders = [item.filename for item in type_items 
-                            if item.isDirectory and not item.filename.startswith('.')]
-            
-            for ticker_folder in ticker_folders:
-                ticker_path = nas_path_join(type_path, ticker_folder)
-                
-                # Extract ticker from folder name (format: TICKER_Path_Safe_Name)
-                ticker = ticker_folder.split('_')[0] if '_' in ticker_folder else ticker_folder
-                institution_info = config['monitored_institutions'].get(ticker, {
-                    'name': f'Unknown ({ticker})', 
-                    'region': 'Unknown', 
-                    'type': institution_type
-                })
-                
-                # Get transcript type folders
-                for transcript_type in config['api_settings']['transcript_types']:
-                    transcript_type_path = nas_path_join(ticker_path, transcript_type)
-                    
-                    try:
-                        files = nas_list_files(nas_conn, transcript_type_path)
-                        
-                        for filename in files:
-                            try:
-                                # Get file attributes for metadata
-                                file_path = nas_path_join(transcript_type_path, filename)
-                                file_attrs = nas_conn.getAttributes(NAS_SHARE_NAME, file_path)
-                                
-                                # Parse filename for additional info
-                                file_parts = filename.replace('.xml', '').split('_')
-                                event_date = file_parts[1] if len(file_parts) > 1 else 'unknown'
-                                
-                                # Handle timestamp conversion safely
-                                try:
-                                    if hasattr(file_attrs.last_write_time, 'strftime'):
-                                        date_modified = file_attrs.last_write_time.strftime('%Y-%m-%d %H:%M:%S')
-                                    else:
-                                        # Convert from timestamp if it's a float/int
-                                        date_modified = datetime.fromtimestamp(file_attrs.last_write_time).strftime('%Y-%m-%d %H:%M:%S')
-                                except (AttributeError, ValueError, TypeError, OSError) as e:
-                                    logger.debug(f"Timestamp conversion failed for {filename}: {e}")
-                                    date_modified = 'unknown'
-                                
-                                try:
-                                    if hasattr(file_attrs.create_time, 'strftime'):
-                                        date_created = file_attrs.create_time.strftime('%Y-%m-%d %H:%M:%S')
-                                    else:
-                                        # Convert from timestamp if it's a float/int
-                                        date_created = datetime.fromtimestamp(file_attrs.create_time).strftime('%Y-%m-%d %H:%M:%S')
-                                except (AttributeError, ValueError, TypeError, OSError) as e:
-                                    logger.debug(f"Create timestamp conversion failed for {filename}: {e}")
-                                    date_created = 'unknown'
-                                
-                                file_record = {
-                                    'filepath': f"Outputs/Data/{institution_type}/{ticker_folder}/{transcript_type}/{filename}",
-                                    'filename': filename,
-                                    'institution_type': institution_type,
-                                    'ticker': ticker,
-                                    'institution_name': institution_info['name'],
-                                    'region': institution_info['region'],
-                                    'transcript_type': transcript_type,
-                                    'event_date': event_date,
-                                    'file_size': file_attrs.file_size,
-                                    'date_modified': date_modified,
-                                    'date_created': date_created
-                                }
-                                
-                                file_index.append(file_record)
-                                
-                            except Exception as e:
-                                logger.warning(f"Error processing file {filename}: {e}")
-                                
-                    except Exception as e:
-                        # Transcript type folder might not exist if no files of that type
-                        continue
-                        
-        except Exception as e:
-            logger.warning(f"Error processing institution type {institution_type}: {e}")
-            continue
-    
-    # Generate summary statistics
-    total_files = len(file_index)
-    by_type = {}
-    by_institution_type = {}
-    by_ticker = {}
-    
-    for record in file_index:
-        # Count by transcript type
-        transcript_type = record['transcript_type']
-        if transcript_type not in by_type:
-            by_type[transcript_type] = 0
-        by_type[transcript_type] += 1
-        
-        # Count by institution type
-        inst_type = record['institution_type']
-        if inst_type not in by_institution_type:
-            by_institution_type[inst_type] = 0
-        by_institution_type[inst_type] += 1
-        
-        # Count by ticker
-        ticker = record['ticker']
-        if ticker not in by_ticker:
-            by_ticker[ticker] = 0
-        by_ticker[ticker] += 1
-    
-    # Create comprehensive index
-    inventory = {
-        'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'total_files': total_files,
-        'summary': {
-            'by_transcript_type': by_type,
-            'by_institution_type': by_institution_type,
-            'by_ticker': by_ticker
-        },
-        'files': file_index
-    }
-    
-    # Log summary
-    logger.info(f"Generated inventory with {total_files} total files")
-    for transcript_type, count in by_type.items():
-        logger.info(f"  {transcript_type}: {count} files")
-    for inst_type, count in by_institution_type.items():
-        logger.info(f"  {inst_type}: {count} files")
-    
-    # Save comprehensive inventory
-    inventory_json = json.dumps(inventory, indent=2)
-    inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Listing", 
-                                 f"transcript_inventory_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.json")
-    
-    inventory_file_obj = io.BytesIO(inventory_json.encode('utf-8'))
-    nas_upload_file(nas_conn, inventory_file_obj, inventory_path)
-    
-    # Also save as current inventory (overwrites previous)
-    current_inventory_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Listing", "current_inventory.json")
-    current_inventory_obj = io.BytesIO(inventory_json.encode('utf-8'))
-    nas_upload_file(nas_conn, current_inventory_obj, current_inventory_path)
 
 def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     """Download SSL certificate from NAS and set up for use."""
@@ -973,8 +819,6 @@ def main() -> None:
                 if i < total_institutions:
                     time.sleep(config['api_settings']['request_delay'])
         
-        generate_final_inventory(nas_conn)
-        
         end_time = datetime.now()
         execution_time = end_time - start_time
         
@@ -1004,7 +848,7 @@ def main() -> None:
             
             # Now safely upload the log file
             log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Logs", 
-                                        f"stage0_sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+                                        f"stage_0_bulk_refresh_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
             
             # Read the entire log file and convert to BytesIO for upload
             with open(logger.temp_log_file, 'rb') as log_file:
