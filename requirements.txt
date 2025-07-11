@@ -1,5 +1,6 @@
 # FactSet SDK
 fds.sdk.EventsandTranscripts
+fds.sdk.FactSetFundamentals
 
 # Core dependencies
 pandas

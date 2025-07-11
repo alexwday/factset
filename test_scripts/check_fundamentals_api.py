@@ -7,7 +7,7 @@ Shows ALL categories, metrics, and data points available for business evaluation
 
 import pandas as pd
 import fds.sdk.FactSetFundamentals
-from fds.sdk.FactSetFundamentals.api import data_items_api, fact_set_fundamentals_api
+from fds.sdk.FactSetFundamentals.api import metrics_api, fact_set_fundamentals_api
 from fds.sdk.FactSetFundamentals.models import *
 import os
 from urllib.parse import quote
@@ -135,7 +135,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection, ssl_cert_path: str) -> Option
         print(f"❌ Error downloading SSL certificate from NAS: {e}")
         return None
 
-def get_available_metrics(data_api: data_items_api.DataItemsApi) -> Dict[str, List[Dict[str, Any]]]:
+def get_available_metrics(data_api: metrics_api.MetricsApi) -> Dict[str, List[Dict[str, Any]]]:
     """Get all available metrics by category."""
     print("📊 Discovering all available fundamental metrics...")
     
@@ -181,7 +181,8 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
         end_date = datetime.now().date()
         start_date = end_date - timedelta(days=3*365)
         
-        response = fund_api.get_fds_fundamentals(
+        # Create request object
+        request = FundamentalsRequest(
             ids=[ticker],
             metrics=metrics,
             periodicity=periodicity,
@@ -190,6 +191,8 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
             currency=currency,
             restated="RP"
         )
+        
+        response = fund_api.get_fds_fundamentals_for_list(request)
         
         if response and hasattr(response, 'data') and response.data:
             data = [item.to_dict() for item in response.data]
@@ -566,13 +569,13 @@ def main():
         proxy=proxy_url,
         ssl_ca_cert=temp_cert_path
     )
-    configuration.get_basic_auth_token()
+    # Note: Different authentication method may be needed for Fundamentals API
     print("✅ FactSet Fundamentals API client configured")
     
     try:
         with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
             # Initialize API instances
-            data_api = data_items_api.DataItemsApi(api_client)
+            data_api = metrics_api.MetricsApi(api_client)
             fund_api = fact_set_fundamentals_api.FactSetFundamentalsApi(api_client)
             
             # Phase 1: Discover all available metrics
