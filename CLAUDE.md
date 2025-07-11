@@ -10,6 +10,16 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 - **Storage**: All data stored on NAS (no local storage) using pysmb with NTLM v2 authentication
 - **Authentication**: Corporate proxy authentication required for API access
 
+### Stage 0 Key Business Rules
+1. **Anti-Contamination**: Only downloads transcripts where target ticker is SOLE primary company
+2. **Security-First**: All credentials from environment, paths validated, URLs sanitized in logs
+3. **Audit Trail**: Every operation logged with timestamps and error context
+4. **Incremental Safe**: Checks existing files, safe to re-run without re-downloading
+5. **Version Management**: Automatically handles vendor version ID updates, keeps only latest version
+6. **Institution Coverage**: 6 Canadian banks, 6 US banks, 3 insurance companies
+7. **File Organization**: Organized by institution type → company → transcript type
+8. **Standardized Naming**: Consistent filename format for easy identification and processing
+
 ## Key Technical Requirements
 
 ### Authentication & Configuration
@@ -42,21 +52,115 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 ### File Naming Convention
 `{primary_id}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
 
-## Current Working Script Features
+**Example**: `RY-CA_2024-01-25_Earnings_Corrected_12345_67890_1.xml`
+- **RY-CA**: Royal Bank of Canada ticker
+- **2024-01-25**: Earnings call date
+- **Earnings**: Event type (filtered to earnings only)
+- **Corrected**: Transcript type (Raw/Corrected/NearRealTime)
+- **12345**: Unique event identifier
+- **67890**: Report identifier
+- **1**: Version identifier
 
-### Core Functionality (0_transcript_bulk_sync_working.py)
+## Stage 0 Business Logic & Process Flow
+
+### Complete Step-by-Step Process
+
+#### **1. Security & Authentication Setup**
+- Validates all required credentials from `.env` file (12 environment variables)
+- Connects to NAS using secure NTLM v2 authentication
+- Downloads SSL certificate from NAS for secure FactSet API connections
+- Configures corporate proxy authentication for API access with domain escaping
+
+#### **2. Configuration Loading & Validation**
+- Downloads `config.json` from NAS at runtime (never stored locally)
+- Validates comprehensive configuration schema:
+  - Institution list validation (ticker format, institution types)
+  - API parameter validation (dates, transcript types, rate limits)
+  - Security path validation to prevent directory traversal attacks
+  - Data type validation for all configuration parameters
+
+#### **3. Directory Structure Creation**
+Creates organized folder structure on NAS:
+```
+Outputs/Data/
+├── Canadian/          # Canadian bank transcripts
+│   ├── RY-CA_Royal_Bank_of_Canada/
+│   │   ├── Raw/       # Raw transcript files
+│   │   ├── Corrected/ # Corrected transcript files
+│   │   └── NearRealTime/ # Near real-time transcript files
+│   └── [5 other Canadian banks...]
+├── US/               # US bank transcripts
+│   ├── JPM-US_JPMorgan_Chase/
+│   └── [5 other US banks...]
+└── Insurance/        # Insurance company transcripts
+    ├── MFC-CA_Manulife_Financial/
+    └── [2 other insurance companies...]
+```
+
+#### **4. Institution Processing Loop (15 Total)**
+For each monitored institution:
+
+**a) API Query with Critical Filters**
+- Queries FactSet Events & Transcripts API for ALL transcripts from 2023-present
+- Applies earnings filter (only "Earnings" event types)
+- **CRITICAL Anti-Contamination Filter**: Only processes transcripts where the target ticker is the SOLE primary company
+  - Prevents cross-contamination (e.g., NA-CA pulling CWB-CA transcripts)
+  - Ensures clean data for individual institution analysis
+
+**b) Transcript Type Processing**
+- **Raw**: Original transcript as received from live call
+- **Corrected**: Manually edited for accuracy, completeness, and formatting
+- **NearRealTime**: Real-time transcript captured during live earnings call
+
+**c) Duplicate Prevention Logic**
+- Scans existing files on NAS for each institution/transcript-type combination
+- Creates standardized filename: `{ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
+- Only downloads transcripts that don't already exist (safe to re-run)
+
+**d) Download & Storage Process**
+- Downloads transcript XML via FactSet API with corporate proxy authentication
+- Validates file integrity and logs file sizes for audit
+- Uploads directly to NAS (no local storage for security)
+- Implements retry logic: 3 attempts with 5-second delays
+- Rate limiting: 2-second delays between requests (API protection)
+
+#### **5. Progress Tracking & Audit Trail**
+- Tracks downloads by institution and transcript type
+- Logs detailed progress, successes, and failures
+- Maintains counts for reporting and audit purposes
+- Generates comprehensive execution summary
+
+#### **6. Final Reporting & Cleanup**
+- Provides detailed summary:
+  - Total transcripts downloaded
+  - Execution time
+  - Institutions with/without transcripts found
+  - Breakdown by transcript type and institution
+- Uploads timestamped execution log to NAS for permanent audit trail
+- Cleans up temporary SSL certificate files
+- Properly closes all network connections
+
+### Core Functionality Features
 - Downloads all earnings transcripts from 2023-present for monitored institutions
 - Filters transcripts where target ticker is the ONLY primary ID (prevents cross-contamination)
 - Supports all transcript types: Corrected, Raw, NearRealTime
+- Implements intelligent version management to handle vendor version ID updates
+- Automatically removes old versions and keeps only latest version of each transcript
+- Uses version-agnostic keys for duplicate detection (prevents duplicate downloads)
 - Implements file-based inventory tracking to avoid re-downloads
-- Concurrent downloads with rate limiting (10 req/sec max)
-- Comprehensive error handling and retry logic
+- Rate limiting with retry logic for API protection
+- Comprehensive error handling and security validation
 - Uploads all data directly to NAS (no local storage)
 
 ### Technical Implementation
 - **Import Pattern**: `from fds.sdk.EventsandTranscripts.api import transcripts_api`
 - **Proxy Setup**: Uses requests proxies with MAPLE domain authentication
 - **SSL Handling**: Downloads certificate from NAS to temp file, sets environment variables
+- **Version Management**: Key functions for handling vendor version updates:
+  - `create_version_agnostic_key()`: Creates duplicate detection keys without version_id
+  - `parse_version_from_filename()`: Extracts version numbers from filenames
+  - `get_existing_files_with_version_management()`: Automatically manages versions, removes old ones
+  - `nas_remove_file()`: Safely removes old versions from NAS
 - **Error Handling**: Pandas warnings suppressed, comprehensive try/catch blocks
 - **Logging**: Simplified logging without email notifications (removed in latest version)
 
@@ -69,6 +173,7 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 4. **Cross-contamination**: NA-CA pulling CWB-CA transcripts fixed with primary ID filtering
 5. **Proxy URL**: Fixed proxy construction for requests library format
 6. **Environment Variables**: Attempted but reverted - broke functionality, restored from git
+7. **Version ID Duplicates**: Fixed duplicate downloads when vendors update version IDs by implementing version-agnostic duplicate detection and automatic cleanup of old versions
 
 ### Git History Context
 - **Last Working Commit**: 1d0ceba (before environment variable changes)
@@ -88,17 +193,30 @@ python-dateutil
 ## Stage Architecture Plan
 
 ### Stage 0: Bulk Refresh ✅ PRODUCTION READY
-- **Purpose**: Download ALL historical transcripts from 2023-present
+- **Purpose**: Download ALL historical earnings transcripts from 2023-present for 15 monitored financial institutions
 - **Script**: `stage_0_bulk_refresh/0_transcript_bulk_sync.py`
-- **Config**: `Inputs/config/stage_0_config.json` on NAS
+- **Config**: `Inputs/config/config.json` on NAS
 - **When**: Initial setup or complete repository refresh
 - **Status**: All 9 critical issues resolved, security validated, production ready
+- **Key Features**:
+  - Anti-contamination filter: Only downloads transcripts where target ticker is SOLE primary company
+  - Version management: Automatically handles vendor version ID updates, prevents duplicate downloads
+  - File organization: Creates institution-type folders (Canadian/US/Insurance) with transcript-type subfolders
+  - Duplicate prevention: Uses version-agnostic keys for intelligent duplicate detection
+  - Automatic cleanup: Removes old versions and keeps only latest version of each transcript
+  - Comprehensive audit trail: Timestamped logs uploaded to NAS
+  - Standardized naming: `{ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
 
-### Stage 1: Daily Sync (Future)
+### Stage 1: Daily Sync (Future Development)
 - **Purpose**: Incremental daily downloads
 - **Script**: `stage_1_daily_sync/1_transcript_daily_sync.py`
 - **Config**: `Inputs/config/stage_1_config.json` on NAS
 - **When**: Scheduled daily operations
+- **Key Requirements**:
+  - Must inherit version management functions from Stage 0
+  - Must use version-agnostic keys for duplicate detection
+  - Must handle vendor version ID updates intelligently
+  - Must maintain same security and validation standards
 
 ### Stage 2: Processing (Future Development)
 - **Purpose**: Process and analyze downloaded transcripts

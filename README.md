@@ -63,6 +63,8 @@ Required environment variables:
 1. Upload `config.json` to your NAS at the path: `{NAS_BASE_PATH}/Inputs/config/config.json`
 2. Ensure the SSL certificate is available at: `{NAS_BASE_PATH}/Inputs/certificate/certificate.cer`
 
+**Note**: The configuration file contains monitored institutions, API settings, and transcript types. Stage 0 validates the entire configuration schema before processing.
+
 ### 4. Run Scripts
 
 Each stage is a standalone Python script:
@@ -170,15 +172,114 @@ CLIENT_MACHINE_NAME=SYNC-CLIENT
 4. **NAS Connection Failed**: Verify NAS credentials and network access
 5. **API Authentication**: Confirm FactSet API credentials are valid
 
+## Stage 0: Detailed Business Logic
+
+### What Stage 0 Actually Does
+
+Stage 0 is a comprehensive bulk download system that establishes your complete historical transcript baseline. Here's the step-by-step business process:
+
+#### **1. Security & Authentication Setup**
+- Validates all required credentials from `.env` file
+- Connects to NAS using secure NTLM v2 authentication
+- Downloads SSL certificate from NAS for secure FactSet API connections
+- Configures corporate proxy authentication for API access
+
+#### **2. Configuration & Validation**
+- Downloads `config.json` from NAS (never stored locally)
+- Validates configuration schema with comprehensive checks:
+  - Institution list validation
+  - API parameter validation (dates, transcript types, rate limits)
+  - Security path validation to prevent directory traversal
+  - Ticker format validation
+
+#### **3. Directory Structure Creation**
+Creates organized folder structure on NAS:
+```
+Outputs/Data/
+├── Canadian/          # Canadian bank transcripts
+│   ├── RY-CA_Royal_Bank_of_Canada/
+│   │   ├── Raw/       # Raw transcript files
+│   │   ├── Corrected/ # Corrected transcript files
+│   │   └── NearRealTime/ # Near real-time transcript files
+│   └── [other Canadian banks...]
+├── US/               # US bank transcripts
+│   ├── JPM-US_JPMorgan_Chase/
+│   └── [other US banks...]
+└── Insurance/        # Insurance company transcripts
+    ├── MFC-CA_Manulife_Financial/
+    └── [other insurance companies...]
+```
+
+#### **4. Institution Processing (15 Total)**
+For each monitored institution:
+
+**a) API Query with Filters**
+- Queries FactSet API for ALL transcripts from 2023-present
+- Applies earnings filter (only "Earnings" event types)
+- **Critical Anti-Contamination Filter**: Only processes transcripts where the target ticker is the SOLE primary company (prevents downloading joint earnings calls)
+
+**b) Transcript Type Processing**
+- **Raw**: Original transcript as received
+- **Corrected**: Edited for accuracy and completeness
+- **NearRealTime**: Real-time transcript during live call
+
+**c) Duplicate Prevention**
+- Scans existing files on NAS for each institution/type
+- Creates standardized filename: `{ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
+- Only downloads new transcripts not already present
+
+**d) Download & Storage**
+- Downloads transcript XML via FactSet API with corporate proxy
+- Validates file integrity and logs file sizes
+- Uploads directly to NAS (no local storage for security)
+- Implements retry logic: 3 attempts with 5-second delays
+- Rate limiting: 2-second delays between requests
+
+#### **5. Progress Tracking & Audit**
+- Tracks downloads by institution and transcript type
+- Logs detailed progress and any failures
+- Generates comprehensive execution summary
+- Uploads timestamped execution log to NAS for audit trail
+
+#### **6. Final Reporting**
+Provides detailed summary including:
+- Total transcripts downloaded
+- Execution time
+- Institutions with/without transcripts found
+- Breakdown by transcript type and institution
+- Any failures or issues encountered
+
+### **Key Business Rules**
+
+1. **Anti-Contamination**: Only downloads transcripts where target ticker is SOLE primary company
+2. **Security-First**: All credentials from environment, paths validated, URLs sanitized in logs
+3. **Audit Trail**: Every operation logged with timestamps and error context
+4. **Incremental Safe**: Checks existing files, safe to re-run without re-downloading
+5. **Version Management**: Automatically handles vendor version ID updates, prevents duplicate downloads
+6. **Institution Coverage**: 6 Canadian banks, 6 US banks, 3 insurance companies
+
+### **Expected Outcomes**
+
+- **Data Structure**: Organized by institution type → company → transcript type
+- **File Naming**: Standardized format for easy identification and processing
+- **Audit Trail**: Complete log of all operations for compliance
+- **Repository**: Complete historical baseline ready for Stage 1 daily updates
+
 ## Pipeline Stages
 
 ### Stage 0: Bulk Refresh ✅ PRODUCTION READY
-- **Purpose**: Download ALL historical transcripts from 2023-present
+- **Purpose**: Download ALL historical earnings transcripts from 2023-present for 15 monitored financial institutions
 - **When to use**: Initial setup or complete repository refresh
-- **Output**: Complete transcript repository on NAS
-- **Configuration**: Loads operational settings from `Inputs/config/stage_0_config.json` on NAS
+- **Output**: Complete transcript repository on NAS with organized folder structure
+- **Configuration**: Loads operational settings from `Inputs/config/config.json` on NAS
 - **Features**: Self-contained script with environment variable authentication
 - **Security**: All 9 critical security and reliability issues resolved
+- **Anti-contamination**: Only downloads transcripts where target ticker is SOLE primary company
+- **Version Management**: Automatically handles vendor version ID updates, prevents duplicate downloads
+- **File Organization**: Creates institution-type folders (Canadian/US/Insurance) with transcript-type subfolders
+- **Duplicate Prevention**: Uses version-agnostic keys for intelligent duplicate detection, safe to re-run
+- **Automatic Cleanup**: Removes old versions and keeps only latest version of each transcript
+- **Audit Trail**: Comprehensive logging with timestamped execution logs uploaded to NAS
 
 ### Stage 1: Daily Sync (Scheduled)
 - **Purpose**: Check for new transcripts daily and download incrementally
