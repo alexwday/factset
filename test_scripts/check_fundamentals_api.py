@@ -295,18 +295,7 @@ def display_sample_data(metrics_data: Dict[str, List[Dict[str, Any]]], max_metri
 def generate_html_report(all_metrics: Dict[str, List[Dict[str, Any]]], 
                         category_results: Dict[str, Dict[str, Any]], 
                         ticker: str) -> str:
-    """Generate comprehensive HTML report."""
-    
-    # Calculate overall statistics
-    total_metrics = sum(len(metrics) for metrics in all_metrics.values())
-    total_data_points = sum(
-        max((result.get('total_points', 0) for result in cat_data.values()), default=0)
-        for cat_data in category_results.values()
-    )
-    categories_with_data = sum(
-        1 for cat_data in category_results.values() 
-        if any(result.get('total_points', 0) > 0 for result in cat_data.values())
-    )
+    """Generate clean data-focused HTML report showing actual metrics and sample data."""
     
     # Generate HTML
     html_content = f"""
@@ -315,213 +304,185 @@ def generate_html_report(all_metrics: Dict[str, List[Dict[str, Any]]],
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>FactSet Fundamentals API Analysis - {ticker}</title>
+        <title>FactSet Fundamentals Data - {ticker}</title>
         <style>
             body {{
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                line-height: 1.6;
+                line-height: 1.5;
                 color: #333;
-                max-width: 1200px;
+                max-width: 1400px;
                 margin: 0 auto;
                 padding: 20px;
-                background-color: #f5f5f5;
+                background-color: #f8f9fa;
             }}
             .header {{
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 30px;
-                border-radius: 10px;
-                margin-bottom: 30px;
+                background: #fff;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                margin-bottom: 20px;
                 text-align: center;
             }}
-            .summary {{
-                background: white;
-                padding: 25px;
-                border-radius: 10px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            .category-section {{
+                background: #fff;
                 margin-bottom: 30px;
-            }}
-            .metrics-grid {{
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                gap: 20px;
-                margin-bottom: 30px;
-            }}
-            .category-card {{
-                background: white;
-                padding: 20px;
-                border-radius: 10px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                border-left: 4px solid #667eea;
+                border-radius: 8px;
+                overflow: hidden;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }}
             .category-header {{
+                background: #495057;
+                color: white;
+                padding: 15px 20px;
                 font-size: 1.2em;
                 font-weight: bold;
-                margin-bottom: 15px;
-                color: #667eea;
+                margin: 0;
             }}
-            .metric-count {{
-                font-size: 2em;
-                font-weight: bold;
-                color: #4CAF50;
-                margin-bottom: 10px;
-            }}
-            .status-good {{ color: #4CAF50; }}
-            .status-warning {{ color: #ff9800; }}
-            .status-error {{ color: #f44336; }}
-            .data-table {{
+            .metrics-table {{
                 width: 100%;
                 border-collapse: collapse;
-                margin-top: 20px;
-                background: white;
-                border-radius: 10px;
-                overflow: hidden;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             }}
-            .data-table th {{
-                background: #667eea;
+            .metrics-table th {{
+                background: #6c757d;
                 color: white;
-                padding: 15px;
+                padding: 10px;
                 text-align: left;
+                font-weight: normal;
+                font-size: 0.9em;
             }}
-            .data-table td {{
-                padding: 12px 15px;
-                border-bottom: 1px solid #eee;
+            .metrics-table td {{
+                padding: 8px 10px;
+                border-bottom: 1px solid #dee2e6;
+                font-size: 0.85em;
+                vertical-align: top;
             }}
-            .data-table tr:hover {{
+            .metrics-table tr:hover {{
                 background: #f8f9fa;
             }}
-            .conclusion {{
-                background: white;
-                padding: 25px;
-                border-radius: 10px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                margin-top: 30px;
+            .metric-code {{
+                font-family: 'Monaco', 'Consolas', monospace;
+                font-weight: bold;
+                color: #0056b3;
             }}
-            .conclusion.good {{
-                border-left: 4px solid #4CAF50;
+            .data-type {{
+                color: #6c757d;
+                font-size: 0.8em;
             }}
-            .conclusion.warning {{
-                border-left: 4px solid #ff9800;
+            .description {{
+                color: #333;
+                max-width: 400px;
             }}
-            .conclusion.error {{
-                border-left: 4px solid #f44336;
+            .sample-data {{
+                background: #f8f9fa;
+                padding: 8px;
+                border-radius: 4px;
+                font-family: 'Monaco', 'Consolas', monospace;
+                font-size: 0.8em;
+                color: #0056b3;
+            }}
+            .no-data {{
+                color: #6c757d;
+                font-style: italic;
             }}
             .timestamp {{
-                color: #666;
+                color: #6c757d;
                 font-size: 0.9em;
                 text-align: center;
                 margin-top: 30px;
+                padding: 20px;
             }}
         </style>
     </head>
     <body>
         <div class="header">
-            <h1>FactSet Fundamentals API Analysis</h1>
+            <h1>FactSet Fundamentals Data Reference</h1>
             <h2>{ticker} - Royal Bank of Canada</h2>
-            <p>Comprehensive evaluation of available fundamental data</p>
+            <p>Available metrics and sample data by category</p>
         </div>
-        
-        <div class="summary">
-            <h2>Executive Summary</h2>
-            <div class="metrics-grid">
-                <div class="category-card">
-                    <div class="metric-count">{total_metrics}</div>
-                    <div>Total Available Metrics</div>
-                </div>
-                <div class="category-card">
-                    <div class="metric-count">{categories_with_data}/10</div>
-                    <div>Categories with Data</div>
-                </div>
-                <div class="category-card">
-                    <div class="metric-count">{total_data_points:,}</div>
-                    <div>Data Points Retrieved</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="summary">
-            <h2>Category Analysis</h2>
-            <table class="data-table">
+    """
+    
+    # Add each category section
+    for category, metrics in all_metrics.items():
+        if not metrics:
+            continue
+            
+        category_name = category.replace('_', ' ').title()
+        html_content += f"""
+        <div class="category-section">
+            <h3 class="category-header">{category_name} ({len(metrics)} metrics)</h3>
+            <table class="metrics-table">
                 <thead>
                     <tr>
-                        <th>Category</th>
-                        <th>Available Metrics</th>
-                        <th>Data Points</th>
-                        <th>Coverage</th>
-                        <th>Status</th>
+                        <th style="width: 180px;">Metric Code</th>
+                        <th style="width: 80px;">Data Type</th>
+                        <th style="width: 400px;">Description</th>
+                        <th style="width: 200px;">Sample Data ({ticker})</th>
                     </tr>
                 </thead>
                 <tbody>
-    """
-    
-    # Add category rows
-    for category, metrics in all_metrics.items():
-        cat_data = category_results.get(category, {})
-        metrics_available = len(metrics)
+        """
         
+        # Get sample data for this category
+        cat_data = category_results.get(category, {})
+        sample_data = {}
         if cat_data:
             best_result = max(cat_data.values(), key=lambda x: x.get('total_points', 0))
-            data_points = best_result.get('total_points', 0)
-            metrics_with_data = best_result.get('metrics_with_data', 0)
-            
-            if data_points > 0:
-                coverage = f"{(metrics_with_data / metrics_available * 100):.1f}%" if metrics_available > 0 else "0%"
-                status = "✅ Excellent" if metrics_with_data > metrics_available * 0.5 else "⚠️ Moderate"
-                status_class = "status-good" if metrics_with_data > metrics_available * 0.5 else "status-warning"
-            else:
-                coverage = "0%"
-                status = "❌ No Data"
-                status_class = "status-error"
-        else:
-            data_points = 0
-            coverage = "0%"
-            status = "❌ No Access"
-            status_class = "status-error"
+            sample_data = best_result.get('metrics_data', {})
         
-        html_content += f"""
+        # Add rows for each metric
+        for metric in metrics:
+            metric_code = metric.get('metric', 'Unknown')
+            data_type = metric.get('data_type', 'Unknown')
+            description = metric.get('description', 'No description available')
+            
+            # Truncate long descriptions
+            if len(description) > 100:
+                description = description[:97] + "..."
+            
+            # Get sample data for this metric
+            if metric_code in sample_data and sample_data[metric_code]:
+                recent_data = sample_data[metric_code][:2]  # Show 2 most recent
+                sample_html = "<div class='sample-data'>"
+                for data_point in recent_data:
+                    value = data_point.get('value', 'N/A')
+                    date = data_point.get('date', 'Unknown')
+                    fy = data_point.get('fiscal_year', '')
+                    fp = data_point.get('fiscal_period', '')
+                    
+                    # Format value
+                    if isinstance(value, (int, float)):
+                        if abs(value) >= 1000000000:
+                            formatted_value = f"{value/1000000000:.1f}B"
+                        elif abs(value) >= 1000000:
+                            formatted_value = f"{value/1000000:.1f}M"
+                        elif abs(value) >= 1000:
+                            formatted_value = f"{value/1000:.1f}K"
+                        else:
+                            formatted_value = f"{value:.2f}"
+                    else:
+                        formatted_value = str(value)[:20]
+                    
+                    sample_html += f"{formatted_value} ({date})<br>"
+                sample_html += "</div>"
+            else:
+                sample_html = "<span class='no-data'>No data available</span>"
+            
+            html_content += f"""
                     <tr>
-                        <td><strong>{category.replace('_', ' ')}</strong></td>
-                        <td>{metrics_available}</td>
-                        <td>{data_points:,}</td>
-                        <td>{coverage}</td>
-                        <td class="{status_class}">{status}</td>
+                        <td class="metric-code">{metric_code}</td>
+                        <td class="data-type">{data_type}</td>
+                        <td class="description">{description}</td>
+                        <td>{sample_html}</td>
                     </tr>
-        """
-    
-    # Business conclusion
-    if total_data_points > 100:
-        conclusion_class = "good"
-        conclusion_text = "✅ EXCELLENT - FactSet Fundamentals API provides comprehensive data coverage"
-        recommendation = "Recommend proceeding with full implementation for internal reporting"
-    elif total_data_points > 50:
-        conclusion_class = "warning"
-        conclusion_text = "⚠️ MODERATE - FactSet Fundamentals API provides partial data coverage"
-        recommendation = "Consider supplementary data sources for complete reporting"
-    else:
-        conclusion_class = "error"
-        conclusion_text = "❌ LIMITED - FactSet Fundamentals API provides limited data coverage"
-        recommendation = "Investigate access permissions or consider alternative data sources"
-    
-    html_content += f"""
+            """
+        
+        html_content += """
                 </tbody>
             </table>
         </div>
-        
-        <div class="conclusion {conclusion_class}">
-            <h2>Business Recommendation</h2>
-            <h3>{conclusion_text}</h3>
-            <p><strong>Recommendation:</strong> {recommendation}</p>
-            <p><strong>Key Findings:</strong></p>
-            <ul>
-                <li>Total metrics available: {total_metrics:,}</li>
-                <li>Categories with data: {categories_with_data}/10</li>
-                <li>Maximum data points: {total_data_points:,}</li>
-                <li>Tested across multiple periods: QTR, ANN, LTM</li>
-                <li>Tested across multiple currencies: CAD, USD, LOCAL</li>
-            </ul>
-        </div>
-        
+        """
+    
+    html_content += f"""
         <div class="timestamp">
             Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         </div>
