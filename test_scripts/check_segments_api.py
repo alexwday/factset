@@ -576,6 +576,22 @@ def main():
             print("="*80)
             
             if segments_data:
+                # First, let's examine the actual structure of the segments data
+                print(f"🔍 EXAMINING SEGMENTS DATA STRUCTURE:")
+                print("-" * 80)
+                
+                if segments_data:
+                    sample_segment = segments_data[0]
+                    if hasattr(sample_segment, 'to_dict'):
+                        sample_dict = sample_segment.to_dict()
+                        print(f"📋 Sample segment structure:")
+                        for key, value in sample_dict.items():
+                            print(f"  {key}: {value}")
+                        print(f"📋 All available fields: {list(sample_dict.keys())}")
+                    else:
+                        print(f"📋 Sample segment type: {type(sample_segment)}")
+                        print(f"📋 Sample segment: {sample_segment}")
+                
                 # Create table format
                 table_data = []
                 
@@ -585,11 +601,35 @@ def main():
                     else:
                         segment_dict = segment
                     
+                    # Debug: print all available fields for the first few segments
+                    if len(table_data) < 3:
+                        print(f"\n🔍 Segment {len(table_data)+1} fields: {list(segment_dict.keys())}")
+                    
+                    # Try different possible field names for segment identification
+                    segment_name = (
+                        segment_dict.get('segment') or 
+                        segment_dict.get('segment_name') or
+                        segment_dict.get('label') or
+                        segment_dict.get('segment_label') or
+                        segment_dict.get('description') or
+                        segment_dict.get('name') or
+                        'Unknown'
+                    )
+                    
+                    # Try different possible field names for date
+                    date_value = (
+                        segment_dict.get('date') or
+                        segment_dict.get('fiscal_end_date') or
+                        segment_dict.get('report_date') or
+                        segment_dict.get('period_end_date') or
+                        'Unknown'
+                    )
+                    
                     # Extract key fields for table
                     table_row = {
                         'Ticker': TEST_TICKER,
-                        'Segment': segment_dict.get('segment', 'Unknown'),
-                        'Date': segment_dict.get('date', 'Unknown'),
+                        'Segment': segment_name,
+                        'Date': date_value,
                         'Metric': segment_dict.get('metric', 'Unknown'),
                         'Description': segment_dict.get('description', 'N/A'),
                         'Value': segment_dict.get('value', 'N/A')
