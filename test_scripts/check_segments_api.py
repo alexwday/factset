@@ -9,6 +9,13 @@ import pandas as pd
 import fds.sdk.FactSetFundamentals
 from fds.sdk.FactSetFundamentals.api import segments_api
 from fds.sdk.FactSetFundamentals.models import *
+from fds.sdk.FactSetFundamentals.model.segments_request import SegmentsRequest
+from fds.sdk.FactSetFundamentals.model.segment_request_body import SegmentRequestBody
+from fds.sdk.FactSetFundamentals.model.ids_batch_max30000 import IdsBatchMax30000
+from fds.sdk.FactSetFundamentals.model.segments_periodicity import SegmentsPeriodicity
+from fds.sdk.FactSetFundamentals.model.segment_type import SegmentType
+from fds.sdk.FactSetFundamentals.model.fiscal_period import FiscalPeriod
+from fds.sdk.FactSetFundamentals.model.batch import Batch
 import os
 from urllib.parse import quote
 from datetime import datetime, timedelta
@@ -143,87 +150,107 @@ def explore_segments_api(seg_api: segments_api.SegmentsApi, ticker: str) -> Dict
     api_methods = [method for method in dir(seg_api) if not method.startswith('_')]
     print(f"📋 Available Segments API methods: {api_methods}")
     
-    results = {}
-    
-    # Try different methods to discover segments
-    for method_name in api_methods:
-        if 'segment' in method_name.lower():
-            try:
-                method = getattr(seg_api, method_name)
-                print(f"🧪 Testing method: {method_name}")
-                
-                # Try calling with minimal parameters
-                if 'get' in method_name.lower():
-                    try:
-                        # Try different parameter combinations
-                        if 'ids' in method.__code__.co_varnames:
-                            response = method(ids=[ticker])
-                        elif 'id' in method.__code__.co_varnames:
-                            response = method(id=ticker)
-                        else:
-                            response = method()
-                        
-                        if response:
-                            print(f"  ✅ {method_name} returned data")
-                            results[method_name] = response
-                        else:
-                            print(f"  ⚠️  {method_name} returned no data")
-                            
-                    except Exception as e:
-                        print(f"  ❌ {method_name} error: {e}")
-                        
-            except Exception as e:
-                print(f"  ❌ Error accessing {method_name}: {e}")
-    
-    return results
+    # Look specifically for the correct method
+    target_method = 'get_fds_segments_for_list'
+    if target_method in api_methods:
+        print(f"✅ Found correct method: {target_method}")
+        
+        # Get method signature
+        method = getattr(seg_api, target_method)
+        print(f"📋 Method signature: {method.__doc__}")
+        
+        return {"methods": api_methods, "target_method": target_method, "available": True}
+    else:
+        print(f"❌ Target method {target_method} not found")
+        
+        # Show available methods that might be relevant
+        relevant_methods = [m for m in api_methods if 'segment' in m.lower() or 'get' in m.lower()]
+        print(f"🔍 Relevant methods found: {relevant_methods}")
+        
+        return {"methods": api_methods, "target_method": target_method, "available": False, "relevant": relevant_methods}
 
 def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str) -> Optional[Dict[str, Any]]:
     """Test getting segments data for the ticker."""
     print(f"📊 Testing segments data retrieval for {ticker}...")
     
     try:
-        # Try the most likely segments API call patterns
-        test_methods = [
-            # Method 1: Basic segments call
-            lambda: seg_api.get_segments(ids=[ticker]),
-            
-            # Method 2: Segments with additional parameters
-            lambda: seg_api.get_segments(ids=[ticker], periodicity="QTR"),
-            
-            # Method 3: Try with different parameter name
-            lambda: seg_api.get_fds_segments(ids=[ticker]),
-            
-            # Method 4: Try segments for list
-            lambda: seg_api.get_segments_for_list(ids=[ticker]),
+        # Create date range for recent data
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=365)
+        
+        # Create request object with proper model class wrapping
+        ids_instance = IdsBatchMax30000([ticker])
+        
+        # Test different segment configurations
+        test_configs = [
+            {
+                "name": "Business Segments - Annual",
+                "segment_type": SegmentType("BUS"),
+                "periodicity": SegmentsPeriodicity("ANN"),
+                "metrics": "FF_SALES"
+            },
+            {
+                "name": "Geographic Segments - Annual", 
+                "segment_type": SegmentType("GEO"),
+                "periodicity": SegmentsPeriodicity("ANN"),
+                "metrics": "FF_SALES"
+            }
         ]
         
-        for i, method in enumerate(test_methods, 1):
+        for config in test_configs:
             try:
-                print(f"  🧪 Testing method {i}...")
-                response = method()
+                print(f"  🧪 Testing {config['name']}...")
                 
-                if response:
-                    print(f"    ✅ Method {i} succeeded!")
-                    
-                    # Try to unwrap if needed
-                    if hasattr(response, 'get_response_200'):
-                        response = response.get_response_200()
-                    
-                    if hasattr(response, 'data') and response.data:
-                        print(f"    📊 Found {len(response.data)} segments")
-                        return response.data
-                    else:
-                        print(f"    📊 Response structure: {type(response)}")
-                        print(f"    📊 Response attributes: {dir(response)}")
-                        return response
+                # Create fiscal period
+                fiscal_period_instance = FiscalPeriod(
+                    start=start_date.strftime('%Y-%m-%d'),
+                    end=end_date.strftime('%Y-%m-%d')
+                )
+                
+                # Create batch instance
+                batch_instance = Batch("N")
+                
+                # Create request body
+                segment_request_body = SegmentRequestBody(
+                    ids=ids_instance,
+                    metrics=config["metrics"],
+                    periodicity=config["periodicity"],
+                    fiscal_period=fiscal_period_instance,
+                    segment_type=config["segment_type"],
+                    batch=batch_instance
+                )
+                
+                # Create request
+                segments_request = SegmentsRequest(data=segment_request_body)
+                
+                # Make API call using correct method name
+                response_wrapper = seg_api.get_fds_segments_for_list(segments_request)
+                
+                # Debug response structure
+                print(f"    🔍 Response wrapper type: {type(response_wrapper)}")
+                
+                # Unwrap response if needed
+                if hasattr(response_wrapper, 'get_response_200'):
+                    response = response_wrapper.get_response_200()
+                    print(f"    🔍 Unwrapped response type: {type(response)}")
                 else:
-                    print(f"    ⚠️  Method {i} returned no data")
-                    
+                    response = response_wrapper
+                
+                if response and hasattr(response, 'data') and response.data:
+                    print(f"    ✅ {config['name']} succeeded! Found {len(response.data)} segments")
+                    return response.data
+                else:
+                    print(f"    ⚠️  {config['name']} returned no data")
+                    if response:
+                        print(f"    🔍 Response attributes: {dir(response)}")
+                        
             except Exception as e:
-                print(f"    ❌ Method {i} error: {e}")
+                print(f"    ❌ {config['name']} error: {e}")
+                print(f"    🔍 Error type: {type(e).__name__}")
                 
     except Exception as e:
         print(f"❌ Error testing segments data: {e}")
+        print(f"🔍 Error type: {type(e).__name__}")
         
     return None
 
