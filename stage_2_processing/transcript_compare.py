@@ -79,32 +79,6 @@ class EnhancedTranscriptComparer:
         # US$X -> CAD X, USD$X -> CAD X, etc.
         normalized = re.sub(r'(?:US|USD|C)\$(\d+(?:\.\d+)?)', r'CAD \1', normalized)
         
-        # Handle compound phrases - convert hyphenated versions to spaced versions
-        # This ensures consistent tokenization
-        
-        # Financial terms
-        normalized = re.sub(r'\byear-over-year\b', 'year over year', normalized)
-        normalized = re.sub(r'\bthrough-the-cycle\b', 'through the cycle', normalized)
-        normalized = re.sub(r'\blower-cost\b', 'lower cost', normalized)
-        normalized = re.sub(r'\bhigh-single-digit\b', 'high single digit', normalized)
-        normalized = re.sub(r'\ball-bank\b', 'all bank', normalized)
-        normalized = re.sub(r'\bAll-Bank\b', 'All Bank', normalized)
-        normalized = re.sub(r'\bshorter-duration\b', 'shorter duration', normalized)
-        
-        # Handle hyphenated versions by converting to spaced versions
-        # This handles pre-tax, re-queue, etc. when they appear with hyphens
-        normalized = re.sub(r'\bpre-tax\b', 'pre tax', normalized)
-        normalized = re.sub(r'\bre-queue\b', 're queue', normalized)
-        normalized = re.sub(r'\bpost-paid\b', 'post paid', normalized)
-        normalized = re.sub(r'\bnon-bank\b', 'non bank', normalized)
-        normalized = re.sub(r'\bnon-interest\b', 'non interest', normalized)
-        normalized = re.sub(r'\bmulti-family\b', 'multi family', normalized)
-        
-        # Handle non-hyphenated compound words that should be split
-        # Only include the most common financial terms that definitely appear both ways
-        normalized = re.sub(r'\bpretax\b', 'pre tax', normalized)
-        normalized = re.sub(r'\brequeue\b', 're queue', normalized)
-        normalized = re.sub(r'\bnonbank\b', 'non bank', normalized)
         
         return normalized
     
