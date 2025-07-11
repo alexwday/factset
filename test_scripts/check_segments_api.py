@@ -7,7 +7,7 @@ Shows business unit breakdowns like Wealth Management, Capital Markets, P&CB.
 
 import pandas as pd
 import fds.sdk.FactSetFundamentals
-from fds.sdk.FactSetFundamentals.api import segments_api
+from fds.sdk.FactSetFundamentals.api import segments_api, metrics_api
 from fds.sdk.FactSetFundamentals.models import *
 from fds.sdk.FactSetFundamentals.model.segments_request import SegmentsRequest
 from fds.sdk.FactSetFundamentals.model.segment_request_body import SegmentRequestBody
@@ -142,6 +142,41 @@ def setup_ssl_certificate(nas_conn: SMBConnection, ssl_cert_path: str) -> Option
         print(f"❌ Error downloading SSL certificate from NAS: {e}")
         return None
 
+def discover_all_metrics(data_api: metrics_api.MetricsApi) -> List[str]:
+    """Discover all available metrics from the metrics API."""
+    print("🔍 Discovering all available metrics...")
+    
+    categories = [
+        "INCOME_STATEMENT", "BALANCE_SHEET", "CASH_FLOW", "RATIOS",
+        "FINANCIAL_SERVICES", "INDUSTRY_METRICS", "PENSION_AND_POSTRETIREMENT",
+        "MARKET_DATA", "MISCELLANEOUS", "DATES"
+    ]
+    
+    all_metrics = []
+    
+    for category in categories:
+        try:
+            print(f"  📊 Fetching {category} metrics...")
+            response = data_api.get_fds_fundamentals_metrics(category=category)
+            
+            if response and hasattr(response, 'data') and response.data:
+                category_metrics = [metric.metric for metric in response.data if hasattr(metric, 'metric') and metric.metric]
+                all_metrics.extend(category_metrics)
+                print(f"    ✅ Found {len(category_metrics)} {category} metrics")
+            else:
+                print(f"    ⚠️  No metrics found for {category}")
+                
+            time.sleep(0.5)  # Rate limiting
+            
+        except Exception as e:
+            print(f"    ❌ Error fetching {category} metrics: {e}")
+    
+    # Remove duplicates and sort
+    unique_metrics = sorted(list(set(all_metrics)))
+    print(f"📊 Total unique metrics discovered: {len(unique_metrics)}")
+    
+    return unique_metrics
+
 def explore_segments_api(seg_api: segments_api.SegmentsApi, ticker: str) -> Dict[str, Any]:
     """Explore what segments-related methods are available."""
     print(f"🔍 Exploring Segments API for {ticker}...")
@@ -169,7 +204,7 @@ def explore_segments_api(seg_api: segments_api.SegmentsApi, ticker: str) -> Dict
         
         return {"methods": api_methods, "target_method": target_method, "available": False, "relevant": relevant_methods}
 
-def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str) -> Optional[Dict[str, Any]]:
+def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str, available_metrics: List[str]) -> Optional[Dict[str, Any]]:
     """Test getting segments data for the ticker."""
     print(f"📊 Testing segments data retrieval for {ticker}...")
     
@@ -181,19 +216,22 @@ def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str) -> Option
         # Create request object with proper model class wrapping
         ids_instance = IdsBatchMax30000([ticker])
         
-        # Test different segment configurations
+        # Use discovered metrics (limit to first 20 for initial testing)
+        test_metrics = available_metrics[:20]  
+        print(f"📊 Testing with {len(test_metrics)} discovered metrics: {test_metrics[:5]}{'...' if len(test_metrics) > 5 else ''}")
+        
         test_configs = [
             {
                 "name": "Business Segments - Annual",
                 "segment_type": SegmentType("BUS"),
                 "periodicity": SegmentsPeriodicity("ANN"),
-                "metrics": "FF_SALES"
+                "metrics": test_metrics
             },
             {
                 "name": "Geographic Segments - Annual", 
                 "segment_type": SegmentType("GEO"),
                 "periodicity": SegmentsPeriodicity("ANN"),
-                "metrics": "FF_SALES"
+                "metrics": test_metrics
             }
         ]
         
@@ -210,39 +248,57 @@ def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str) -> Option
                 # Create batch instance
                 batch_instance = Batch("N")
                 
-                # Create request body
-                segment_request_body = SegmentRequestBody(
-                    ids=ids_instance,
-                    metrics=config["metrics"],
-                    periodicity=config["periodicity"],
-                    fiscal_period=fiscal_period_instance,
-                    segment_type=config["segment_type"],
-                    batch=batch_instance
-                )
+                # Test each metric individually (segments API might only support one metric at a time)
+                successful_metrics = []
+                all_segment_data = []
                 
-                # Create request
-                segments_request = SegmentsRequest(data=segment_request_body)
+                for metric in config["metrics"]:
+                    try:
+                        print(f"    📊 Testing metric: {metric}")
+                        
+                        # Create request body for single metric
+                        segment_request_body = SegmentRequestBody(
+                            ids=ids_instance,
+                            metrics=metric,  # Test one metric at a time
+                            periodicity=config["periodicity"],
+                            fiscal_period=fiscal_period_instance,
+                            segment_type=config["segment_type"],
+                            batch=batch_instance
+                        )
+                        
+                        # Create request
+                        segments_request = SegmentsRequest(data=segment_request_body)
+                        
+                        # Make API call
+                        response_wrapper = seg_api.get_fds_segments_for_list(segments_request)
+                        
+                        # Unwrap response
+                        if hasattr(response_wrapper, 'get_response_200'):
+                            response = response_wrapper.get_response_200()
+                        else:
+                            response = response_wrapper
+                        
+                        if response and hasattr(response, 'data') and response.data:
+                            successful_metrics.append(metric)
+                            all_segment_data.extend(response.data)
+                            print(f"      ✅ {metric}: {len(response.data)} data points")
+                        else:
+                            print(f"      ❌ {metric}: No data")
+                            
+                    except Exception as e:
+                        print(f"      ❌ {metric}: Error - {e}")
+                        continue
                 
-                # Make API call using correct method name
-                response_wrapper = seg_api.get_fds_segments_for_list(segments_request)
-                
-                # Debug response structure
-                print(f"    🔍 Response wrapper type: {type(response_wrapper)}")
-                
-                # Unwrap response if needed
-                if hasattr(response_wrapper, 'get_response_200'):
-                    response = response_wrapper.get_response_200()
-                    print(f"    🔍 Unwrapped response type: {type(response)}")
+                # Report results for this configuration
+                if successful_metrics:
+                    print(f"    ✅ {config['name']} succeeded! Found {len(successful_metrics)} working metrics: {successful_metrics}")
+                    print(f"    📊 Total data points: {len(all_segment_data)}")
+                    
+                    # Return data from first successful configuration
+                    if all_segment_data:
+                        return all_segment_data
                 else:
-                    response = response_wrapper
-                
-                if response and hasattr(response, 'data') and response.data:
-                    print(f"    ✅ {config['name']} succeeded! Found {len(response.data)} segments")
-                    return response.data
-                else:
-                    print(f"    ⚠️  {config['name']} returned no data")
-                    if response:
-                        print(f"    🔍 Response attributes: {dir(response)}")
+                    print(f"    ⚠️  {config['name']} - no working metrics found")
                         
             except Exception as e:
                 print(f"    ❌ {config['name']} error: {e}")
@@ -493,64 +549,74 @@ def main():
     
     try:
         with fds.sdk.FactSetFundamentals.ApiClient(configuration) as api_client:
-            # Initialize Segments API
+            # Initialize APIs
             seg_api = segments_api.SegmentsApi(api_client)
+            data_api = metrics_api.MetricsApi(api_client)
             
-            # Phase 1: Explore available segments methods
-            print(f"\n🔍 PHASE 1: EXPLORING SEGMENTS API METHODS")
+            # Phase 1: Discover all available metrics
+            print(f"\n🔍 PHASE 1: DISCOVERING ALL AVAILABLE METRICS")
+            print("="*80)
+            
+            available_metrics = discover_all_metrics(data_api)
+            
+            # Phase 2: Explore available segments methods
+            print(f"\n🔍 PHASE 2: EXPLORING SEGMENTS API METHODS")
             print("="*80)
             
             api_exploration = explore_segments_api(seg_api, TEST_TICKER)
             
-            # Phase 2: Test segments data retrieval
-            print(f"\n🔍 PHASE 2: TESTING SEGMENTS DATA RETRIEVAL")
+            # Phase 3: Test segments data retrieval with discovered metrics
+            print(f"\n🔍 PHASE 3: TESTING SEGMENTS DATA RETRIEVAL")
             print("="*80)
             
-            segments_data = test_segments_data(seg_api, TEST_TICKER)
+            segments_data = test_segments_data(seg_api, TEST_TICKER, available_metrics)
             
-            # Phase 3: Analyze segments data
-            print(f"\n🔍 PHASE 3: ANALYZING SEGMENTS DATA")
+            # Phase 4: Generate table output
+            print(f"\n📊 GENERATING SEGMENTS DATA TABLE")
             print("="*80)
             
-            segments_analysis = analyze_segments_data(segments_data)
-            
-            # Display results
-            print(f"\n📊 RESULTS SUMMARY:")
-            print("-" * 80)
-            print(f"Segments found: {segments_analysis.get('segments_found', 0)}")
-            print(f"Data type: {segments_analysis.get('data_type', 'Unknown')}")
-            
-            if segments_analysis.get('error'):
-                print(f"❌ Error: {segments_analysis['error']}")
-            
-            if segments_analysis.get('segments_found', 0) > 0:
-                print("✅ Successfully found segments data!")
+            if segments_data:
+                # Create table format
+                table_data = []
                 
-                # Show sample segment details
-                for segment in segments_analysis.get('segments_details', [])[:3]:
-                    print(f"\n📋 Sample Segment:")
-                    if segment.get('data'):
-                        for key, value in list(segment['data'].items())[:5]:
-                            print(f"  {key}: {value}")
+                for segment in segments_data:
+                    if hasattr(segment, 'to_dict'):
+                        segment_dict = segment.to_dict()
+                    else:
+                        segment_dict = segment
+                    
+                    # Extract key fields for table
+                    table_row = {
+                        'Ticker': TEST_TICKER,
+                        'Segment': segment_dict.get('segment', 'Unknown'),
+                        'Date': segment_dict.get('date', 'Unknown'),
+                        'Metric': segment_dict.get('metric', 'Unknown'),
+                        'Description': segment_dict.get('description', 'N/A'),
+                        'Value': segment_dict.get('value', 'N/A')
+                    }
+                    table_data.append(table_row)
+                
+                # Create DataFrame and display
+                if table_data:
+                    df = pd.DataFrame(table_data)
+                    print(f"📋 SEGMENTS DATA TABLE ({len(df)} rows):")
+                    print("-" * 120)
+                    print(df.to_string(index=False))
+                    
+                    # Save to CSV
+                    output_dir = Path(__file__).parent / "output"
+                    output_dir.mkdir(exist_ok=True)
+                    
+                    csv_filename = f"factset_segments_data_{TEST_TICKER}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    csv_path = output_dir / csv_filename
+                    
+                    df.to_csv(csv_path, index=False)
+                    print(f"\n✅ Segments data saved to CSV: {csv_path}")
+                    print(f"📊 Table contains {len(df)} rows with segment data for {TEST_TICKER}")
+                else:
+                    print("❌ No segment data found to create table")
             else:
-                print("⚠️  No segments data found - may need different API approach")
-            
-            # Generate HTML report
-            print(f"\n📄 GENERATING SEGMENTS ANALYSIS REPORT...")
-            html_report = generate_segments_report(TEST_TICKER, segments_analysis)
-            
-            # Save HTML report
-            output_dir = Path(__file__).parent / "output"
-            output_dir.mkdir(exist_ok=True)
-            
-            html_filename = f"factset_segments_analysis_{TEST_TICKER}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-            html_path = output_dir / html_filename
-            
-            with open(html_path, 'w', encoding='utf-8') as f:
-                f.write(html_report)
-            
-            print(f"✅ Segments analysis report saved: {html_path}")
-            print(f"🌐 Open the file in your browser to view the detailed analysis")
+                print("⚠️  No segments data found")
             
     finally:
         # Cleanup
