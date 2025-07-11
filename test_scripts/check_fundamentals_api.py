@@ -216,16 +216,29 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
         
         response = fund_api.get_fds_fundamentals_for_list(request)
         
+        # Debug: Print response details
+        print(f"    🔍 Response received: {response is not None}")
+        if response:
+            print(f"    🔍 Response has data attribute: {hasattr(response, 'data')}")
+            if hasattr(response, 'data'):
+                print(f"    🔍 Response data is not None: {response.data is not None}")
+                if response.data:
+                    print(f"    🔍 Response data length: {len(response.data)}")
+        
         if response and hasattr(response, 'data') and response.data:
             data = [item.to_dict() for item in response.data]
             print(f"    ✅ Retrieved {len(data)} data points")
             return data
         else:
             print(f"    ⚠️  No data returned for {ticker}")
+            # Debug: Print what metrics were requested
+            print(f"    🔍 Requested metrics: {metrics[:5]}{'...' if len(metrics) > 5 else ''}")
             return None
             
     except Exception as e:
         print(f"    ❌ Error fetching fundamental data: {e}")
+        print(f"    🔍 Error type: {type(e).__name__}")
+        print(f"    🔍 Requested metrics: {metrics[:5]}{'...' if len(metrics) > 5 else ''}")
         return None
 
 def analyze_data_coverage(data: List[Dict[str, Any]]) -> Dict[str, Any]:
