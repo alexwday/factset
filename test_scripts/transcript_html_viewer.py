@@ -330,105 +330,96 @@ def generate_html(transcript_data: Dict) -> str:
         }}
         
         .section-content.active {{
-            max-height: 2000px;
+            max-height: none;
+            overflow: visible;
             padding: 20px 25px;
         }}
         
-        /* Participants Section */
-        .participants-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 15px;
+        /* Participants Section - Compact */
+        .participants-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }}
         
-        .participant-card {{
+        .participant-item {{
             background: var(--white);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 15px;
-            transition: all 0.3s ease;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 0.9em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }}
         
-        .participant-card:hover {{
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            transform: translateY(-2px);
+        .participant-info {{
+            flex: 1;
         }}
         
         .participant-name {{
             font-weight: 600;
             color: var(--primary-color);
-            margin-bottom: 5px;
         }}
         
         .participant-title {{
             color: var(--gray-color);
-            font-size: 0.9em;
-            margin-bottom: 5px;
+            font-size: 0.85em;
         }}
         
         .participant-type {{
-            display: inline-block;
             background: var(--primary-color);
             color: var(--white);
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 0.8em;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.75em;
             font-weight: 500;
         }}
         
-        /* Transcript Content */
+        /* Transcript Content with Margin Layout */
         .transcript-section {{
             margin-bottom: 30px;
         }}
         
         .speaker-block {{
-            margin-bottom: 20px;
-            background: var(--white);
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            transition: all 0.3s ease;
+            margin-bottom: 25px;
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
         }}
         
-        .speaker-block:hover {{
-            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-        }}
-        
-        .speaker-header {{
-            padding: 15px 20px;
+        .speaker-margin {{
+            flex: 0 0 200px;
+            padding: 15px;
             background: var(--light-color);
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 10px;
-        }}
-        
-        .speaker-info {{
-            display: flex;
-            align-items: center;
-            gap: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            position: sticky;
+            top: 20px;
         }}
         
         .speaker-name {{
             font-weight: 600;
             color: var(--primary-color);
-            font-size: 1.1em;
+            font-size: 1em;
+            margin-bottom: 5px;
         }}
         
         .speaker-title {{
             color: var(--gray-color);
-            font-size: 0.9em;
+            font-size: 0.85em;
+            margin-bottom: 8px;
+            line-height: 1.3;
         }}
         
         .interaction-badge {{
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8em;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75em;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            display: inline-block;
         }}
         
         .question-badge {{
@@ -442,7 +433,11 @@ def generate_html(transcript_data: Dict) -> str:
         }}
         
         .speaker-content {{
+            flex: 1;
+            background: var(--white);
+            border-radius: 8px;
             padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
         }}
         
         .speaker-content p {{
@@ -485,6 +480,16 @@ def generate_html(transcript_data: Dict) -> str:
             .section-content.active {{
                 padding: 15px;
             }}
+            
+            .speaker-block {{
+                flex-direction: column;
+                gap: 15px;
+            }}
+            
+            .speaker-margin {{
+                flex: none;
+                position: static;
+            }}
         }}
     </style>
 </head>
@@ -508,9 +513,6 @@ def generate_html(transcript_data: Dict) -> str:
                 <div class="metadata-item">
                     <strong>Date:</strong> {date}
                 </div>
-                <div class="metadata-item">
-                    <strong>Companies:</strong> {companies}
-                </div>
             </div>
             
             <!-- Participants Section -->
@@ -520,7 +522,7 @@ def generate_html(transcript_data: Dict) -> str:
                     <span class="toggle-icon">▼</span>
                 </button>
                 <div class="section-content" id="participants-content">
-                    <div class="participants-grid">
+                    <div class="participants-list">
                         {participants_html}
                     </div>
                 </div>
@@ -548,13 +550,9 @@ def generate_html(transcript_data: Dict) -> str:
             }}
         }}
         
-        // Initialize: collapse all sections by default
+        // Initialize: all sections collapsed by default
         document.addEventListener('DOMContentLoaded', function() {{
-            // Optionally auto-expand the first section
-            const firstSection = document.querySelector('.expandable-section .section-content');
-            if (firstSection && firstSection.id === 'participants-content') {{
-                toggleSection('participants');
-            }}
+            // All sections start collapsed - no auto-expansion
         }});
     </script>
 </body>
@@ -567,10 +565,11 @@ def generate_html(transcript_data: Dict) -> str:
     for p_id, p_data in transcript_data['participants'].items():
         participant_type = "Company" if p_data['type'] == 'C' else "Analyst" if p_data['type'] == 'A' else p_data['type']
         participants_html += f"""
-        <div class="participant-card">
-            <div class="participant-name">{html.escape(p_data['name'])}</div>
-            <div class="participant-title">{html.escape(p_data['title'])}</div>
-            <div class="participant-title">{html.escape(p_data['affiliation'])}</div>
+        <div class="participant-item">
+            <div class="participant-info">
+                <div class="participant-name">{html.escape(p_data['name'])}</div>
+                <div class="participant-title">{html.escape(p_data['title'])}, {html.escape(p_data['affiliation'])}</div>
+            </div>
             <span class="participant-type">{participant_type}</span>
         </div>"""
     
@@ -605,11 +604,9 @@ def generate_html(transcript_data: Dict) -> str:
             # Build speaker block
             speaker_html = f"""
                     <div class="speaker-block">
-                        <div class="speaker-header">
-                            <div class="speaker-info">
-                                <span class="speaker-name">{html.escape(speaker_name)}</span>
-                                <span class="speaker-title">{html.escape(speaker_title)}</span>
-                            </div>
+                        <div class="speaker-margin">
+                            <div class="speaker-name">{html.escape(speaker_name)}</div>
+                            <div class="speaker-title">{html.escape(speaker_title)}</div>
                             {interaction_badge}
                         </div>
                         <div class="speaker-content">
@@ -637,7 +634,6 @@ def generate_html(transcript_data: Dict) -> str:
     html_output = html_template.format(
         title=html.escape(transcript_data['title']),
         date=html.escape(transcript_data['date']),
-        companies=html.escape(', '.join(transcript_data['companies'])),
         primary_company=html.escape(primary_company),
         logo_url=logo_url,
         participants_count=participants_count,
