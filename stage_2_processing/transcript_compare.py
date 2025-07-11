@@ -572,28 +572,37 @@ class EnhancedTranscriptComparer:
         
         <div class="info-section">
             <div class="info-box">
-                <h4>Normalization Applied</h4>
+                <h4>Normalization Process</h4>
+                <p><strong>Phase 1: Pre-tokenization</strong> (Applied to full text before splitting into words)</p>
                 <ul style="margin: 5px 0; padding-left: 20px;">
-                    <li>$ and CAD treated as equivalent</li>
-                    <li>Case insensitive matching</li>
-                    <li>Hyphens ignored (FX-trading = FX trading)</li>
-                    <li>Possessives removed (Banking's = Banking)</li>
-                    <li>Numbers 1-10 and II normalized to words</li>
-                    <li>Punctuation normalized (. , ; : removed)</li>
-                    <li>% normalized to "percent"</li>
+                    <li>Currency symbols: $4.5 → CAD 4.5 (creates proper token boundaries)</li>
+                    <li>Purpose: Ensures token counts align when one format has attached symbols</li>
                 </ul>
+                <p><strong>Phase 2: Token-level</strong> (Applied during comparison of individual words)</p>
+                <ul style="margin: 5px 0; padding-left: 20px;">
+                    <li>Case insensitive: Slide → slide</li>
+                    <li>Hyphen removal: pre-tax → pretax, FX-trading → FXtrading</li>
+                    <li>Punctuation removal: quarter, → quarter</li>
+                    <li>Possessives: Banking's → Banking</li>
+                    <li>Numbers: 1-10 → words, II → two</li>
+                    <li>Percent symbol: % → percent</li>
+                </ul>
+                <p><strong>Match Types:</strong> Exact (green) = original tokens identical, Normalized (light green) = identical after normalization</p>
             </div>
             <div class="info-box">
-                <h4>Algorithm Used</h4>
-                <p><strong>Sequence Alignment with Normalization</strong></p>
-                <p>The algorithm uses dynamic programming sequence alignment (similar to DNA sequencing) to find optimal matches between transcripts:</p>
+                <h4>Algorithm: Sequence Alignment</h4>
+                <p><strong>Method:</strong> Python's difflib.SequenceMatcher with Ratcliff-Obershelp algorithm</p>
+                <p><strong>Scientific basis:</strong> Dynamic programming approach similar to DNA sequence alignment, finds longest common subsequence</p>
+                <p><strong>Practical application:</strong> Compares normalized token sequences to identify optimal alignment between transcripts</p>
+                <p><strong>Process:</strong></p>
                 <ul style="margin: 5px 0; padding-left: 20px;">
-                    <li>Tokenizes both documents into words</li>
-                    <li>Normalizes tokens using the rules shown</li>
-                    <li>Aligns sequences to maximize matches</li>
-                    <li>Groups consecutive segments of the same type</li>
-                    <li>Handles insertions, deletions, and substitutions</li>
+                    <li>Tokenize: Split text into words using whitespace boundaries</li>
+                    <li>Normalize: Apply token-level rules to create comparable versions</li>
+                    <li>Align: Use SequenceMatcher to find optimal matching between sequences</li>
+                    <li>Classify: Check if aligned tokens are exactly equal or normalized equal</li>
+                    <li>Merge: Group consecutive segments of same type for cleaner display</li>
                 </ul>
+                <p><strong>Handles:</strong> Insertions (missing words), deletions (extra words), substitutions (different words), and transpositions</p>
             </div>
         </div>
         
