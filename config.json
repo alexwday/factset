@@ -276,6 +276,18 @@
       "path_safe_name": "Progressive_Corporation",
       "region": "US",
       "type": "Insurance"
+    },
+    "PDO-CA": {
+      "name": "Precision Drilling Corporation",
+      "path_safe_name": "Precision_Drilling_Corporation",
+      "region": "CA",
+      "type": "Canadian"
+    },
+    "AKBM-NO": {
+      "name": "Aker BioMarine AS",
+      "path_safe_name": "Aker_BioMarine_AS",
+      "region": "NO",
+      "type": "European"
     }
   },
   "api_settings": {
