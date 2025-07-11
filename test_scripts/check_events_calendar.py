@@ -8,6 +8,8 @@ Perfect for seeing what events are scheduled for the institutions we're monitori
 import pandas as pd
 import fds.sdk.EventsandTranscripts
 from fds.sdk.EventsandTranscripts.api import calendar_events_api
+from fds.sdk.EventsandTranscripts.models import CompanyEventRequest, CompanyEventRequestData, CompanyEventRequestDataDateTime, CompanyEventRequestDataUniverse
+from dateutil.parser import parse as dateutil_parser
 import os
 from urllib.parse import quote
 from datetime import datetime, timedelta
@@ -137,40 +139,47 @@ def check_upcoming_events(api_instance: calendar_events_api.CalendarEventsApi,
         
         print(f"🔍 Querying upcoming events from {start_date} to {end_date}")
         
-        # Query events for all monitored institutions
+        # Convert dates to datetime objects for API
+        start_datetime = dateutil_parser(f"{start_date}T00:00:00Z")
+        end_datetime = dateutil_parser(f"{end_date}T23:59:59Z")
+        
+        # Build the request object for all monitored tickers
+        company_event_request = CompanyEventRequest(
+            data=CompanyEventRequestData(
+                date_time=CompanyEventRequestDataDateTime(
+                    start=start_datetime,
+                    end=end_datetime,
+                ),
+                universe=CompanyEventRequestDataUniverse(
+                    symbols=monitored_tickers,
+                    type="Tickers",
+                ),
+                event_types=["Earnings"],
+            ),
+        )
+        
+        print(f"🏦 Checking events for {len(monitored_tickers)} institutions...")
+        
+        # Make the API call
+        response = api_instance.get_company_event(company_event_request)
+        
         upcoming_events = []
         
-        for ticker in monitored_tickers:
-            try:
-                print(f"  🏦 Checking events for {ticker}...")
-                
-                # Use the calendar events API
-                response = api_instance.get_events(
-                    ids=[ticker],
-                    start_date=start_date,
-                    end_date=end_date,
-                    event_type="Earnings",
-                    sort=["-startDateTime"],
-                    pagination_limit=100
-                )
-                
-                if response and hasattr(response, 'data') and response.data:
-                    events = [event.to_dict() for event in response.data]
-                    print(f"    ✅ Found {len(events)} events for {ticker}")
-                    
-                    for event in events:
-                        upcoming_events.append((event, ticker))
-                else:
-                    print(f"    📭 No events found for {ticker}")
-                    
-            except Exception as e:
-                print(f"    ❌ Error querying events for {ticker}: {e}")
-                continue
-        
-        print(f"📊 Found {len(upcoming_events)} total upcoming events")
+        if response and hasattr(response, 'data') and response.data:
+            events = [event.to_dict() for event in response.data]
+            print(f"📊 Found {len(events)} total events")
+            
+            for event in events:
+                # Extract ticker from event data
+                ticker = event.get('ticker', 'Unknown')
+                if ticker in monitored_tickers:
+                    upcoming_events.append((event, ticker))
+                    print(f"  ✅ {ticker}: {event.get('event_type', 'Unknown')} on {event.get('event_date_time', 'Unknown')[:10]}")
+        else:
+            print(f"📭 No events found for the specified date range")
         
         # Sort by event date
-        upcoming_events.sort(key=lambda x: x[0].get('start_date_time', ''))
+        upcoming_events.sort(key=lambda x: x[0].get('event_date_time', ''))
         
         return upcoming_events
         
@@ -180,8 +189,9 @@ def check_upcoming_events(api_instance: calendar_events_api.CalendarEventsApi,
 
 def format_event_info(event: Dict[str, Any], ticker: str) -> str:
     """Format event information for display."""
-    event_date = event.get('start_date_time', 'Unknown')[:10]  # Extract date part
-    event_time = event.get('start_date_time', 'Unknown')[11:16] if len(event.get('start_date_time', '')) > 10 else 'Unknown'
+    event_datetime = event.get('event_date_time', 'Unknown')
+    event_date = event_datetime[:10] if len(event_datetime) > 10 else 'Unknown'
+    event_time = event_datetime[11:16] if len(event_datetime) > 10 else 'Unknown'
     event_type = event.get('event_type', 'Unknown')
     event_id = event.get('event_id', 'Unknown')
     webcast_status = event.get('webcast_status', 'Unknown')
@@ -246,7 +256,7 @@ def main():
                 # Group by date
                 by_date = {}
                 for event, ticker in upcoming_events:
-                    event_date = event.get('start_date_time', 'Unknown')[:10]
+                    event_date = event.get('event_date_time', 'Unknown')[:10]
                     if event_date not in by_date:
                         by_date[event_date] = []
                     by_date[event_date].append((event, ticker))
@@ -262,7 +272,7 @@ def main():
                     print(f"📅 {date} ({len(events_on_date)} events):")
                     
                     for event, ticker in events_on_date:
-                        institution_name = config['monitored_institutions'][ticker]['name']
+                        institution_name = config['monitored_institutions'].get(ticker, {}).get('name', ticker)
                         print(f"  🏦 {institution_name} ({ticker})")
                         print(f"    {format_event_info(event, ticker)}")
                         
