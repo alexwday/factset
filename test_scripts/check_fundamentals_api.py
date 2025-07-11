@@ -9,6 +9,10 @@ import pandas as pd
 import fds.sdk.FactSetFundamentals
 from fds.sdk.FactSetFundamentals.api import metrics_api, fact_set_fundamentals_api
 from fds.sdk.FactSetFundamentals.models import *
+from fds.sdk.FactSetFundamentals.model.ids_batch_max30000 import IdsBatchMax30000
+from fds.sdk.FactSetFundamentals.model.metrics import Metrics
+from fds.sdk.FactSetFundamentals.model.periodicity import Periodicity
+from fds.sdk.FactSetFundamentals.model.update_type import UpdateType
 import os
 from urllib.parse import quote
 from datetime import datetime, timedelta
@@ -181,15 +185,21 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
         end_date = datetime.now().date()
         start_date = end_date - timedelta(days=3*365)
         
-        # Create request object with proper data structure
+        # Create request object with proper model class wrapping
+        # CRITICAL: All parameters must be wrapped in their respective model classes
+        ids_instance = IdsBatchMax30000([ticker])
+        metrics_instance = Metrics(metrics)
+        periodicity_instance = Periodicity(periodicity)
+        update_type_instance = UpdateType("RP")
+        
         request_data = FundamentalRequestBody(
-            ids=[ticker],
-            metrics=metrics,
-            periodicity=periodicity,
+            ids=ids_instance,
+            metrics=metrics_instance,
+            periodicity=periodicity_instance,
             fiscal_period_start=start_date.strftime('%Y-%m-%d'),
             fiscal_period_end=end_date.strftime('%Y-%m-%d'),
             currency=currency,
-            update_type="RP"
+            update_type=update_type_instance
         )
         
         request = FundamentalsRequest(data=request_data)
@@ -532,7 +542,8 @@ def main():
         proxy=proxy_url,
         ssl_ca_cert=temp_cert_path
     )
-    # Note: Different authentication method may be needed for Fundamentals API
+    # CRITICAL: Add authentication token (missing in original code)
+    configuration.get_basic_auth_token()
     print("✅ FactSet Fundamentals API client configured")
     
     try:
