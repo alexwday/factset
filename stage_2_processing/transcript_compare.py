@@ -91,13 +91,20 @@ class EnhancedTranscriptComparer:
         normalized = re.sub(r'\bAll-Bank\b', 'All Bank', normalized)
         normalized = re.sub(r'\bshorter-duration\b', 'shorter duration', normalized)
         
-        # Common prefixes - convert to spaced versions to match tokenization
-        # This handles pretax vs pre-tax, requeue vs re-queue, etc.
-        normalized = re.sub(r'\b(pre|post|re|co|multi|non|anti|de|dis|mis|over|under|sub|super)-(\w+)', r'\1 \2', normalized)
+        # Handle hyphenated versions by converting to spaced versions
+        # This handles pre-tax, re-queue, etc. when they appear with hyphens
+        normalized = re.sub(r'\bpre-tax\b', 'pre tax', normalized)
+        normalized = re.sub(r'\bre-queue\b', 're queue', normalized)
+        normalized = re.sub(r'\bpost-paid\b', 'post paid', normalized)
+        normalized = re.sub(r'\bnon-bank\b', 'non bank', normalized)
+        normalized = re.sub(r'\bnon-interest\b', 'non interest', normalized)
+        normalized = re.sub(r'\bmulti-family\b', 'multi family', normalized)
         
-        # Also handle compound words that should be split
-        # Convert "pretax" to "pre tax", "requeue" to "re queue", etc.
-        normalized = re.sub(r'\b(pre|post|re|co|multi|non|anti|de|dis|mis|over|under|sub|super)(\w+)', r'\1 \2', normalized)
+        # Handle non-hyphenated compound words that should be split
+        # Only include the most common financial terms that definitely appear both ways
+        normalized = re.sub(r'\bpretax\b', 'pre tax', normalized)
+        normalized = re.sub(r'\brequeue\b', 're queue', normalized)
+        normalized = re.sub(r'\bnonbank\b', 'non bank', normalized)
         
         return normalized
     
