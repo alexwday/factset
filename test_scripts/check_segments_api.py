@@ -219,9 +219,9 @@ def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str, available
     print(f"📊 Testing segments data retrieval for {ticker}...")
     
     try:
-        # Create date range for recent data
+        # Create date range for recent data (last 6 months to get latest quarterly data)
         end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=365)
+        start_date = end_date - timedelta(days=180)
         
         # Create request object with proper model class wrapping
         ids_instance = IdsBatchMax30000([ticker])
@@ -230,16 +230,17 @@ def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str, available
         test_metrics = available_metrics[:20]  
         print(f"📊 Testing with {len(test_metrics)} discovered metrics: {test_metrics[:5]}{'...' if len(test_metrics) > 5 else ''}")
         
+        # Test both quarterly and annual data to see what's available
         test_configs = [
             {
-                "name": "Business Segments - Annual",
+                "name": "Business Segments - Quarterly",
                 "segment_type": SegmentType("BUS"),
-                "periodicity": SegmentsPeriodicity("ANN"),
+                "periodicity": SegmentsPeriodicity("QTR"),
                 "metrics": test_metrics
             },
             {
-                "name": "Geographic Segments - Annual", 
-                "segment_type": SegmentType("GEO"),
+                "name": "Business Segments - Annual",
+                "segment_type": SegmentType("BUS"),
                 "periodicity": SegmentsPeriodicity("ANN"),
                 "metrics": test_metrics
             }
@@ -264,7 +265,7 @@ def test_segments_data(seg_api: segments_api.SegmentsApi, ticker: str, available
                 
                 for metric in config["metrics"]:
                     try:
-                        print(f"    📊 Testing metric: {metric}")
+                        print(f"    📊 Testing metric: {metric} ({config['periodicity']})")
                         
                         # Create request body for single metric
                         segment_request_body = SegmentRequestBody(
