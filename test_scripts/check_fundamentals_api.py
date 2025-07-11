@@ -173,25 +173,48 @@ def get_available_metrics(data_api: metrics_api.MetricsApi) -> Dict[str, List[Di
     return all_metrics
 
 def group_metrics_by_data_type(metrics: List[Dict[str, Any]]) -> Dict[str, List[str]]:
-    """Group metric codes by their data type for consistent API requests."""
+    """Group metric codes by their data type for consistent API requests.
+    
+    CRITICAL: FactSet API does not support mixing data types in single request.
+    Array types (floatArray, doubleArray, etc.) need separate processing.
+    """
     grouped = {}
+    array_types = ['floatArray', 'doubleArray', 'intArray', 'stringArray']
+    
     for metric in metrics:
         data_type = metric.get('data_type', 'Unknown')
         metric_code = metric.get('metric')
+        
         if data_type not in grouped:
             grouped[data_type] = []
         if metric_code:
             grouped[data_type].append(metric_code)
+    
+    # Debug: Show array vs scalar type breakdown
+    array_count = sum(len(grouped.get(dt, [])) for dt in array_types if dt in grouped)
+    scalar_count = sum(len(metrics) for dt, metrics in grouped.items() if dt not in array_types)
+    
+    if array_count > 0:
+        print(f"    🔍 Found {array_count} array-type metrics, {scalar_count} scalar-type metrics")
+    
     return grouped
 
 def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentalsApi, 
                         ticker: str, 
                         metrics: List[str], 
                         periodicity: str = "QTR",
-                        currency: str = "CAD") -> Optional[List[Dict[str, Any]]]:
+                        currency: str = "CAD",
+                        data_type: str = "float") -> Optional[List[Dict[str, Any]]]:
     """Get fundamental data for specific metrics."""
     try:
-        print(f"  📈 Fetching {len(metrics)} metrics for {ticker} ({periodicity}, {currency})")
+        array_types = ['floatArray', 'doubleArray', 'intArray', 'stringArray']
+        is_array_type = data_type in array_types
+        
+        print(f"  📈 Fetching {len(metrics)} {data_type} metrics for {ticker} ({periodicity}, {currency})")
+        
+        # Special handling for array types
+        if is_array_type:
+            print(f"    🔍 Processing array-type metrics ({data_type}) - may need extended time")
         
         # Add date range for recent data (last 3 years)
         end_date = datetime.now().date()
@@ -638,12 +661,20 @@ def main():
                             if not metric_codes:
                                 continue
                                 
-                            # Limit to first 20 metrics per data type to avoid API limits
-                            test_metrics = metric_codes[:20]
+                            # Adjust batch size based on data type
+                            array_types = ['floatArray', 'doubleArray', 'intArray', 'stringArray']
+                            if data_type in array_types:
+                                # Array types may need smaller batches due to multi-dimensional data
+                                batch_size = 5
+                            else:
+                                # Regular scalar types can handle larger batches
+                                batch_size = 20
+                            
+                            test_metrics = metric_codes[:batch_size]
                             print(f"    📊 Testing {len(test_metrics)} {data_type} metrics...")
                             
                             data = get_fundamental_data(
-                                fund_api, TEST_TICKER, test_metrics, periodicity, currency
+                                fund_api, TEST_TICKER, test_metrics, periodicity, currency, data_type
                             )
                             
                             if data:
