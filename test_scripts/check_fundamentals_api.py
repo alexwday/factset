@@ -181,16 +181,18 @@ def get_fundamental_data(fund_api: fact_set_fundamentals_api.FactSetFundamentals
         end_date = datetime.now().date()
         start_date = end_date - timedelta(days=3*365)
         
-        # Create request object
-        request = FundamentalsRequest(
+        # Create request object with proper data structure
+        request_data = FundamentalRequestBody(
             ids=[ticker],
             metrics=metrics,
             periodicity=periodicity,
             fiscal_period_start=start_date.strftime('%Y-%m-%d'),
             fiscal_period_end=end_date.strftime('%Y-%m-%d'),
             currency=currency,
-            restated="RP"
+            update_type="RP"
         )
+        
+        request = FundamentalsRequest(data=request_data)
         
         response = fund_api.get_fds_fundamentals_for_list(request)
         
