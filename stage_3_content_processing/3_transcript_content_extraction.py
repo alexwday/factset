@@ -779,12 +779,11 @@ def main() -> None:
             
             logger.info(f"Processing file {i}/{len(files_to_process)}: {filename}")
             
-            # Download XML file from NAS
-            nas_file_path = nas_path_join(NAS_BASE_PATH, file_path)
-            xml_content = nas_download_file(nas_conn, nas_file_path)
+            # Download XML file from NAS (file_path already contains full path from share root)
+            xml_content = nas_download_file(nas_conn, file_path)
             
             if not xml_content:
-                error_logger.log_download_error(nas_file_path, "Failed to download XML file")
+                error_logger.log_download_error(file_path, "Failed to download XML file")
                 continue
             
             # Extract paragraph-level content
