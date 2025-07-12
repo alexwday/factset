@@ -409,6 +409,17 @@ def nas_list_files(conn: SMBConnection, directory_path: str) -> List[str]:
         logger.debug(f"Failed to list files in {directory_path}: {e}")
         return []
 
+def nas_list_directories(conn: SMBConnection, directory_path: str) -> List[str]:
+    """List subdirectories in a NAS directory."""
+    global logger
+    try:
+        files = conn.listPath(NAS_SHARE_NAME, directory_path)
+        return [file_info.filename for file_info in files 
+                if file_info.isDirectory and file_info.filename not in ['.', '..']]
+    except Exception as e:
+        logger.debug(f"Failed to list directories in {directory_path}: {e}")
+        return []
+
 def validate_file_path(path: str) -> bool:
     """Validate file path for security."""
     if not path or not isinstance(path, str):
@@ -763,8 +774,38 @@ def get_existing_files_with_version_management(nas_conn: SMBConnection, ticker: 
     path_safe_name = institution_info.get('path_safe_name', ticker)
     ticker_folder_name = f"{ticker}_{path_safe_name}"
     
-    institution_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", institution_type, ticker_folder_name, transcript_type)
-    all_files = nas_list_files(nas_conn, institution_path)
+    # Search across ALL quarterly folders in enhanced structure
+    data_base_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data")
+    all_files = []
+    
+    # Get all years and quarters from enhanced structure
+    file_paths = {}  # Track filename -> full_path mapping
+    try:
+        years = nas_list_directories(nas_conn, data_base_path)
+        for year in years:
+            if year == "Unknown":
+                continue
+            year_path = nas_path_join(data_base_path, year)
+            quarters = nas_list_directories(nas_conn, year_path)
+            for quarter in quarters:
+                if quarter == "Unknown":
+                    continue
+                # Check this quarterly path for our institution
+                institution_path = nas_path_join(year_path, quarter, institution_type, ticker_folder_name, transcript_type)
+                quarterly_files = nas_list_files(nas_conn, institution_path)
+                # Track full paths for each file
+                for filename in quarterly_files:
+                    file_paths[filename] = nas_path_join(institution_path, filename)
+                all_files.extend(quarterly_files)
+                logger.debug(f"Found {len(quarterly_files)} files in {year}/{quarter} for {ticker}")
+    except Exception as e:
+        logger.debug(f"Enhanced structure search failed for {ticker}, trying legacy structure: {e}")
+        # Fallback to legacy structure if enhanced structure doesn't exist
+        legacy_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", institution_type, ticker_folder_name, transcript_type)
+        legacy_files = nas_list_files(nas_conn, legacy_path)
+        for filename in legacy_files:
+            file_paths[filename] = nas_path_join(legacy_path, filename)
+        all_files = legacy_files
     
     # Group files by version-agnostic key
     version_groups = {}
@@ -778,7 +819,7 @@ def get_existing_files_with_version_management(nas_conn: SMBConnection, ticker: 
         version_groups[version_agnostic_key].append({
             'filename': filename,
             'version_id': version_id,
-            'full_path': nas_path_join(institution_path, filename)
+            'full_path': file_paths[filename]
         })
     
     # Keep only the latest version of each transcript
