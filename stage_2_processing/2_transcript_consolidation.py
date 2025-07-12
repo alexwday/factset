@@ -833,8 +833,16 @@ def get_all_files_with_metadata(
         
         # Parse metadata from filename
         parts = filename.replace(".xml", "").split("_")
-        event_id = parts[4] if len(parts) > 4 else "unknown"
-        report_id = parts[5] if len(parts) > 5 else "unknown"
+        # Handle both formats: with and without event_type field
+        if len(parts) >= 7:  # Full format: {ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}
+            event_id = parts[4]
+            report_id = parts[5]
+        elif len(parts) >= 6:  # Missing event_type: {ticker}_{date}_{transcript_type}_{event_id}_{report_id}_{version_id}
+            event_id = parts[3]
+            report_id = parts[4]
+        else:
+            event_id = "unknown"
+            report_id = "unknown"
         
         file_record = {
             "filename": filename,
@@ -1055,10 +1063,18 @@ def create_file_record(
     version_id = parse_version_from_filename(filename)
     version_agnostic_key = get_version_agnostic_key_from_filename(filename)
 
-    # Parse metadata from filename (ticker_date_event_type_eventid_reportid_versionid.xml)
+    # Parse metadata from filename
     parts = filename.replace(".xml", "").split("_")
-    event_id = parts[4] if len(parts) > 4 else "unknown"
-    report_id = parts[5] if len(parts) > 5 else "unknown"
+    # Handle both formats: with and without event_type field
+    if len(parts) >= 7:  # Full format: {ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}
+        event_id = parts[4]
+        report_id = parts[5]
+    elif len(parts) >= 6:  # Missing event_type: {ticker}_{date}_{transcript_type}_{event_id}_{report_id}_{version_id}
+        event_id = parts[3]
+        report_id = parts[4]
+    else:
+        event_id = "unknown"
+        report_id = "unknown"
 
     return {
         "filename": filename,
