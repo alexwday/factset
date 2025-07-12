@@ -833,8 +833,20 @@ def get_all_files_with_metadata(
         
         # Parse metadata from filename
         parts = filename.replace(".xml", "").split("_")
-        event_id = parts[4] if len(parts) > 4 else "unknown"
-        report_id = parts[5] if len(parts) > 5 else "unknown"
+        # Based on Stage 0 format: {ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}
+        # But check if missing event_type field by looking at transcript_type position
+        if len(parts) >= 7 and parts[3] == transcript_type:
+            # Full format: parts[4] = event_id, parts[5] = report_id
+            event_id = parts[4]
+            report_id = parts[5]
+        elif len(parts) >= 6 and parts[2] == transcript_type:
+            # Missing event_type: parts[3] = event_id, parts[4] = report_id  
+            event_id = parts[3]
+            report_id = parts[4]
+        else:
+            # Fallback: use original positions but default to unknown if parsing fails
+            event_id = parts[4] if len(parts) > 4 else "unknown"
+            report_id = parts[5] if len(parts) > 5 else "unknown"
         
         file_record = {
             "filename": filename,
@@ -1055,10 +1067,21 @@ def create_file_record(
     version_id = parse_version_from_filename(filename)
     version_agnostic_key = get_version_agnostic_key_from_filename(filename)
 
-    # Parse metadata from filename (ticker_date_event_type_eventid_reportid_versionid.xml)
+    # Parse metadata from filename
     parts = filename.replace(".xml", "").split("_")
-    event_id = parts[4] if len(parts) > 4 else "unknown"
-    report_id = parts[5] if len(parts) > 5 else "unknown"
+    # Handle both formats by checking part count and content
+    if len(parts) >= 7:
+        # Full format: {ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}
+        event_id = parts[4]
+        report_id = parts[5]
+    elif len(parts) == 6:
+        # Missing event_type: {ticker}_{date}_{transcript_type}_{event_id}_{report_id}_{version_id}
+        event_id = parts[3]
+        report_id = parts[4]
+    else:
+        # Fallback for unexpected formats
+        event_id = parts[4] if len(parts) > 4 else "unknown"
+        report_id = parts[5] if len(parts) > 5 else "unknown"
 
     return {
         "filename": filename,
