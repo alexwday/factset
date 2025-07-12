@@ -831,22 +831,21 @@ def get_all_files_with_metadata(
             call_type = "unknown"  
             call_suffix = None
         
-        # Parse metadata from filename
+        # Parse metadata from filename  
         parts = filename.replace(".xml", "").split("_")
-        # Based on Stage 0 format: {ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}
-        # But check if missing event_type field by looking at transcript_type position
-        if len(parts) >= 7 and parts[3] == transcript_type:
-            # Full format: parts[4] = event_id, parts[5] = report_id
+        # Actual format: RY_CA_2024-01-25_Earnings_Corrected_12345_67890_1
+        # parts[0]: RY, parts[1]: CA, parts[2]: date, parts[3]: event_type, parts[4]: transcript_type, parts[5]: event_id, parts[6]: report_id, parts[7]: version_id
+        if len(parts) >= 8:
+            # Full format with ticker containing underscore
+            event_id = parts[5]
+            report_id = parts[6]
+        elif len(parts) >= 7:
+            # Missing event_type or different format
             event_id = parts[4]
             report_id = parts[5]
-        elif len(parts) >= 6 and parts[2] == transcript_type:
-            # Missing event_type: parts[3] = event_id, parts[4] = report_id  
-            event_id = parts[3]
-            report_id = parts[4]
         else:
-            # Fallback: use original positions but default to unknown if parsing fails
-            event_id = parts[4] if len(parts) > 4 else "unknown"
-            report_id = parts[5] if len(parts) > 5 else "unknown"
+            event_id = "unknown"
+            report_id = "unknown"
         
         file_record = {
             "filename": filename,
@@ -1069,19 +1068,19 @@ def create_file_record(
 
     # Parse metadata from filename
     parts = filename.replace(".xml", "").split("_")
-    # Handle both formats by checking part count and content
-    if len(parts) >= 7:
-        # Full format: {ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}
+    # Actual format: RY_CA_2024-01-25_Earnings_Corrected_12345_67890_1
+    # parts[0]: RY, parts[1]: CA, parts[2]: date, parts[3]: event_type, parts[4]: transcript_type, parts[5]: event_id, parts[6]: report_id, parts[7]: version_id
+    if len(parts) >= 8:
+        # Full format with ticker containing underscore
+        event_id = parts[5]
+        report_id = parts[6]
+    elif len(parts) >= 7:
+        # Missing event_type or different format
         event_id = parts[4]
         report_id = parts[5]
-    elif len(parts) == 6:
-        # Missing event_type: {ticker}_{date}_{transcript_type}_{event_id}_{report_id}_{version_id}
-        event_id = parts[3]
-        report_id = parts[4]
     else:
-        # Fallback for unexpected formats
-        event_id = parts[4] if len(parts) > 4 else "unknown"
-        report_id = parts[5] if len(parts) > 5 else "unknown"
+        event_id = "unknown"
+        report_id = "unknown"
 
     return {
         "filename": filename,
