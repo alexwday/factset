@@ -524,15 +524,14 @@ def parse_transcript_xml(xml_content: bytes) -> Dict:
     }
 
 
-def format_speaker_string(participant_data: Dict) -> Tuple[str, str]:
+def format_speaker_string(participant_data: Dict) -> str:
     """
     Format speaker information into a clean string.
-    Returns (speaker_string, speaker_type)
+    Returns speaker_string
     """
     name = participant_data.get('name', 'Unknown Speaker')
     title = participant_data.get('title', '')
     affiliation = participant_data.get('affiliation', '')
-    participant_type = participant_data.get('type', '')
     
     # Build speaker string: "Name, Title, Affiliation"
     parts = [name]
@@ -543,14 +542,7 @@ def format_speaker_string(participant_data: Dict) -> Tuple[str, str]:
     
     speaker_string = ", ".join(parts)
     
-    # Determine speaker type description
-    speaker_type = {
-        'C': 'Company',
-        'A': 'Analyst', 
-        'O': 'Other'
-    }.get(participant_type, 'Unknown')
-    
-    return speaker_string, speaker_type
+    return speaker_string
 
 
 def determine_qa_flag(speaker_type: str) -> Optional[str]:
@@ -591,7 +583,7 @@ def extract_transcript_paragraphs(
                 speaker_info = transcript_data['participants'].get(speaker_id, {})
                 
                 # Format speaker as string
-                speaker_string, speaker_type_desc = format_speaker_string(speaker_info)
+                speaker_string = format_speaker_string(speaker_info)
                 
                 # Determine Q&A flag
                 qa_flag = determine_qa_flag(speaker_type)
@@ -604,12 +596,11 @@ def extract_transcript_paragraphs(
                         paragraph_record = {
                             **original_record,  # All fields from Stage 2
                             
-                            # New Stage 3 fields
+                            # New Stage 3 fields (reordered)
                             "section_name": section_name,
-                            "speaker": speaker_string,
-                            "speaker_type": speaker_type_desc,
-                            "question_answer_flag": qa_flag,
                             "paragraph_order": global_paragraph_order,
+                            "question_answer_flag": qa_flag,
+                            "speaker": speaker_string,
                             "paragraph_content": paragraph_text.strip()
                         }
                         
