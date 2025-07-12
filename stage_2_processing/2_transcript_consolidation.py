@@ -831,10 +831,16 @@ def get_all_files_with_metadata(
             call_type = "unknown"  
             call_suffix = None
         
-        # Parse metadata from filename
+        # Parse metadata from filename: {ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml
         parts = filename.replace(".xml", "").split("_")
         event_id = parts[4] if len(parts) > 4 else "unknown"
         report_id = parts[5] if len(parts) > 5 else "unknown"
+        
+        # Debug: Log filename parsing to identify issue
+        logger.debug(f"Filename: {filename}")
+        logger.debug(f"Parts: {parts}")
+        logger.debug(f"Event ID (parts[4]): {event_id}")
+        logger.debug(f"Report ID (parts[5]): {report_id}")
         
         file_record = {
             "filename": filename,
@@ -1055,10 +1061,16 @@ def create_file_record(
     version_id = parse_version_from_filename(filename)
     version_agnostic_key = get_version_agnostic_key_from_filename(filename)
 
-    # Parse metadata from filename (ticker_date_event_type_eventid_reportid_versionid.xml)
+    # Parse metadata from filename: {ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml
     parts = filename.replace(".xml", "").split("_")
     event_id = parts[4] if len(parts) > 4 else "unknown"
     report_id = parts[5] if len(parts) > 5 else "unknown"
+    
+    # Debug: Log filename parsing to identify issue
+    logger.debug(f"create_file_record - Filename: {filename}")
+    logger.debug(f"create_file_record - Parts: {parts}")
+    logger.debug(f"create_file_record - Event ID (parts[4]): {event_id}")
+    logger.debug(f"create_file_record - Report ID (parts[5]): {report_id}")
 
     return {
         "filename": filename,
