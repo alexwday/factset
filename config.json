@@ -314,5 +314,13 @@
     "transcript_type_priority": ["Corrected", "Raw", "NearRealTime"],
     "include_xml_content": false,
     "description": "Transcript consolidation and database management"
+  },
+  "stage_3": {
+    "dev_mode": true,
+    "dev_max_files": 2,
+    "input_source": "Outputs/Refresh/files_to_process.json",
+    "output_file": "extracted_transcript_sections.json",
+    "output_path": "Outputs/Refresh",
+    "description": "XML content extraction and paragraph-level breakdown"
   }
 }

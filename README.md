@@ -13,6 +13,7 @@ factset/
 ├── stage_0_bulk_refresh/                  # Historical bulk download (optional)
 ├── stage_1_daily_sync/                    # Daily incremental sync (scheduled)
 ├── stage_2_processing/                    # Transcript consolidation & change detection
+├── stage_3_content_processing/            # XML content extraction & paragraph breakdown
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -82,12 +83,16 @@ python stage_1_daily_sync/earnings_monitor.py
 
 # Stage 2: Transcript consolidation and change detection (implemented)
 python stage_2_processing/2_transcript_consolidation.py
+
+# Stage 3: XML content extraction and paragraph-level breakdown (implemented)
+python stage_3_content_processing/3_transcript_content_extraction.py
 ```
 
 **Current Status**: 
 - Stage 0 is production-ready with enhanced fiscal quarter organization ✅
 - Stage 1 is production-ready with enhanced folder structure and comprehensive error logging ✅
 - Stage 2 is production-ready with transcript consolidation and change detection ✅
+- Stage 3 is production-ready with XML content extraction and paragraph-level breakdown ✅
 - All stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
 
 ## Testing from Work Environment
@@ -336,6 +341,22 @@ Provides detailed summary including:
   - Delta detection for changed/new/removed files
   - Processing queues (files_to_process.json, files_to_remove.json)
 - **Usage**: `python stage_2_processing/2_transcript_consolidation.py`
+
+### Stage 3: XML Content Extraction ✅ PRODUCTION READY
+- **Purpose**: Process XML transcripts and extract paragraph-level content with speaker attribution
+- **When to use**: After Stage 2 creates processing queues
+- **Input**: files_to_process.json from Stage 2 output
+- **Output**: extracted_transcript_sections.json with paragraph-level database records
+- **Features**:
+  - Development mode (process only 1-2 files for testing)
+  - Complete field preservation from Stage 2 input
+  - Paragraph-level breakdown with sequential ordering
+  - Speaker attribution with formatted strings (Name, Title, Affiliation)
+  - Q&A detection (question/answer flags from XML)
+  - Section tracking (Presentation, Q&A Session, etc.)
+  - Enhanced error logging with separate JSON files
+- **Usage**: `python stage_3_content_processing/3_transcript_content_extraction.py`
+- **Development**: Set `"dev_mode": true` in config.json to process limited files during testing
 
 ## Configuration
 
