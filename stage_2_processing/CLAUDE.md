@@ -16,36 +16,67 @@ Stage 2 identifies the optimal single transcript per company per fiscal quarter/
 - **Stage 2**: Consolidate to single best transcript and manage master inventory
 - **Focus**: File selection, database management, and change detection (no AI processing)
 
-## File Selection Algorithm
+## Enhanced File Selection Algorithm
 
-### Three-Tier Priority System
+### Multi-Call Handling System
 
-#### **Tier 1: Transcript Type Priority**
+Stage 2 now handles multiple earnings calls per quarter by implementing a **4-tier enhanced selection system**:
+
+#### **Tier 1: Primary Call Detection**
+Uses XML title analysis to identify call types:
+- **Primary**: Exact match `"Q1 2024 Earnings Call"` pattern
+- **Secondary**: Suffix pattern `"Q1 2024 Earnings Call - Fixed Income"`  
+- **Other**: Non-standard earnings call titles
+
+#### **Tier 2: Transcript Type Priority**
 Configurable priority order (default: `["Corrected", "Raw", "NearRealTime"]`):
 1. **Corrected** (Priority 1): Manually edited for accuracy - highest quality
 2. **Raw** (Priority 2): Original transcript as received from earnings call
 3. **NearRealTime** (Priority 3): Real-time capture during live call
 
-#### **Tier 2: Version ID Priority**
-Within same transcript type:
+#### **Tier 3: Version ID Priority**
+Within same call and transcript type:
 - Highest `version_id` number wins (latest vendor update)
-- Uses `parse_version_from_filename()` from Stage 1
 - Groups by version-agnostic key to identify same transcript
 
-#### **Tier 3: Date Modified Priority**
+#### **Tier 4: Date Modified Priority**
 Final tiebreaker:
 - Latest `date_last_modified` timestamp wins
-- Handles edge cases where multiple unique files exist
+- Handles edge cases where multiple files remain
 
-### Selection Logic Flow
+### Enhanced Selection Logic Flow
 ```python
 for company+quarter+year:
-    for transcript_type in priority_order:
-        files = get_files_in_folder(transcript_type)
-        if files:
-            best_file = apply_version_and_date_selection(files)
-            return best_file  # First priority type with files wins
-    return None  # No transcripts found
+    all_calls = collect_all_earnings_calls_across_types()
+    
+    # Step 1: Find primary earnings calls
+    primary_calls = filter_by_call_type("primary")
+    if primary_calls:
+        return apply_3_tier_selection(primary_calls)
+    
+    # Step 2: Fallback to any earnings calls
+    earnings_calls = filter_by_pattern("Earnings Call")
+    if earnings_calls:
+        return apply_3_tier_selection(earnings_calls)
+    
+    # Step 3: Best available with warning
+    return apply_3_tier_selection(all_calls)
+```
+
+### Call Classification Algorithm
+```python
+def classify_earnings_call(title):
+    if re.match(r"^Q[1-4] 20\d{2} Earnings Call$", title):
+        return "primary", None
+    
+    suffix_match = re.search(r"Earnings Call\s*-\s*(.+)$", title)
+    if suffix_match:
+        return "secondary", suffix_match.group(1)
+    
+    if "Earnings Call" in title and " - " not in title:
+        return "primary", None
+    
+    return "other", None
 ```
 
 ## Master Database Schema
@@ -70,7 +101,11 @@ for company+quarter+year:
       "filename": "RY-CA_2024-01-25_Earnings_Corrected_12345_67890_1.xml",
       "date_last_modified": "2024-01-25T15:30:00Z",
       "selection_priority": 1,
-      "version_agnostic_key": "RY-CA_2024-01-25_Earnings_Corrected_12345_67890"
+      "version_agnostic_key": "RY-CA_2024-01-25_Earnings_Corrected_12345_67890",
+      "title": "Q1 2024 Earnings Call",
+      "call_type": "primary",
+      "call_suffix": null,
+      "selection_reason": "primary_earnings_call"
     }
   ]
 }

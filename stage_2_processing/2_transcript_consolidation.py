@@ -579,6 +579,51 @@ def parse_quarter_and_year_from_xml(
         return None, None
 
 
+def extract_title_from_xml(xml_content: bytes) -> Optional[str]:
+    """Extract title from transcript XML."""
+    try:
+        root = ET.parse(io.BytesIO(xml_content)).getroot()
+        namespace = ""
+        if root.tag.startswith("{"):
+            namespace = root.tag.split("}")[0] + "}"
+
+        meta = root.find(f"{namespace}meta" if namespace else "meta")
+        if meta is None:
+            return None
+
+        title_elem = meta.find(f"{namespace}title" if namespace else "title")
+        if title_elem is None or not title_elem.text:
+            return None
+
+        return title_elem.text.strip()
+    except Exception as e:
+        logger.error(f"Error extracting title from XML: {e}")
+        return None
+
+
+def classify_earnings_call(title: str) -> Tuple[str, Optional[str]]:
+    """Classify earnings call type based on title.
+    Returns (call_type, call_suffix)
+    """
+    if not title:
+        return "unknown", None
+    
+    # Check for exact main earnings call pattern
+    if re.match(r"^Q[1-4] 20\d{2} Earnings Call$", title):
+        return "primary", None
+    
+    # Check for earnings call with suffix
+    suffix_match = re.search(r"Earnings Call\s*-\s*(.+)$", title)
+    if suffix_match:
+        return "secondary", suffix_match.group(1).strip()
+    
+    # Check if it's still an earnings call without suffix
+    if "Earnings Call" in title and " - " not in title:
+        return "primary", None
+    
+    return "other", None
+
+
 def parse_version_from_filename(filename: str) -> Optional[int]:
     """Extract version number from filename. Returns None if not found or invalid."""
     global logger
@@ -657,26 +702,34 @@ def scan_nas_for_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any
                     company_path = nas_path_join(type_path, company)
                     transcript_types = nas_list_directories(nas_conn, company_path)
 
-                    # Process transcript type folders in priority order
-                    selected_file = None
+                    # Collect ALL earnings calls for this company+quarter+year
+                    all_quarterly_calls = []
                     for priority_type in config["stage_2"]["transcript_type_priority"]:
                         if priority_type in transcript_types:
                             type_path_full = nas_path_join(company_path, priority_type)
                             files = nas_list_files(nas_conn, type_path_full)
 
                             if files:
-                                # Apply version management and date selection
-                                selected_file = select_best_file_from_type(
+                                # Get all files with their metadata
+                                type_files = get_all_files_with_metadata(
                                     nas_conn,
                                     type_path_full,
                                     files,
                                     ticker,
                                     quarter,
                                     year,
+                                    priority_type
                                 )
-                                if selected_file:
-                                    selected_file["transcript_type"] = priority_type
-                                    break
+                                all_quarterly_calls.extend(type_files)
+                    
+                    # Select the primary earnings call from all available
+                    selected_file = select_primary_earnings_call(
+                        nas_conn,
+                        all_quarterly_calls,
+                        ticker,
+                        quarter,
+                        year
+                    )
 
                     if selected_file:
                         # Create comparison key
@@ -703,6 +756,10 @@ def scan_nas_for_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any
                             "version_agnostic_key": selected_file.get(
                                 "version_agnostic_key", ""
                             ),
+                            "title": selected_file.get("title", ""),
+                            "call_type": selected_file.get("call_type", "unknown"),
+                            "call_suffix": selected_file.get("call_suffix", None),
+                            "selection_reason": "primary_earnings_call"
                         }
 
                         transcript_inventory[comparison_key] = transcript_record
@@ -714,6 +771,187 @@ def scan_nas_for_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any
         f"NAS scan complete: Found {len(transcript_inventory)} optimal transcripts"
     )
     return transcript_inventory
+
+
+def get_all_files_with_metadata(
+    nas_conn: SMBConnection,
+    type_path: str,
+    files: List[str],
+    ticker: str,
+    quarter: str,
+    year: str,
+    transcript_type: str
+) -> List[Dict[str, Any]]:
+    """Get all files in a transcript type folder with their metadata and titles."""
+    global logger, error_logger
+    
+    result_files = []
+    
+    for filename in files:
+        file_path = nas_path_join(type_path, filename)
+        modified_time = get_file_modified_time(nas_conn, file_path)
+        version_id = parse_version_from_filename(filename)
+        version_agnostic_key = get_version_agnostic_key_from_filename(filename)
+        
+        # Download file to extract title
+        try:
+            xml_content = nas_download_file(nas_conn, file_path)
+            if xml_content:
+                title = extract_title_from_xml(xml_content)
+                call_type, call_suffix = classify_earnings_call(title)
+            else:
+                title = None
+                call_type = "unknown"
+                call_suffix = None
+                error_logger.validation_errors.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'ticker': ticker,
+                    'filename': filename,
+                    'error': 'Failed to download file for title extraction'
+                })
+        except Exception as e:
+            logger.warning(f"Failed to extract title from {filename}: {e}")
+            title = None
+            call_type = "unknown"  
+            call_suffix = None
+        
+        # Parse metadata from filename
+        parts = filename.replace(".xml", "").split("_")
+        event_id = parts[4] if len(parts) > 4 else "unknown"
+        report_id = parts[5] if len(parts) > 5 else "unknown"
+        
+        file_record = {
+            "filename": filename,
+            "file_path": file_path,
+            "transcript_type": transcript_type,
+            "version_id": version_id or 0,
+            "date_last_modified": modified_time.isoformat() if modified_time else datetime.now().isoformat(),
+            "version_agnostic_key": version_agnostic_key,
+            "event_id": event_id,
+            "report_id": report_id,
+            "title": title,
+            "call_type": call_type,
+            "call_suffix": call_suffix,
+            "selection_priority": get_priority_score(transcript_type)
+        }
+        
+        result_files.append(file_record)
+        logger.debug(f"Found {call_type} call: {title} ({filename})")
+    
+    return result_files
+
+
+def select_primary_earnings_call(
+    nas_conn: SMBConnection,
+    all_calls: List[Dict[str, Any]], 
+    ticker: str,
+    quarter: str,
+    year: str
+) -> Optional[Dict[str, Any]]:
+    """Select the primary earnings call from all available calls using enhanced selection logic."""
+    global logger, error_logger
+    
+    if not all_calls:
+        return None
+    
+    if len(all_calls) == 1:
+        logger.debug(f"Single call found for {ticker} {year} {quarter}")
+        return all_calls[0]
+    
+    # Apply version management first - group by version-agnostic key and keep latest versions
+    version_groups = {}
+    for call in all_calls:
+        key = call["version_agnostic_key"]
+        if key not in version_groups:
+            version_groups[key] = []
+        version_groups[key].append(call)
+    
+    # Keep only latest version of each unique call
+    latest_calls = []
+    for group in version_groups.values():
+        if len(group) == 1:
+            latest_calls.append(group[0])
+        else:
+            # Select highest version
+            latest_call = max(group, key=lambda x: x["version_id"])
+            latest_calls.append(latest_call)
+    
+    # Now apply primary call selection logic
+    if len(latest_calls) == 1:
+        logger.debug(f"Single latest call for {ticker} {year} {quarter}")
+        return latest_calls[0]
+    
+    # Tier 1: Look for exact primary calls first
+    primary_calls = [call for call in latest_calls if call["call_type"] == "primary"]
+    
+    if len(primary_calls) == 1:
+        logger.info(f"Selected primary call for {ticker} {year} {quarter}: {primary_calls[0]['title']}")
+        return primary_calls[0]
+    elif len(primary_calls) > 1:
+        # Multiple primary calls - use existing 3-tier selection
+        selected = apply_three_tier_selection(primary_calls, ticker, quarter, year)
+        logger.info(f"Selected from multiple primary calls for {ticker} {year} {quarter}: {selected['title']}")
+        return selected
+    
+    # Tier 2: No primary calls, look for any earnings calls
+    earnings_calls = [call for call in latest_calls if "Earnings Call" in (call["title"] or "")]
+    
+    if earnings_calls:
+        selected = apply_three_tier_selection(earnings_calls, ticker, quarter, year)
+        logger.warning(f"No primary call found for {ticker} {year} {quarter}, selected: {selected['title']}")
+        error_logger.log_selection_error(
+            ticker, quarter, year,
+            f"No primary earnings call found, selected: {selected['title']}"
+        )
+        return selected
+    
+    # Tier 3: Fallback to best available
+    selected = apply_three_tier_selection(latest_calls, ticker, quarter, year)
+    logger.warning(f"No earnings calls found for {ticker} {year} {quarter}, selected best available: {selected['title']}")
+    error_logger.log_selection_error(
+        ticker, quarter, year,
+        f"No earnings calls found, selected: {selected['title']}"
+    )
+    return selected
+
+
+def apply_three_tier_selection(
+    calls: List[Dict[str, Any]],
+    ticker: str,
+    quarter: str, 
+    year: str
+) -> Dict[str, Any]:
+    """Apply 3-tier selection: transcript type > version ID > date modified."""
+    global logger, error_logger
+    
+    if len(calls) == 1:
+        return calls[0]
+    
+    # Tier 1: Transcript type priority (already grouped by type during collection)
+    # Find the highest priority transcript type available
+    best_priority = min(call["selection_priority"] for call in calls)
+    best_type_calls = [call for call in calls if call["selection_priority"] == best_priority]
+    
+    if len(best_type_calls) == 1:
+        return best_type_calls[0]
+    
+    # Tier 2: Highest version ID
+    max_version = max(call["version_id"] for call in best_type_calls)
+    best_version_calls = [call for call in best_type_calls if call["version_id"] == max_version]
+    
+    if len(best_version_calls) == 1:
+        return best_version_calls[0]
+    
+    # Tier 3: Latest modified date
+    latest_call = max(best_version_calls, key=lambda x: x["date_last_modified"])
+    
+    if len(best_version_calls) > 1:
+        error_logger.log_selection_error(
+            ticker, quarter, year,
+            f"Multiple files after 3-tier selection, chose by date: {[c['filename'] for c in best_version_calls]}"
+        )
+    
+    return latest_call
 
 
 def select_best_file_from_type(
@@ -750,7 +988,7 @@ def select_best_file_from_type(
                 "filename": filename,
                 "file_path": file_path,
                 "version_id": version_id or 0,
-                "date_last_modified": modified_time or datetime.min,
+                "date_last_modified": modified_time.isoformat() if modified_time else datetime.now().isoformat(),
                 "version_agnostic_key": version_agnostic_key,
             }
         )
