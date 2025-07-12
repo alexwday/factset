@@ -329,7 +329,14 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict[str, Any]:
 
 def nas_path_join(*parts: str) -> str:
     """Join path parts for NAS paths using forward slashes."""
-    return "/".join(str(part) for part in parts if part)
+    # Filter out empty parts and strip slashes
+    clean_parts = []
+    for part in parts:
+        if part:
+            clean_part = str(part).strip("/")
+            if clean_part:
+                clean_parts.append(clean_part)
+    return "/".join(clean_parts)
 
 
 def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
@@ -487,17 +494,26 @@ def validate_file_path(path: str) -> bool:
 
 def validate_nas_path(path: str) -> bool:
     """Validate NAS path structure."""
+    global logger
+    
     if not path or not isinstance(path, str):
+        logger.debug(f"NAS path validation failed: empty or not string: '{path}'")
         return False
 
     # Ensure path is relative and safe
     normalized = path.strip("/")
+    if not normalized:
+        logger.debug(f"NAS path validation failed: empty after normalization: '{path}'")
+        return False
+        
     parts = normalized.split("/")
 
     for part in parts:
         if not part or part in [".", ".."]:
+            logger.debug(f"NAS path validation failed: invalid part '{part}' in path: '{path}'")
             return False
         if not validate_file_path(part):
+            logger.debug(f"NAS path validation failed: file path validation failed for part '{part}' in path: '{path}'")
             return False
 
     return True
@@ -1107,6 +1123,10 @@ def save_master_database(nas_conn: SMBConnection, database: Dict[str, Any]) -> b
     database["last_updated"] = datetime.now().isoformat()
 
     db_path = nas_path_join(NAS_BASE_PATH, config["stage_2"]["master_database_path"])
+    
+    # Ensure Database directory exists
+    db_dir = nas_path_join(NAS_BASE_PATH, "Outputs", "Database")
+    nas_create_directory(nas_conn, db_dir)
 
     try:
         db_content = json.dumps(database, indent=2)
@@ -1265,11 +1285,11 @@ def save_processing_queues(
     # Upload both files
     success = True
     if not nas_upload_file(nas_conn, process_file_obj, process_path):
-        logger.error("Failed to save files_to_process.json")
+        logger.error(f"Failed to save files_to_process.json to path: {process_path}")
         success = False
 
     if not nas_upload_file(nas_conn, remove_file_obj, remove_path):
-        logger.error("Failed to save files_to_remove.json")
+        logger.error(f"Failed to save files_to_remove.json to path: {remove_path}")
         success = False
 
     if success:
@@ -1280,12 +1300,47 @@ def save_processing_queues(
     return success
 
 
+def upload_logs_to_nas(nas_conn: SMBConnection, logger: logging.Logger, error_logger) -> None:
+    """Upload logs to NAS immediately (for critical failures)."""
+    try:
+        # Save error logs first
+        error_logger.save_error_logs(nas_conn)
+        
+        # Close all logging handlers to ensure file is not in use
+        for handler in logger.handlers[:]:
+            handler.close()
+            logger.removeHandler(handler)
+
+        # Force any remaining buffered log data to be written
+        logging.shutdown()
+
+        # Upload the log file
+        log_file_path = nas_path_join(
+            NAS_BASE_PATH,
+            "Outputs",
+            "Logs",
+            f"stage_2_consolidation_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log",
+        )
+
+        # Read the entire log file and convert to BytesIO for upload
+        with open(logger.temp_log_file, "rb") as log_file:
+            log_content = log_file.read()
+
+        log_file_obj = io.BytesIO(log_content)
+        nas_upload_file(nas_conn, log_file_obj, log_file_path)
+        print(f"Emergency log upload completed to: {log_file_path}")
+        
+    except Exception as e:
+        print(f"Emergency log upload failed: {e}")
+
+
 def main() -> None:
     """Main function to orchestrate Stage 2 transcript consolidation."""
     global config, logger, error_logger
 
     logger = setup_logging()
     error_logger = EnhancedErrorLogger()
+    print(f"Local log file: {logger.temp_log_file}")  # Always show where local log is
     logger.info("STAGE 2: TRANSCRIPT CONSOLIDATION & DATABASE MANAGEMENT")
 
     # Connect to NAS and load configuration
@@ -1341,6 +1396,11 @@ def main() -> None:
         logger.info("Step 7: Saving processing queues...")
         if not save_processing_queues(nas_conn, files_to_process, files_to_remove):
             logger.error("Failed to save processing queues")
+            # Upload logs immediately on critical failure
+            try:
+                upload_logs_to_nas(nas_conn, logger, error_logger)
+            except:
+                pass
             return
 
         end_time = datetime.now()
