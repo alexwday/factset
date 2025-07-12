@@ -12,6 +12,7 @@ factset/
 ├── docs/                                  # Documentation & FactSet SDK docs
 ├── stage_0_bulk_refresh/                  # Historical bulk download (optional)
 ├── stage_1_daily_sync/                    # Daily incremental sync (scheduled)
+├── stage_2_processing/                    # Transcript consolidation & database management
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -79,14 +80,15 @@ python stage_1_daily_sync/1_transcript_daily_sync.py
 # Stage 1: With earnings monitor (runs every 5 minutes with notifications)
 python stage_1_daily_sync/earnings_monitor.py
 
-# Stage 2: Processing & analysis (planned - future development)
-# python stage_2_processing/2_transcript_processing.py
+# Stage 2: Transcript consolidation and database management (implemented)
+python stage_2_processing/2_transcript_consolidation.py
 ```
 
 **Current Status**: 
 - Stage 0 is production-ready with enhanced fiscal quarter organization ✅
 - Stage 1 is production-ready with enhanced folder structure and comprehensive error logging ✅
-- Both stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
+- Stage 2 is production-ready with transcript consolidation and master database management ✅
+- All stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
 
 ## Testing from Work Environment
 
@@ -169,6 +171,23 @@ CLIENT_MACHINE_NAME=SYNC-CLIENT
 - **Processing**: Downloads transcripts for all 15 monitored institutions
 - **Output**: Generates inventory files and execution logs
 - **Error Handling**: Retries failed downloads, logs all errors
+
+### Testing Stage 2
+
+1. **Prerequisites**:
+   - Stage 0 or Stage 1 must have run successfully (transcripts exist on NAS)
+   - NAS config.json must include `stage_2` section
+
+2. **Execute Consolidation**:
+   ```bash
+   python stage_2_processing/2_transcript_consolidation.py
+   ```
+
+3. **Expected Outputs**:
+   - `master_database.json`: Complete inventory of selected transcripts
+   - `files_to_process.json`: New/changed transcripts for future processing
+   - `files_to_remove.json`: Database records to clean up
+   - Comprehensive execution logs with selection decisions
 
 ### Troubleshooting
 
@@ -306,11 +325,17 @@ Provides detailed summary including:
   - Manual: `python stage_1_daily_sync/1_transcript_daily_sync.py`
   - Monitor: `python stage_1_daily_sync/earnings_monitor.py` (runs every 5 minutes with popups)
 
-### Stage 2: Processing (Future Development)
-- **Purpose**: Process, enrich, and analyze downloaded transcripts
-- **When to use**: After transcripts are downloaded
-- **Output**: Processed data and analysis results
-- **Status**: Not yet implemented
+### Stage 2: Transcript Consolidation ✅ PRODUCTION READY
+- **Purpose**: Select optimal single transcript per company per fiscal quarter/year and manage master database
+- **When to use**: After Stage 0/1 populate transcripts repository
+- **Output**: Master database JSON and processing queues for downstream analysis
+- **Features**:
+  - 4-tier enhanced file selection (call type → transcript type → version → date)
+  - Handles multiple earnings calls per quarter (prioritizes primary over secondary)
+  - Master database with comprehensive metadata
+  - Delta detection for changed/new/removed files
+  - Processing queues (files_to_process.json, files_to_remove.json)
+- **Usage**: `python stage_2_processing/2_transcript_consolidation.py`
 
 ## Configuration
 

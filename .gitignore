@@ -182,3 +182,7 @@ Thumbs.db
 
 # API Documentation (downloaded from GitHub)
 docs/
+
+# Claude development documentation
+CLAUDE.md
+**/CLAUDE.md
