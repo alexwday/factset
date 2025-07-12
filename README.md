@@ -12,7 +12,7 @@ factset/
 ├── docs/                                  # Documentation & FactSet SDK docs
 ├── stage_0_bulk_refresh/                  # Historical bulk download (optional)
 ├── stage_1_daily_sync/                    # Daily incremental sync (scheduled)
-├── stage_2_processing/                    # Transcript consolidation & database management
+├── stage_2_processing/                    # Transcript consolidation & change detection
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -80,14 +80,14 @@ python stage_1_daily_sync/1_transcript_daily_sync.py
 # Stage 1: With earnings monitor (runs every 5 minutes with notifications)
 python stage_1_daily_sync/earnings_monitor.py
 
-# Stage 2: Transcript consolidation and database management (implemented)
+# Stage 2: Transcript consolidation and change detection (implemented)
 python stage_2_processing/2_transcript_consolidation.py
 ```
 
 **Current Status**: 
 - Stage 0 is production-ready with enhanced fiscal quarter organization ✅
 - Stage 1 is production-ready with enhanced folder structure and comprehensive error logging ✅
-- Stage 2 is production-ready with transcript consolidation and master database management ✅
+- Stage 2 is production-ready with transcript consolidation and change detection ✅
 - All stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
 
 ## Testing from Work Environment
@@ -184,10 +184,10 @@ CLIENT_MACHINE_NAME=SYNC-CLIENT
    ```
 
 3. **Expected Outputs**:
-   - `master_database.json`: Complete inventory of selected transcripts
    - `files_to_process.json`: New/changed transcripts for future processing
-   - `files_to_remove.json`: Database records to clean up
+   - `files_to_remove.json`: Database records to clean up (if database exists)
    - Comprehensive execution logs with selection decisions
+   - Note: No master database is created (that's handled by Stage 3)
 
 ### Troubleshooting
 
@@ -326,13 +326,13 @@ Provides detailed summary including:
   - Monitor: `python stage_1_daily_sync/earnings_monitor.py` (runs every 5 minutes with popups)
 
 ### Stage 2: Transcript Consolidation ✅ PRODUCTION READY
-- **Purpose**: Select optimal single transcript per company per fiscal quarter/year and manage master database
+- **Purpose**: Select optimal single transcript per company per fiscal quarter/year and detect changes
 - **When to use**: After Stage 0/1 populate transcripts repository
-- **Output**: Master database JSON and processing queues for downstream analysis
+- **Output**: Processing queues for downstream analysis (no database creation)
 - **Features**:
   - 4-tier enhanced file selection (call type → transcript type → version → date)
   - Handles multiple earnings calls per quarter (prioritizes primary over secondary)
-  - Master database with comprehensive metadata
+  - Read-only comparison with existing master database (if present)
   - Delta detection for changed/new/removed files
   - Processing queues (files_to_process.json, files_to_remove.json)
 - **Usage**: `python stage_2_processing/2_transcript_consolidation.py`
