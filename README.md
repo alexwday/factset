@@ -1,6 +1,6 @@
 # FactSet Earnings Transcript Pipeline
 
-A multi-stage pipeline for downloading, processing, and analyzing earnings transcripts from FactSet's Events & Transcripts API.
+A multi-stage pipeline for downloading, processing, and analyzing earnings transcripts from FactSet's Events & Transcripts API with enhanced fiscal quarter organization.
 
 ## Project Structure
 
@@ -84,8 +84,9 @@ python stage_1_daily_sync/earnings_monitor.py
 ```
 
 **Current Status**: 
-- Stage 0 is production-ready with all security issues resolved ✅
-- Stage 1 is production-ready with date-based queries and optional earnings monitor ✅
+- Stage 0 is production-ready with enhanced fiscal quarter organization ✅
+- Stage 1 is production-ready with enhanced folder structure and comprehensive error logging ✅
+- Both stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
 
 ## Testing from Work Environment
 
@@ -256,19 +257,25 @@ Provides detailed summary including:
 
 ### **Key Business Rules**
 
-1. **Anti-Contamination**: Only downloads transcripts where target ticker is SOLE primary company
-2. **Security-First**: All credentials from environment, paths validated, URLs sanitized in logs
-3. **Audit Trail**: Every operation logged with timestamps and error context
-4. **Incremental Safe**: Checks existing files, safe to re-run without re-downloading
-5. **Version Management**: Automatically handles vendor version ID updates, prevents duplicate downloads
-6. **Institution Coverage**: 6 Canadian banks, 6 US banks, 3 insurance companies
+1. **Enhanced Fiscal Quarter Organization**: Automatically organizes all transcripts by fiscal year and quarter parsed from XML titles
+2. **Robust Title Parsing**: 4 regex patterns handle various formats with smart fallbacks to "Unknown/Unknown" folder
+3. **Comprehensive Error Logging**: Separate JSON files track parsing, download, filesystem, and validation errors
+4. **Anti-Contamination**: Only downloads transcripts where target ticker is SOLE primary company
+5. **Security-First**: All credentials from environment, paths validated, URLs sanitized in logs
+6. **Audit Trail**: Every operation logged with timestamps and error context
+7. **Incremental Safe**: Checks existing files across all folders, safe to re-run without re-downloading
+8. **Version Management**: Automatically handles vendor version ID updates, prevents duplicate downloads
+9. **Windows Compatibility**: Path length validation with automatic shortening
+10. **Institution Coverage**: 6 Canadian banks, 6 US banks, 3 insurance companies
 
 ### **Expected Outcomes**
 
-- **Data Structure**: Organized by institution type → company → transcript type
+- **Enhanced Data Structure**: Organized by fiscal year → quarter → institution type → company → transcript type
+- **Fiscal Quarter Organization**: Easy quarterly analysis and time-series studies
+- **Error Management**: Comprehensive error logs with actionable recovery instructions
 - **File Naming**: Standardized format for easy identification and processing
 - **Audit Trail**: Complete log of all operations for compliance
-- **Repository**: Complete historical baseline ready for Stage 1 daily updates
+- **Repository**: Complete historical baseline with fiscal quarter organization ready for Stage 1 daily updates
 
 ## Pipeline Stages
 

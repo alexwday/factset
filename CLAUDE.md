@@ -42,11 +42,12 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 ### NAS Integration Details
 - **Protocol**: SMB/CIFS using pysmb.SMBConnection
 - **Authentication**: NTLM v2 with domain credentials
-- **Folder Structure**:
+- **Enhanced Folder Structure** (Fiscal Quarter Organization):
   - `Inputs/certificate/` - SSL certificates
   - `Inputs/config/` - Configuration files (single config.json)
-  - `Outputs/Data/` - Downloaded transcripts by type and institution
+  - `Outputs/Data/YYYY/QX/Type/Company/TranscriptType/` - Transcripts organized by fiscal year and quarter
   - `Outputs/Logs/` - Execution logs
+  - `Outputs/Logs/Errors/` - Separate error logs (parsing, download, filesystem, validation)
   - `Outputs/listing/` - Inventory JSON files (future use)
 
 ### Monitored Institutions
@@ -66,6 +67,8 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 - **67890**: Report identifier
 - **1**: Version identifier
 
+**Storage Path**: `Data/2024/Q1/Canadian/RY-CA_Royal_Bank_of_Canada/Corrected/RY-CA_2024-01-25_Earnings_Corrected_12345_67890_1.xml`
+
 ## Stage 0 Business Logic & Process Flow
 
 ### Complete Step-by-Step Process
@@ -84,22 +87,25 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
   - Security path validation to prevent directory traversal attacks
   - Data type validation for all configuration parameters
 
-#### **3. Directory Structure Creation**
-Creates organized folder structure on NAS:
+#### **3. Enhanced Directory Structure Creation**
+Creates fiscal quarter-organized folder structure on NAS:
 ```
 Outputs/Data/
-├── Canadian/          # Canadian bank transcripts
-│   ├── RY-CA_Royal_Bank_of_Canada/
-│   │   ├── Raw/       # Raw transcript files
-│   │   ├── Corrected/ # Corrected transcript files
-│   │   └── NearRealTime/ # Near real-time transcript files
-│   └── [5 other Canadian banks...]
-├── US/               # US bank transcripts
-│   ├── JPM-US_JPMorgan_Chase/
-│   └── [5 other US banks...]
-└── Insurance/        # Insurance company transcripts
-    ├── MFC-CA_Manulife_Financial/
-    └── [2 other insurance companies...]
+├── 2024/                    # Fiscal year folders
+│   ├── Q1/                  # Fiscal quarter folders
+│   │   ├── Canadian/        # Institution type
+│   │   │   └── RY-CA_Royal_Bank_of_Canada/
+│   │   │       ├── Raw/     # Transcript type subfolders
+│   │   │       ├── Corrected/
+│   │   │       └── NearRealTime/
+│   │   ├── US/
+│   │   │   └── JPM-US_JPMorgan_Chase/
+│   │   └── Insurance/
+│   │       └── MFC-CA_Manulife_Financial/
+│   ├── Q2/ Q3/ Q4/         # Other quarters in same structure
+├── 2023/                   # Previous years
+└── Unknown/                # Fallback for unparseable transcripts
+    └── Unknown/
 ```
 
 #### **4. Institution Processing Loop (15 Total)**
@@ -147,18 +153,31 @@ For each monitored institution:
 
 ### Core Functionality Features
 - Downloads all earnings transcripts from 2023-present for monitored institutions
+- **Enhanced Fiscal Quarter Organization**: Automatically organizes transcripts by fiscal year and quarter parsed from XML titles
+- **Robust Title Parsing**: 4 regex patterns handle various formats ("Q1 2024 Earnings Call", "First Quarter 2024", "2024 Q1")
 - Filters transcripts where target ticker is the ONLY primary ID (prevents cross-contamination)
 - Supports all transcript types: Corrected, Raw, NearRealTime
+- **Comprehensive Error Logging**: Separate JSON files for parsing, download, filesystem, and validation errors
+- **Smart Fallbacks**: Uses "Unknown/Unknown" folder for unparseable transcripts with operator guidance
+- **Windows Path Compatibility**: Validates path lengths and automatically shortens when needed
 - Implements intelligent version management to handle vendor version ID updates
 - Automatically removes old versions and keeps only latest version of each transcript
 - Uses version-agnostic keys for duplicate detection (prevents duplicate downloads)
-- Implements file-based inventory tracking to avoid re-downloads
 - Rate limiting with retry logic for API protection
 - Comprehensive error handling and security validation
 - Uploads all data directly to NAS (no local storage)
 
 ### Technical Implementation
 - **Import Pattern**: `from fds.sdk.EventsandTranscripts.api import transcripts_api`
+- **Enhanced Folder Structure**: Dynamic creation based on parsed fiscal quarter/year from XML titles
+- **Quarter/Year Parsing**: Key functions for extracting temporal information:
+  - `parse_quarter_and_year_from_xml()`: Parses XML content to extract Q1-Q4 and 20XX from titles
+  - `validate_path_length()`: Ensures Windows compatibility (260 char limit)
+  - `get_fallback_quarter_year()`: Returns "Unknown/Unknown" for unparseable transcripts
+  - `create_enhanced_directory_structure()`: Creates fiscal quarter-organized paths
+- **Enhanced Error Logging**: Separate tracking and JSON export for different error types
+  - `EnhancedErrorLogger`: Manages parsing, download, filesystem, and validation errors
+  - Saves actionable error reports to `Outputs/Logs/Errors/` with recovery instructions
 - **Proxy Setup**: Uses requests proxies with MAPLE domain authentication
 - **SSL Handling**: Downloads certificate from NAS to temp file, sets environment variables
 - **Version Management**: Key functions for handling vendor version updates:
@@ -179,6 +198,7 @@ For each monitored institution:
 5. **Proxy URL**: Fixed proxy construction for requests library format
 6. **Environment Variables**: Attempted but reverted - broke functionality, restored from git
 7. **Version ID Duplicates**: Fixed duplicate downloads when vendors update version IDs by implementing version-agnostic duplicate detection and automatic cleanup of old versions
+8. **Enhanced Folder Structure**: Implemented fiscal quarter organization with robust title parsing and comprehensive error logging (2024-07-12)
 
 ### Git History Context
 - **Last Working Commit**: 1d0ceba (before environment variable changes)
@@ -193,6 +213,8 @@ requests
 python-dotenv
 pysmb
 python-dateutil
+# Enhanced folder structure parsing:
+xml.etree.ElementTree  # Built-in Python library for XML parsing
 ```
 
 ## Stage Architecture Plan
@@ -204,11 +226,15 @@ python-dateutil
 - **When**: Initial setup or complete repository refresh
 - **Status**: All 9 critical issues resolved, security validated, production ready
 - **Key Features**:
+  - **Enhanced Fiscal Quarter Organization**: Automatically organizes by fiscal year/quarter parsed from XML titles
+  - **Robust Title Parsing**: 4 regex patterns handle "Q1 2024 Earnings Call", "First Quarter 2024", "2024 Q1" formats
+  - **Comprehensive Error Logging**: Separate JSON files for parsing, download, filesystem, validation errors
+  - **Smart Fallbacks**: Uses "Unknown/Unknown" folder for unparseable transcripts with operator guidance
   - Anti-contamination filter: Only downloads transcripts where target ticker is SOLE primary company
   - Version management: Automatically handles vendor version ID updates, prevents duplicate downloads
-  - File organization: Creates institution-type folders (Canadian/US/Insurance) with transcript-type subfolders
   - Duplicate prevention: Uses version-agnostic keys for intelligent duplicate detection
   - Automatic cleanup: Removes old versions and keeps only latest version of each transcript
+  - **Windows Path Compatibility**: Validates path lengths and automatically shortens when needed
   - Comprehensive audit trail: Timestamped logs uploaded to NAS
   - Standardized naming: `{ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
 
@@ -218,9 +244,12 @@ python-dateutil
 - **Config**: `Inputs/config/config.json` on NAS (uses stage_1 section)
 - **When**: Scheduled daily operations or earnings day monitoring
 - **Key Features**:
+  - **Enhanced Fiscal Quarter Organization**: Same dynamic folder structure as Stage 0 (YYYY/QX/Type/Company/TranscriptType/)
+  - **Comprehensive Error Logging**: Inherits all error tracking and JSON export capabilities
   - Date-based queries using `get_transcripts_dates()` API
   - Single API call per date (efficient vs Stage 0's 15 calls)
   - Inherits ALL version management from Stage 0
+  - **Smart Title Parsing**: Same 4 regex patterns and fallback logic as Stage 0
   - Optional `earnings_monitor.py` for real-time notifications
   - Configurable lookback period (sync_date_range)
 
