@@ -17,6 +17,7 @@ import re
 import json
 import tempfile
 import io
+import xml.etree.ElementTree as ET
 from smb.SMBConnection import SMBConnection
 from typing import Dict, List, Optional, Set, Tuple, Any
 import warnings
@@ -63,6 +64,7 @@ if missing_vars:
 # Global variables for configuration
 config = {}
 logger = None
+error_logger = None
 
 def setup_logging() -> logging.Logger:
     """Set up logging configuration."""
@@ -85,6 +87,59 @@ def setup_logging() -> logging.Logger:
     logger = logging.getLogger(__name__)
     logger.temp_log_file = temp_log_file.name
     return logger
+
+class EnhancedErrorLogger:
+    """Handles separate error logging for different failure types."""
+    def __init__(self):
+        self.parsing_errors = []
+        self.download_errors = []
+        self.filesystem_errors = []
+        self.validation_errors = []
+        
+    def log_parsing_error(self, ticker: str, filename: str, title: str, error: str):
+        """Log parsing errors with actionable information."""
+        self.parsing_errors.append({
+            'timestamp': datetime.now().isoformat(),
+            'ticker': ticker,
+            'filename': filename,
+            'title': title,
+            'error': error,
+            'location': 'Data/Unknown/Unknown/',
+            'action_required': 'Check title format and manually move to correct quarter/year'
+        })
+        
+    def save_error_logs(self, nas_conn: SMBConnection):
+        """Save error logs to separate JSON files on NAS."""
+        global logger
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        error_base_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Logs", "Errors")
+        nas_create_directory(nas_conn, error_base_path)
+        
+        # Save each error type if errors exist
+        error_types = [
+            ('parsing_errors', self.parsing_errors),
+            ('download_errors', self.download_errors),
+            ('filesystem_errors', self.filesystem_errors),
+            ('validation_errors', self.validation_errors)
+        ]
+        
+        summary = {
+            'run_timestamp': timestamp,
+            'total_errors': sum(len(errors) for _, errors in error_types),
+            'errors_by_type': {error_type: len(errors) for error_type, errors in error_types}
+        }
+        
+        for error_type, errors in error_types:
+            if errors:
+                filename = f"{error_type}_{timestamp}.json"
+                file_path = nas_path_join(error_base_path, filename)
+                content = json.dumps({
+                    'summary': summary,
+                    'errors': errors
+                }, indent=2)
+                file_obj = io.BytesIO(content.encode('utf-8'))
+                nas_upload_file(nas_conn, file_obj, file_path)
+                logger.warning(f"Saved {len(errors)} {error_type} to {filename}")
 
 def sanitize_url_for_logging(url: str) -> str:
     """Sanitize URL for logging by removing query parameters and auth tokens."""
@@ -441,6 +496,76 @@ def sanitize_for_filename(text: Any) -> str:
     clean_text = re.sub(r'[-\s]+', '_', clean_text)
     return clean_text.strip('_')
 
+def parse_quarter_and_year_from_xml(xml_content: bytes) -> Tuple[Optional[str], Optional[str]]:
+    """Parse quarter and fiscal year from transcript XML title."""
+    try:
+        # Parse only until we find the title
+        root = ET.parse(io.BytesIO(xml_content)).getroot()
+        namespace = ""
+        if root.tag.startswith('{'):
+            namespace = root.tag.split('}')[0] + '}'
+        
+        meta = root.find(f"{namespace}meta" if namespace else "meta")
+        if meta is None:
+            return None, None
+            
+        title_elem = meta.find(f"{namespace}title" if namespace else "title")
+        if title_elem is None or not title_elem.text:
+            return None, None
+            
+        title = title_elem.text.strip()
+        
+        # Try multiple patterns in order of likelihood
+        patterns = [
+            r"Q([1-4])\s+(20\d{2})\s+Earnings\s+Call",  # "Q1 2024 Earnings Call"
+            r".*Q([1-4])\s+(20\d{2})\s+Earnings\s+Call.*",  # Anywhere in title
+            r"(First|Second|Third|Fourth)\s+Quarter\s+(20\d{2})",  # "First Quarter 2024"
+            r"(20\d{2})\s+Q([1-4])",  # "2024 Q1"
+        ]
+        
+        for i, pattern in enumerate(patterns):
+            match = re.search(pattern, title, re.IGNORECASE)
+            if match:
+                if i == 2:  # "(First|Second|Third|Fourth)\s+Quarter\s+(20\d{2})"
+                    quarter_map = {"first": "Q1", "second": "Q2", "third": "Q3", "fourth": "Q4"}
+                    quarter = quarter_map.get(match.group(1).lower())
+                    year = match.group(2)
+                    return quarter, year
+                elif i == 3:  # "(20\d{2})\s+Q([1-4])"
+                    year = match.group(1)
+                    quarter = f"Q{match.group(2)}"
+                    return quarter, year
+                else:  # Standard Q([1-4])\s+(20\d{2}) patterns
+                    quarter = f"Q{match.group(1)}"
+                    year = match.group(2)
+                    return quarter, year
+        
+        # Final fallback: Find Q and year separately
+        quarter_match = re.search(r"Q([1-4])", title)
+        year_match = re.search(r"(20\d{2})", title)
+        if quarter_match and year_match:
+            return f"Q{quarter_match.group(1)}", year_match.group(2)
+            
+        return None, None
+        
+    except Exception as e:
+        logger.error(f"Error parsing XML for quarter/year: {e}")
+        return None, None
+
+def validate_path_length(path: str) -> bool:
+    """Validate path length for Windows compatibility."""
+    # Windows has 260 character path limit
+    if len(path) > 250:  # Leave some buffer
+        logger.warning(f"Path length ({len(path)}) approaching Windows limit: {path}")
+        return False
+    return True
+
+def get_fallback_quarter_year() -> Tuple[str, str]:
+    """Get fallback quarter/year when parsing fails."""
+    # Don't use current date as it's meaningless for fiscal quarters
+    # Instead, use a special "Unknown" folder that operators can manually sort
+    return "Unknown", "Unknown"
+
 def create_base_directory_structure(nas_conn: SMBConnection) -> None:
     """Create the base directory structure for the transcript repository on NAS."""
     global logger
@@ -462,31 +587,45 @@ def create_base_directory_structure(nas_conn: SMBConnection) -> None:
     nas_create_directory(nas_conn, data_path)
     nas_create_directory(nas_conn, logs_path)
     
-    # Create type-based folders: Canadian, US, European, Insurance
-    type_folders = ["Canadian", "US", "European", "Insurance"]
-    for type_folder in type_folders:
-        type_path = nas_path_join(data_path, type_folder)
-        nas_create_directory(nas_conn, type_path)
-
-def create_ticker_directory_structure(nas_conn: SMBConnection, ticker: str, institution_type: str) -> None:
-    """Create directory structure for a specific ticker when transcripts are found."""
-    global config
-    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data")
+    # Create error logs directory
+    error_logs_path = nas_path_join(logs_path, "Errors")
+    nas_create_directory(nas_conn, error_logs_path)
     
-    # Get path-safe name for the ticker folder
+    # Note: Year/Quarter folders will be created dynamically as needed
+
+def create_enhanced_directory_structure(nas_conn: SMBConnection, ticker: str, 
+                                      institution_type: str, transcript_type: str,
+                                      quarter: str, year: str) -> Optional[str]:
+    """Create enhanced directory structure with fiscal year and quarter."""
+    global config
+    # Build path: Data/YYYY/QX/Type/Company/TranscriptType/
     institution_info = config['monitored_institutions'].get(ticker, {})
     path_safe_name = institution_info.get('path_safe_name', ticker)
+    
+    # Shorten company folder name if needed for path length
     ticker_folder_name = f"{ticker}_{path_safe_name}"
+    if len(ticker_folder_name) > 50:  # Arbitrary limit to keep paths short
+        ticker_folder_name = ticker  # Just use ticker if name too long
     
-    ticker_path = nas_path_join(data_path, institution_type, ticker_folder_name)
+    path_components = [
+        NAS_BASE_PATH, "Outputs", "Data",
+        year, quarter, institution_type,
+        ticker_folder_name, transcript_type
+    ]
     
-    # Create ticker folder
-    nas_create_directory(nas_conn, ticker_path)
+    full_path = nas_path_join(*path_components)
     
-    # Create transcript type subfolders
-    for transcript_type in config['api_settings']['transcript_types']:
-        transcript_type_path = nas_path_join(ticker_path, transcript_type)
-        nas_create_directory(nas_conn, transcript_type_path)
+    # Validate path length
+    if not validate_path_length(full_path):
+        # Try with just ticker
+        path_components[-2] = ticker
+        full_path = nas_path_join(*path_components)
+        if not validate_path_length(full_path):
+            logger.error(f"Path too long even with shortened name: {full_path}")
+            return None
+    
+    nas_create_directory(nas_conn, full_path)
+    return full_path
 
 def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str] = None) -> str:
     """Create standardized filename from transcript data."""
@@ -687,11 +826,13 @@ def get_existing_files_with_version_management(nas_conn: SMBConnection, ticker: 
     
     return result
 
-def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str, 
-                                 nas_file_path: str, transcript_id: str, configuration, 
-                                 proxy_user: str, proxy_password: str) -> bool:
-    """Download transcript with retry logic and upload to NAS."""
-    global logger, config
+def download_transcript_with_enhanced_structure(nas_conn: SMBConnection, transcript_link: str,
+                                              ticker: str, institution_type: str, 
+                                              transcript_type: str, filename: str,
+                                              configuration, proxy_user: str, 
+                                              proxy_password: str) -> bool:
+    """Download transcript with quarter/year parsing and enhanced folder structure."""
+    global logger, config, error_logger
     
     for attempt in range(config['api_settings']['max_retries']):
         try:
@@ -717,24 +858,85 @@ def download_transcript_with_retry(nas_conn: SMBConnection, transcript_link: str
             
             response.raise_for_status()
             
+            # Parse XML to extract quarter and year
+            quarter, year = parse_quarter_and_year_from_xml(response.content)
+            
+            if not quarter or not year:
+                # Extract title for error logging
+                try:
+                    root = ET.parse(io.BytesIO(response.content)).getroot()
+                    namespace = ""
+                    if root.tag.startswith('{'):
+                        namespace = root.tag.split('}')[0] + '}'
+                    meta = root.find(f"{namespace}meta" if namespace else "meta")
+                    title_elem = meta.find(f"{namespace}title" if namespace else "title") if meta else None
+                    title = title_elem.text if title_elem and title_elem.text else "No title found"
+                except:
+                    title = "Failed to extract title"
+                
+                # Log parsing error
+                error_logger.log_parsing_error(ticker, filename, title, 
+                                             "Could not extract quarter/year from title")
+                
+                # Use fallback
+                quarter, year = get_fallback_quarter_year()
+                logger.warning(f"Using fallback location Unknown/Unknown for {filename}")
+            
+            # Create enhanced directory structure
+            target_dir = create_enhanced_directory_structure(nas_conn, ticker, 
+                                                           institution_type, 
+                                                           transcript_type,
+                                                           quarter, year)
+            
+            if not target_dir:
+                error_logger.filesystem_errors.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'filename': filename,
+                    'error': 'Path too long for Windows compatibility'
+                })
+                return False
+            
+            # Upload file to new location
+            file_path = nas_path_join(target_dir, filename)
             file_obj = io.BytesIO(response.content)
             file_size = len(response.content)
             
-            if nas_upload_file(nas_conn, file_obj, nas_file_path):
-                logger.info(f"Downloaded and uploaded {transcript_id} ({file_size:,} bytes)")
+            if nas_upload_file(nas_conn, file_obj, file_path):
+                logger.info(f"Successfully saved {filename} to {year}/{quarter} ({file_size:,} bytes)")
                 return True
             else:
-                logger.error(f"Failed to upload {transcript_id} to NAS")
+                error_logger.filesystem_errors.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'filename': filename,
+                    'path': file_path,
+                    'error': 'Failed to upload to NAS'
+                })
                 return False
-            
-        except Exception as e:
-            logger.warning(f"Download attempt {attempt + 1} failed for {transcript_id}: {e}")
+                
+        except requests.exceptions.RequestException as e:
             if attempt < config['api_settings']['max_retries'] - 1:
+                logger.warning(f"Download attempt {attempt + 1} failed, retrying: {e}")
                 time.sleep(config['api_settings']['retry_delay'])
             else:
-                logger.error(f"Failed to download {transcript_id} after {config['api_settings']['max_retries']} attempts")
+                error_logger.download_errors.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'ticker': ticker,
+                    'filename': filename,
+                    'url': sanitize_url_for_logging(transcript_link),
+                    'error': str(e)
+                })
+                logger.error(f"Failed to download {filename} after {attempt + 1} attempts: {e}")
                 return False
-    
+        except Exception as e:
+            error_logger.download_errors.append({
+                'timestamp': datetime.now().isoformat(),
+                'ticker': ticker,
+                'filename': filename,
+                'error': str(e)
+            })
+            logger.error(f"Unexpected error downloading {filename}: {e}")
+            return False
+                
     return False
 
 def process_bank(ticker: str, institution_info: Dict[str, str], 
@@ -808,8 +1010,7 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
             logger.info(f"No earnings transcripts found for {ticker}")
             return bank_downloads
         
-        # Create ticker directory structure since we found transcripts
-        create_ticker_directory_structure(nas_conn, ticker, institution_type)
+        # Mark that we found transcripts (directories will be created dynamically)
         bank_downloads['found_transcripts'] = True
         
         total_downloaded = 0
@@ -869,17 +1070,10 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
                         logger.warning(f"No download link for {filename}")
                         continue
                     
-                    # Get path-safe name for the ticker folder
-                    institution_info = config['monitored_institutions'].get(ticker, {})
-                    path_safe_name = institution_info.get('path_safe_name', ticker)
-                    ticker_folder_name = f"{ticker}_{path_safe_name}"
-                    
-                    nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", 
-                                                institution_type, ticker_folder_name, transcript_type, filename)
-                    
-                    if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], 
-                                                    nas_file_path, filename, configuration, 
-                                                    proxy_user, proxy_password):
+                    if download_transcript_with_enhanced_structure(nas_conn, transcript['transcripts_link'],
+                                                                    ticker, institution_type, transcript_type, 
+                                                                    filename, configuration, 
+                                                                    proxy_user, proxy_password):
                         downloaded_count += 1
                         
                     time.sleep(config['api_settings']['request_delay'])
@@ -890,17 +1084,10 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
                         logger.warning(f"No download link for {filename}")
                         continue
                     
-                    # Get path-safe name for the ticker folder
-                    institution_info = config['monitored_institutions'].get(ticker, {})
-                    path_safe_name = institution_info.get('path_safe_name', ticker)
-                    ticker_folder_name = f"{ticker}_{path_safe_name}"
-                    
-                    nas_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data", 
-                                                institution_type, ticker_folder_name, transcript_type, filename)
-                    
-                    if download_transcript_with_retry(nas_conn, transcript['transcripts_link'], 
-                                                    nas_file_path, filename, configuration, 
-                                                    proxy_user, proxy_password):
+                    if download_transcript_with_enhanced_structure(nas_conn, transcript['transcripts_link'],
+                                                                    ticker, institution_type, transcript_type, 
+                                                                    filename, configuration, 
+                                                                    proxy_user, proxy_password):
                         downloaded_count += 1
                         logger.info(f"Downloaded updated version: {filename}")
                         
@@ -947,10 +1134,11 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
 
 def main() -> None:
     """Main function to orchestrate the Stage 0 bulk transcript sync."""
-    global config, logger
+    global config, logger, error_logger
     
     logger = setup_logging()
-    logger.info("STAGE 0: BULK TRANSCRIPT SYNC")
+    error_logger = EnhancedErrorLogger()
+    logger.info("STAGE 0: BULK TRANSCRIPT SYNC WITH ENHANCED FOLDER STRUCTURE")
     
     temp_cert_path = None
     
@@ -1027,7 +1215,10 @@ def main() -> None:
         end_time = datetime.now()
         execution_time = end_time - start_time
         
-        logger.info("STAGE 0 BULK SYNC COMPLETE")
+        # Save error logs to NAS
+        error_logger.save_error_logs(nas_conn)
+        
+        logger.info("STAGE 0 BULK SYNC WITH ENHANCED STRUCTURE COMPLETE")
         logger.info(f"Total new transcripts downloaded: {total_downloaded}")
         logger.info(f"Execution time: {execution_time}")
         
@@ -1065,6 +1256,13 @@ def main() -> None:
         except Exception as e:
             print(f"Error uploading log file: {e}")  # Can't use logger since it's shut down
         
+    except Exception as e:
+        logger.error(f"Bulk sync failed: {e}")
+        # Try to save error logs even if main execution failed
+        try:
+            error_logger.save_error_logs(nas_conn)
+        except:
+            pass
     finally:
         if nas_conn:
             nas_conn.close()
