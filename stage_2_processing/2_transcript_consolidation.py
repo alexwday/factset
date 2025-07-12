@@ -1084,7 +1084,7 @@ def get_priority_score(transcript_type: str) -> int:
 
 
 def load_master_database(nas_conn: SMBConnection) -> Dict[str, Any]:
-    """Load existing master database or create new one."""
+    """Load existing master database for comparison (read-only). Returns empty structure if none exists."""
     global logger, config, error_logger
 
     db_path = nas_path_join(NAS_BASE_PATH, config["stage_2"]["master_database_path"])
@@ -1106,11 +1106,11 @@ def load_master_database(nas_conn: SMBConnection) -> Dict[str, Any]:
             error_logger.log_database_error("load", f"Database load error: {e}")
             logger.error(f"Error loading database: {e}")
 
-    # Create new database
-    logger.info("Creating new master database...")
+    # No existing database - return empty structure for comparison
+    logger.info("No existing master database found - all files will be marked for processing")
     return {
         "schema_version": "2.0",
-        "last_updated": datetime.now().isoformat(),
+        "last_updated": "never",
         "transcripts": [],
     }
 
@@ -1380,20 +1380,8 @@ def main() -> None:
             nas_inventory, database_inventory
         )
 
-        # Step 5: Update master database
-        logger.info("Step 5: Updating master database...")
-        updated_database = update_master_database(
-            master_database, files_to_process, files_to_remove
-        )
-
-        # Step 6: Save updated database
-        logger.info("Step 6: Saving master database...")
-        if not save_master_database(nas_conn, updated_database):
-            logger.error("Failed to save master database")
-            return
-
-        # Step 7: Save processing queues
-        logger.info("Step 7: Saving processing queues...")
+        # Step 5: Save processing queues
+        logger.info("Step 5: Saving processing queues...")
         if not save_processing_queues(nas_conn, files_to_process, files_to_remove):
             logger.error("Failed to save processing queues")
             # Upload logs immediately on critical failure
@@ -1414,7 +1402,7 @@ def main() -> None:
         logger.info(f"Total transcripts in inventory: {len(nas_inventory)}")
         logger.info(f"Files to process: {len(files_to_process)}")
         logger.info(f"Files to remove: {len(files_to_remove)}")
-        logger.info(f"Master database records: {len(updated_database['transcripts'])}")
+        logger.info(f"Existing database records: {len(database_inventory)}")
         logger.info(f"Execution time: {execution_time}")
 
         # Upload log file to NAS
