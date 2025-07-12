@@ -194,6 +194,31 @@ CLIENT_MACHINE_NAME=SYNC-CLIENT
    - Comprehensive execution logs with selection decisions
    - Note: No master database is created (that's handled by Stage 3)
 
+### Testing Stage 3
+
+1. **Prerequisites**:
+   - Stage 2 must have run successfully (creates `files_to_process.json`)
+   - NAS config.json must include `stage_3` section with `dev_mode: true`
+
+2. **Execute Content Extraction**:
+   ```bash
+   python stage_3_content_processing/3_transcript_content_extraction.py
+   ```
+
+3. **Expected Outputs**:
+   - `extracted_transcript_sections.json`: Paragraph-level database records
+   - Each paragraph becomes a separate record with speaker attribution
+   - All Stage 2 fields preserved plus new content fields
+   - Development mode processes only 1-2 files for testing
+
+4. **Development Mode Settings**:
+   ```json
+   "stage_3": {
+     "dev_mode": true,
+     "dev_max_files": 2
+   }
+   ```
+
 ### Troubleshooting
 
 1. **"Config file not found"**: Upload `config.json` to NAS at correct path
