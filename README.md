@@ -16,6 +16,7 @@ factset/
 ├── stage_3_content_processing/            # XML content extraction & paragraph breakdown
 ├── stage_4_llm_classification/            # LLM-based section type classification
 ├── stage_5_qa_pairing/                    # Q&A conversation boundary detection
+├── stage_6_detailed_classification/       # Detailed financial category classification
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -96,6 +97,9 @@ python stage_4_llm_classification/4_transcript_llm_classification.py
 
 # Stage 5: Q&A conversation boundary detection and pairing (implemented)
 python stage_5_qa_pairing/5_transcript_qa_pairing.py
+
+# Stage 6: Detailed financial category classification (implemented)
+python stage_6_detailed_classification/6_transcript_detailed_classification.py
 ```
 
 **Current Status**: 
@@ -105,6 +109,7 @@ python stage_5_qa_pairing/5_transcript_qa_pairing.py
 - Stage 3 is production-ready with XML content extraction and paragraph-level breakdown ✅
 - Stage 4 is production-ready with LLM-based section type classification and enhanced execution metrics ✅
 - Stage 5 is production-ready with Q&A conversation boundary detection, fixed group counting, and comprehensive timing ✅
+- Stage 6 is production-ready with detailed financial category classification using dual processing approaches ✅
 - All stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
 
 ## Testing from Work Environment
@@ -334,6 +339,61 @@ LLM_CLIENT_SECRET=your_llm_client_secret
    - **Comprehensive Fallbacks**: LLM → XML type attributes → conservative grouping
    - **Cost Tracking**: Real-time token usage and final cost summary
 
+### Testing Stage 6
+
+1. **Prerequisites**:
+   - Stage 5 must have run successfully (creates `qa_paired_transcript_sections.json`)
+   - NAS config.json must include `stage_6` section with LLM configuration
+   - LLM API credentials configured in .env file (same as Stage 4/5)
+
+2. **Execute Detailed Classification**:
+   ```bash
+   python stage_6_detailed_classification/6_transcript_detailed_classification.py
+   ```
+
+3. **Expected Outputs**:
+   - `detailed_classified_sections.json`: Complete records with detailed financial category classifications
+   - Each paragraph gets 1 new field: detailed_classification (categories, confidence, method)
+   - Management Discussion: Speaker block windowing with 750-char prior context
+   - Q&A Groups: Complete conversation analysis using Stage 5 boundaries
+   - Development mode processes only 2 transcripts for testing
+
+4. **Development Mode Settings**:
+   ```json
+   "stage_6": {
+     "dev_mode": true,
+     "dev_max_transcripts": 2,
+     "processing_config": {
+       "md_paragraph_window_size": 5,
+       "prior_block_preview_chars": 750,
+       "max_speaker_blocks_context": 2
+     },
+     "llm_config": {
+       "model": "gpt-4-turbo",
+       "temperature": 0.1,
+       "max_tokens": 1500,
+       "base_url": "https://your-llm-api.com/v1",
+       "token_endpoint": "https://oauth.your-api.com/token",
+       "cost_per_1k_prompt_tokens": 0.03,
+       "cost_per_1k_completion_tokens": 0.06
+     }
+   }
+   ```
+
+5. **Classification Results**:
+   - **Categories**: Array of applicable financial categories (10 core categories)
+   - **Confidence**: 0.0-1.0 LLM confidence in classification decision
+   - **Method**: "speaker_block_windowing" (Management Discussion) or "complete_conversation" (Q&A)
+
+6. **Key Features**:
+   - **Dual Processing Approach**: Different strategies for Management Discussion vs Q&A sections
+   - **10 Financial Categories**: Comprehensive classification covering all major earnings call topics
+   - **Flexible Classification**: No minimum/maximum category requirements - applies all relevant
+   - **Enhanced Context**: 750-char prior speaker block previews with previous classifications
+   - **Per-Transcript OAuth Refresh**: Fresh token for each transcript (eliminates expiration issues)
+   - **LLM-Only Approach**: No fallback classifications - comprehensive error handling instead
+   - **Cost Tracking**: Real-time token usage and comprehensive cost monitoring
+
 ### Troubleshooting
 
 1. **"Config file not found"**: Upload `config.json` to NAS at correct path
@@ -547,6 +607,35 @@ Provides detailed summary including:
   - Enhanced operator detection excludes "thank you, next question" from Q&A groups
   - Real-time validation eliminates false warnings about decision inconsistencies
   - Simplified prompting focuses on speaker patterns vs complex thematic analysis
+
+### Stage 6: Detailed Financial Category Classification ✅ PRODUCTION READY
+- **Purpose**: Classify transcript content with detailed financial categories using dual processing approaches
+- **When to use**: After Stage 5 creates Q&A group boundaries for comprehensive content analysis
+- **Input**: qa_paired_transcript_sections.json from Stage 5 output
+- **Output**: detailed_classified_sections.json with comprehensive financial category classifications
+- **Features**:
+  - **Dual Processing Approach**: Management Discussion (speaker block windowing) vs Q&A Groups (complete conversation analysis)
+  - **10 Financial Categories**: Comprehensive classification covering all major earnings call topics (Financial Performance, Credit Quality, Capital Management, etc.)
+  - **Management Discussion Processing**: 5-paragraph windows within speaker blocks with 750-char prior context
+  - **Q&A Group Processing**: Complete conversation analysis using Stage 5 boundaries (single LLM call per group)
+  - **Flexible Classification**: No minimum/maximum category requirements - applies all relevant categories
+  - **Enhanced Context Formatting**: Full current speaker block + 750-char prior speaker block previews with previous classifications
+  - **Progressive Context**: Each window sees previous classifications within current speaker block
+  - **LLM-Only Approach**: No fallback classifications - comprehensive error handling instead
+  - **Per-Transcript OAuth Refresh**: Fresh token for each transcript (eliminates expiration issues)
+  - **CO-STAR Prompt Framework**: Structured prompts with embedded category descriptions
+  - **Function Calling Schemas**: Separate schemas for paragraph-level and conversation-level classification
+  - **Minimal Schema Extension**: Only 1 new field (detailed_classification with categories, confidence, method)
+  - **Cost Tracking**: Real-time token usage and comprehensive cost monitoring with detailed summaries
+  - **Development Mode**: Process only 2 transcripts for testing
+  - **Enhanced Error Logging**: Separate categories for LLM, authentication, classification, and processing errors
+- **Usage**: `python stage_6_detailed_classification/6_transcript_detailed_classification.py`
+- **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
+- **Authentication**: Uses same LLM credentials as Stage 4/5 (LLM_CLIENT_ID and LLM_CLIENT_SECRET)
+- **Classification Categories**:
+  - Financial Performance & Results, Credit Quality & Risk Management, Capital & Regulatory Management
+  - Strategic Initiatives & Transformation, Market Environment & Outlook, Operating Efficiency & Expenses
+  - Asset & Liability Management, Non-Interest Revenue & Segments, ESG & Sustainability, Insurance Operations
 
 ## Configuration
 
