@@ -14,6 +14,7 @@ factset/
 ├── stage_1_daily_sync/                    # Daily incremental sync (scheduled)
 ├── stage_2_processing/                    # Transcript consolidation & change detection
 ├── stage_3_content_processing/            # XML content extraction & paragraph breakdown
+├── stage_4_llm_classification/            # LLM-based section type classification
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -57,6 +58,8 @@ Required environment variables:
 - `NAS_SHARE_NAME` - NAS share name
 - `NAS_BASE_PATH` - Base path within NAS share
 - `CLIENT_MACHINE_NAME` - Client machine name for SMB
+- `LLM_CLIENT_ID` - LLM API client ID (for Stage 4)
+- `LLM_CLIENT_SECRET` - LLM API client secret (for Stage 4)
 
 ### 3. Setup NAS Configuration
 
@@ -86,6 +89,9 @@ python stage_2_processing/2_transcript_consolidation.py
 
 # Stage 3: XML content extraction and paragraph-level breakdown (implemented)
 python stage_3_content_processing/3_transcript_content_extraction.py
+
+# Stage 4: LLM-based transcript section classification (implemented)
+python stage_4_llm_classification/4_transcript_llm_classification.py
 ```
 
 **Current Status**: 
@@ -93,6 +99,7 @@ python stage_3_content_processing/3_transcript_content_extraction.py
 - Stage 1 is production-ready with enhanced folder structure and comprehensive error logging ✅
 - Stage 2 is production-ready with transcript consolidation and change detection ✅
 - Stage 3 is production-ready with XML content extraction and paragraph-level breakdown ✅
+- Stage 4 is production-ready with LLM-based section type classification ✅
 - All stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
 
 ## Testing from Work Environment
@@ -142,6 +149,10 @@ NAS_BASE_PATH=transcript_repository
 NAS_PORT=445
 CONFIG_PATH=Inputs/config/config.json
 CLIENT_MACHINE_NAME=SYNC-CLIENT
+
+# LLM Configuration (Stage 4)
+LLM_CLIENT_ID=your_llm_client_id
+LLM_CLIENT_SECRET=your_llm_client_secret
 ```
 
 ### Testing Stage 0
@@ -218,6 +229,46 @@ CLIENT_MACHINE_NAME=SYNC-CLIENT
      "dev_max_files": 2
    }
    ```
+
+### Testing Stage 4
+
+1. **Prerequisites**:
+   - Stage 3 must have run successfully (creates `extracted_transcript_sections.json`)
+   - NAS config.json must include `stage_4` section with LLM configuration
+   - LLM API credentials configured in .env file
+
+2. **Execute LLM Classification**:
+   ```bash
+   python stage_4_llm_classification/4_transcript_llm_classification.py
+   ```
+
+3. **Expected Outputs**:
+   - `classified_transcript_sections.json`: Complete records with section type classifications
+   - Each paragraph gets 3 new fields: section_type, section_type_confidence, section_type_method
+   - 3-level progressive classification: Direct → Breakpoint → Individual analysis
+   - Development mode processes only 2 transcripts for testing
+
+4. **Development Mode Settings**:
+   ```json
+   "stage_4": {
+     "dev_mode": true,
+     "dev_max_transcripts": 2,
+     "llm_config": {
+       "model": "gpt-4-turbo",
+       "temperature": 0.1,
+       "base_url": "https://your-llm-api.com/v1",
+       "token_endpoint": "https://oauth.your-api.com/token"
+     },
+     "classification_thresholds": {
+       "min_confidence": 0.7
+     }
+   }
+   ```
+
+5. **Classification Results**:
+   - **section_type**: "Management Discussion" or "Investor Q&A"
+   - **section_type_confidence**: 0.0-1.0 confidence score
+   - **section_type_method**: "section_uniform", "breakpoint_detection", or "contextual_individual"
 
 ### Troubleshooting
 
@@ -383,6 +434,23 @@ Provides detailed summary including:
 - **Usage**: `python stage_3_content_processing/3_transcript_content_extraction.py`
 - **Development**: Set `"dev_mode": true` in config.json to process limited files during testing
 
+### Stage 4: LLM-Based Classification ✅ PRODUCTION READY
+- **Purpose**: Add section type classification using 3-level progressive LLM analysis
+- **When to use**: After Stage 3 creates extracted content records
+- **Input**: extracted_transcript_sections.json from Stage 3 output
+- **Output**: classified_transcript_sections.json with section type classifications
+- **Features**:
+  - 3-level progressive classification system (Direct → Breakpoint → Individual)
+  - OAuth 2.0 authentication with SSL certificate management
+  - CO-STAR prompt framework with structured function calling
+  - Development mode (process only 2 transcripts for testing)
+  - Comprehensive error handling and recovery mechanisms
+  - Progressive API cost optimization (avg 1.5 calls per section)
+  - Adds exactly 3 fields: section_type, section_type_confidence, section_type_method
+- **Usage**: `python stage_4_llm_classification/4_transcript_llm_classification.py`
+- **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
+- **Authentication**: Requires LLM_CLIENT_ID and LLM_CLIENT_SECRET environment variables
+
 ## Configuration
 
 ### Authentication (.env file)
@@ -473,7 +541,12 @@ python stage_1_daily_sync/earnings_monitor.py
    - Check if API access is enabled for your account
    - Ensure proxy settings are correct if behind corporate firewall
 
-4. **Import Errors**
+4. **LLM Authentication Failed (Stage 4)**
+   - Verify LLM_CLIENT_ID and LLM_CLIENT_SECRET environment variables
+   - Check OAuth token endpoint URL in configuration
+   - Ensure SSL certificate is available on NAS
+
+5. **Import Errors**
    - Activate virtual environment: `source venv/bin/activate`
    - Install requirements: `pip install -r requirements.txt`
 
