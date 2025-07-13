@@ -582,33 +582,40 @@ def create_qa_boundary_prompt(formatted_context: str, current_block_id: int) -> 
 
 
 # Q&A Boundary Detection Schema
-qa_boundary_detection_schema = {
-    "name": "analyze_speaker_block_boundaries",
-    "description": "Analyze speaker block boundaries for Q&A group assignment",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "qa_group_decision": {
-                "type": "object",
-                "properties": {
-                    "current_block_id": {"type": "integer"},
-                    "qa_group_id": {"type": "integer"},
-                    "qa_group_start_block": {"type": "integer"},
-                    "qa_group_end_block": {"type": "integer"},
-                    "group_status": {
-                        "type": "string",
-                        "enum": ["group_start", "group_continue", "group_end", "standalone"]
+def create_qa_boundary_detection_tools():
+    """Create function calling tools for Q&A boundary detection."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "analyze_speaker_block_boundaries",
+                "description": "Analyze speaker block boundaries for Q&A group assignment",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "qa_group_decision": {
+                            "type": "object",
+                            "properties": {
+                                "current_block_id": {"type": "integer"},
+                                "qa_group_id": {"type": "integer"},
+                                "qa_group_start_block": {"type": "integer"},
+                                "qa_group_end_block": {"type": "integer"},
+                                "group_status": {
+                                    "type": "string",
+                                    "enum": ["group_start", "group_continue", "group_end", "standalone"]
+                                },
+                                "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                                "reasoning": {"type": "string"},
+                                "continue_to_next_block": {"type": "boolean"}
+                            },
+                            "required": ["current_block_id", "qa_group_id", "group_status", "confidence_score", "continue_to_next_block"]
+                        }
                     },
-                    "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                    "reasoning": {"type": "string"},
-                    "continue_to_next_block": {"type": "boolean"}
-                },
-                "required": ["current_block_id", "qa_group_id", "group_status", "confidence_score", "continue_to_next_block"]
+                    "required": ["qa_group_decision"]
+                }
             }
-        },
-        "required": ["qa_group_decision"]
-    }
-}
+        }
+    ]
 
 
 def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
@@ -655,8 +662,8 @@ def analyze_speaker_block_boundary(current_block_index: int,
         response = llm_client.chat.completions.create(
             model=config["stage_5"]["llm_config"]["model"],
             messages=[{"role": "user", "content": prompt}],
-            tools=[qa_boundary_detection_schema],
-            tool_choice={"type": "function", "function": {"name": "analyze_speaker_block_boundaries"}},
+            tools=create_qa_boundary_detection_tools(),
+            tool_choice="required",
             temperature=config["stage_5"]["llm_config"]["temperature"],
             max_tokens=config["stage_5"]["llm_config"]["max_tokens"]
         )
