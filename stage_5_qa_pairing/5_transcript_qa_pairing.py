@@ -543,11 +543,44 @@ SPEAKER BLOCK {block['speaker_block_id']}:
 {chr(10).join(paragraphs_text)}"""
 
 
-def create_qa_boundary_prompt(formatted_context: str, current_block_id: int) -> str:
+def create_qa_boundary_prompt(formatted_context: str, current_block_id: int, qa_state: Dict = None) -> str:
     """
-    Create sophisticated CO-STAR prompt for Q&A boundary detection with enhanced operator handling.
+    Create sophisticated CO-STAR prompt for Q&A boundary detection with state awareness and look-ahead context.
     """
+    # Extract state information
+    current_group_active = qa_state.get("group_active", False) if qa_state else False
+    current_group_id = qa_state.get("current_qa_group_id") if qa_state else None
+    last_status = qa_state.get("last_decision_status") if qa_state else None
+    next_block = qa_state.get("next_block") if qa_state else None
+    
+    # Create state context
+    state_context = f"""**CURRENT STATE**:
+- Q&A Group Active: {"YES" if current_group_active else "NO"}
+- Active Group ID: {current_group_id if current_group_id else "None"}
+- Last Decision: {last_status if last_status else "None"}
+- Next Block Preview: {next_block.get('speaker', 'None') if next_block else 'End of transcript'}"""
+    
+    # Create enhanced look-ahead guidance
+    lookahead_guidance = ""
+    current_block_index = qa_state.get("current_block_index", 0) if qa_state else 0
+    
+    if next_block:
+        next_speaker = next_block.get('speaker', '').lower()
+        is_next_operator = 'operator' in next_speaker
+        is_next_pleasantries = is_closing_pleasantries_block(next_block)
+        
+        if is_next_operator:
+            lookahead_guidance = "\n**LOOK-AHEAD ALERT**: Next block is operator - current block likely ends conversation."
+        elif is_next_pleasantries:
+            lookahead_guidance = "\n**LOOK-AHEAD ALERT**: Next block contains closing pleasantries - consider including in current group if active."
+        elif current_group_active and 'analyst' in next_speaker:
+            lookahead_guidance = "\n**LOOK-AHEAD ALERT**: Next block is new analyst - current block should end active group."
+    else:
+        lookahead_guidance = "\n**LOOK-AHEAD ALERT**: End of transcript - current block should end any active group."
+    
     return f"""**CONTEXT**: You are analyzing earnings call speaker blocks to determine Q&A conversation boundaries. Each speaker block contains one person's complete statement with their role and content clearly marked. Your goal is to capture complete conversational exchanges between question askers and institution responders.
+
+{state_context}{lookahead_guidance}
 
 **OBJECTIVE**: For the current speaker block (marked as DECISION POINT), determine:
 1. Does this block start a new Q&A group?
@@ -576,6 +609,12 @@ def create_qa_boundary_prompt(formatted_context: str, current_block_id: int) -> 
 
 **CRITICAL ANALYSIS INSTRUCTIONS**:
 
+**STATE-AWARE DECISION LOGIC (MANDATORY)**:
+- If NO active group: Look for question starts or operator management
+- If active group: Look for continuation, completion, or premature interruption
+- If group just ended: Don't create duplicate endings - look for new starts or pleasantries
+- Use next block preview to make better ending decisions
+
 **OPERATOR BLOCK HANDLING (MANDATORY)**:
 - If current block speaker contains "operator" → assign qa_group_id: null, group_status: "standalone"
 - Operator blocks manage call flow, introduce speakers, handle technical issues
@@ -586,10 +625,17 @@ def create_qa_boundary_prompt(formatted_context: str, current_block_id: int) -> 
 2. **Thematic Coherence**: 
    - Same topic/theme follow-ups → continue current Q&A group
    - Different topic/theme questions → start new Q&A group
-3. **Natural Boundaries**:
-   - "Thank you" + topic shift → end current group
-   - New analyst introduction → start new group
-   - Operator transitions between questions → natural break points
+3. **Natural Boundaries with Look-ahead**:
+   - "Thank you" + next block is operator/new speaker → end current group
+   - "Thank you" + next block continues theme → include thanks in group
+   - New analyst introduction → start new group (unless thanking previous)
+   - Operator transitions → natural break points
+
+**CLOSING PLEASANTRIES HANDLING**:
+- If current block contains "thank you", "appreciate", "helpful" AND active group exists:
+  - Check next block: if operator/new topic → include thanks and end group
+  - If unclear → include thanks in current group for completeness
+- Avoid creating separate groups for brief thanks - attach to preceding Q&A
 
 **SPEAKER TRANSITION ANALYSIS**:
 - Analyst→Executive: Typically question→answer flow (continue group)
@@ -682,6 +728,31 @@ def is_operator_block(speaker_block: Dict) -> bool:
     return False
 
 
+def is_closing_pleasantries_block(speaker_block: Dict) -> bool:
+    """
+    Detect if a speaker block contains closing pleasantries that should be attached to preceding Q&A.
+    """
+    # Combine all paragraph content for analysis
+    all_content = ""
+    for para in speaker_block.get("paragraphs", []):
+        content = para.get("paragraph_content", "")
+        all_content += " " + content.lower()
+    
+    # Check for closing pleasantry indicators
+    closing_indicators = [
+        "thank you", "thanks", "appreciate", "helpful", "great", "perfect",
+        "that's all", "that concludes", "no more questions", "no further questions"
+    ]
+    
+    # Check if content is brief and contains pleasantries
+    content_words = all_content.split()
+    is_brief = len(content_words) <= 20  # Short closing statements
+    
+    has_pleasantries = any(indicator in all_content for indicator in closing_indicators)
+    
+    return is_brief and has_pleasantries
+
+
 def analyze_speaker_block_boundary(current_block_index: int, 
                                  speaker_blocks: List[Dict],
                                  transcript_id: str,
@@ -710,6 +781,25 @@ def analyze_speaker_block_boundary(current_block_index: int,
                 "continue_to_next_block": True
             }
         
+        # Check for closing pleasantries when there's an active group
+        current_group_active = qa_state.get("group_active", False)
+        current_group_id = qa_state.get("current_qa_group_id")
+        
+        if (current_group_active and is_closing_pleasantries_block(current_block) and 
+            qa_state.get("last_decision_status") != "group_end"):
+            
+            logger.info(f"Block {current_block_id} identified as closing pleasantries - ending active group {current_group_id}")
+            return {
+                "current_block_id": current_block_id,
+                "qa_group_id": current_group_id,
+                "qa_group_start_block": None,  # Will be determined by group formation
+                "qa_group_end_block": current_block_id,
+                "group_status": "group_end",  # End group with pleasantries
+                "confidence_score": 0.9,  # High confidence in pleasantries detection
+                "reasoning": "Closing pleasantries - end group",
+                "continue_to_next_block": True
+            }
+        
         # Create context window for non-operator blocks
         window_blocks = create_speaker_block_window(current_block_index, speaker_blocks, qa_state)
         
@@ -718,8 +808,8 @@ def analyze_speaker_block_boundary(current_block_index: int,
                                                        next(i for i, b in enumerate(window_blocks) 
                                                            if b["speaker_block_id"] == current_block_id))
         
-        # Create prompt
-        prompt = create_qa_boundary_prompt(formatted_context, current_block_id)
+        # Create prompt with state awareness
+        prompt = create_qa_boundary_prompt(formatted_context, current_block_id, qa_state)
         
         # Make LLM API call
         response = llm_client.chat.completions.create(
@@ -809,25 +899,51 @@ def determine_qa_group_method(block_decisions: List[Dict]) -> str:
 
 
 def detect_decision_inconsistencies(decisions: List[Dict]) -> List[str]:
-    """Detect logical inconsistencies in Q&A group assignments."""
+    """Detect logical inconsistencies in Q&A group assignments using state machine validation."""
     issues = []
     
-    # Check for impossible sequences
-    for i in range(len(decisions) - 1):
-        current = decisions[i]
-        next_decision = decisions[i + 1]
+    # Track state machine progression
+    current_qa_group = None
+    group_state = "none"  # none, active, ended
+    
+    for i, decision in enumerate(decisions):
+        block_id = decision["current_block_id"]
+        status = decision["group_status"]
+        qa_group_id = decision.get("qa_group_id")
         
-        # Group end followed by same group continuation
-        if (current["group_status"] == "group_end" and 
-            next_decision.get("qa_group_id") == current["qa_group_id"] and
-            next_decision["group_status"] in ["group_continue"]):
-            issues.append(f"Block {current['current_block_id']} ends group but block {next_decision['current_block_id']} continues same group")
-        
-        # Group start without proper sequence
-        if (current["group_status"] == "group_start" and 
-            next_decision.get("qa_group_id") == current["qa_group_id"] and
-            next_decision["group_status"] not in ["group_continue", "group_end"]):
-            issues.append(f"Block {current['current_block_id']} starts group but next block has invalid status")
+        # Skip operator blocks (they should be standalone)
+        if status == "standalone" and qa_group_id is None:
+            continue
+            
+        # State machine validation
+        if status == "group_start":
+            if group_state == "active" and current_qa_group is not None:
+                issues.append(f"Block {block_id}: Starting new group {qa_group_id} without ending active group {current_qa_group}")
+            current_qa_group = qa_group_id
+            group_state = "active"
+            
+        elif status == "group_continue":
+            if group_state != "active":
+                issues.append(f"Block {block_id}: Continuing group {qa_group_id} but no active group (state: {group_state})")
+            elif qa_group_id != current_qa_group:
+                issues.append(f"Block {block_id}: Continuing different group {qa_group_id} (active: {current_qa_group})")
+                
+        elif status == "group_end":
+            if group_state != "active":
+                issues.append(f"Block {block_id}: Ending group {qa_group_id} but no active group (state: {group_state})")
+            elif qa_group_id != current_qa_group:
+                issues.append(f"Block {block_id}: Ending different group {qa_group_id} (active: {current_qa_group})")
+            else:
+                group_state = "ended"
+                # Don't reset current_qa_group yet - check for duplicate ends
+                
+        # Check for multiple consecutive group ends
+        if i > 0:
+            prev_decision = decisions[i-1]
+            if (prev_decision["group_status"] == "group_end" and 
+                status == "group_end" and 
+                prev_decision.get("qa_group_id") == qa_group_id):
+                issues.append(f"Block {block_id}: Multiple consecutive group_end for same group {qa_group_id}")
     
     return issues
 
@@ -925,22 +1041,60 @@ def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_
         
         logger.info(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks")
         
-        # Process each speaker block for boundary decisions
+        # Process each speaker block for boundary decisions with enhanced state tracking
         all_decisions = []
-        qa_state = {}
+        qa_state = {
+            "current_qa_group_id": None,
+            "group_active": False,
+            "last_decision_status": None,
+            "last_block_id": None,
+            "question_start_index": None,
+            "extends_question_start": False
+        }
         
         for i, block in enumerate(qa_speaker_blocks):
+            # Add look-ahead context for better end decisions
+            next_block = qa_speaker_blocks[i + 1] if i + 1 < len(qa_speaker_blocks) else None
+            qa_state["next_block"] = next_block
+            qa_state["current_block_index"] = i
+            
             decision = analyze_speaker_block_boundary(i, qa_speaker_blocks, transcript_id, qa_state)
             
             if decision:
                 all_decisions.append(decision)
                 
-                # Update QA state for dynamic window extension
-                if decision["group_status"] == "group_start":
+                # Update comprehensive QA state tracking
+                block_id = decision["current_block_id"]
+                status = decision["group_status"]
+                group_id = decision.get("qa_group_id")
+                
+                # State machine updates
+                if status == "group_start":
+                    qa_state["current_qa_group_id"] = group_id
+                    qa_state["group_active"] = True
                     qa_state["question_start_index"] = i
                     qa_state["extends_question_start"] = True
-                elif decision["group_status"] == "group_end":
+                    
+                elif status == "group_continue":
+                    # Group should already be active
+                    if not qa_state["group_active"] or qa_state["current_qa_group_id"] != group_id:
+                        logger.warning(f"Block {block_id}: State inconsistency - continuing group {group_id} but state shows active: {qa_state['group_active']}, current: {qa_state['current_qa_group_id']}")
+                    
+                elif status == "group_end":
+                    qa_state["group_active"] = False
                     qa_state["extends_question_start"] = False
+                    # Keep current_qa_group_id for duplicate end detection
+                    
+                elif status == "standalone":
+                    # Operator blocks don't change group state
+                    pass
+                
+                # Update last decision tracking
+                qa_state["last_decision_status"] = status
+                qa_state["last_block_id"] = block_id
+                
+                logger.debug(f"Block {block_id} state update: active={qa_state['group_active']}, current_group={qa_state['current_qa_group_id']}, status={status}")
+                
             else:
                 # LLM analysis failed, use XML fallback
                 logger.warning(f"LLM analysis failed for block {block['speaker_block_id']}, falling back to XML grouping")
