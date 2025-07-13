@@ -688,5 +688,30 @@
       "cost_per_1k_completion_tokens": 0.06
     },
     "description": "Q&A conversation boundary detection and pairing using speaker block analysis"
+  },
+  "stage_6": {
+    "dev_mode": true,
+    "dev_max_transcripts": 2,
+    "input_source": "Outputs/Refresh/qa_paired_transcript_sections.json",
+    "output_file": "detailed_classified_sections.json",
+    "output_path": "Outputs/Refresh",
+    "processing_config": {
+      "md_paragraph_window_size": 5,
+      "prior_block_preview_chars": 750,
+      "max_speaker_blocks_context": 2,
+      "description": "Management Discussion processing parameters with 750-char prior block previews"
+    },
+    "llm_config": {
+      "token_endpoint": "https://oauth2.example.com/token",
+      "base_url": "https://api.example.com/v1",
+      "model": "gpt-4-turbo",
+      "temperature": 0.1,
+      "max_tokens": 1500,
+      "timeout": 90,
+      "max_retries": 3,
+      "cost_per_1k_prompt_tokens": 0.03,
+      "cost_per_1k_completion_tokens": 0.06
+    },
+    "description": "Detailed paragraph-level classification for Management Discussion and Q&A topic analysis"
   }
 }
