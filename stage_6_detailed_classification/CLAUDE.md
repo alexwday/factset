@@ -28,7 +28,7 @@ Stage 6 processes Stage 5 output to add detailed financial category classificati
 
 ### Financial Content Categories
 
-**10 Core Categories:**
+**11 Core Categories:**
 1. **Financial Performance & Results**: Revenue, earnings per share, profitability metrics (ROE/ROA), net income, general financial health indicators
 2. **Credit Quality & Risk Management**: Loan loss provisions, non-performing loans, charge-offs, delinquency trends, reserve coverage ratios, portfolio risk assessment
 3. **Capital & Regulatory Management**: Capital adequacy ratios (CET1, Tier 1, leverage), stress test results, capital allocation decisions, regulatory requirements
@@ -39,6 +39,13 @@ Stage 6 processes Stage 5 output to add detailed financial category classificati
 8. **Non-Interest Revenue & Segments**: Fee-based income streams, trading revenues, wealth management, investment banking, divisional performance
 9. **ESG & Sustainability**: Environmental commitments, social responsibility initiatives, governance improvements, climate risk management, sustainability reporting
 10. **Insurance Operations**: Insurance-specific metrics including premiums, underwriting results, combined ratios, catastrophe losses, reserve development
+11. **Other**: Non-contributory content like operator introductions, executive introductions, call logistics, pleasantries, transitions without financial substance
+
+### Null Handling Strategy
+- **Automatic "Other" Assignment**: If LLM returns empty categories or null values, system automatically assigns ["Other"]
+- **Clean Data Guarantee**: All classified records will have non-null category_type values
+- **Operator Content Detection**: System recognizes introductory and transitional content that doesn't contribute to financial analysis
+- **Quality Assurance**: Prevents forcing non-financial content into inappropriate financial categories
 
 ### LLM Integration Architecture
 
@@ -97,7 +104,7 @@ Two different schemas for the two processing approaches:
 ## Output Schema
 
 ### Enhanced Records
-Stage 6 adds exactly 1 new field to each Stage 5 record (following Stage 4/5 pattern):
+Stage 6 adds exactly 3 new fields to each Stage 5 record (following Stage 4/5 pattern):
 
 ```json
 {
@@ -114,12 +121,10 @@ Stage 6 adds exactly 1 new field to each Stage 5 record (following Stage 4/5 pat
   "qa_group_confidence": 0.89,
   "qa_group_method": "llm_detection",
   
-  // New Stage 6 field
-  "detailed_classification": {
-    "categories": ["Credit Quality & Risk Management", "Capital & Regulatory Management"],
-    "confidence": 0.87,
-    "method": "speaker_block_windowing"  // or "complete_conversation"
-  }
+  // New Stage 6 fields
+  "category_type": ["Credit Quality & Risk Management", "Capital & Regulatory Management"],
+  "category_type_confidence": 0.87,
+  "category_type_method": "speaker_block_windowing"  // or "complete_conversation"
 }
 ```
 
