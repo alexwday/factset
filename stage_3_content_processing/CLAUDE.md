@@ -26,8 +26,10 @@ Stage 3 processes XML transcripts from Stage 2's processing queue and extracts p
 ### Output Structure
 Each paragraph becomes a database record with:
 - **All Stage 2 fields**: ticker, fiscal_year, filename, etc. (complete preservation)
+- **section_id**: Sequential section identifier (1, 2, 3...) for section ordering
 - **section_name**: "Presentation", "Q&A Session", etc.
-- **paragraph_order**: Sequential numbering across entire transcript for reconstruction
+- **paragraph_id**: Sequential numbering across entire transcript for reconstruction
+- **speaker_block_id**: Sequential speaker block identifier (1, 2, 3...) for grouping speaker statements
 - **question_answer_flag**: null, "question", or "answer" from XML
 - **speaker**: Formatted speaker string with name, title, affiliation
 - **paragraph_content**: Clean paragraph text
@@ -66,6 +68,14 @@ Each paragraph becomes a database record with:
 - `event_id = parts[5]` (not parts[4])
 - `report_id = parts[6]` (not parts[5])
 **Impact**: Fixed incorrect event_id values showing as transcript_type
+
+### 3. Enhanced Data Structure for Stage 4 Integration (Fixed 2024-07-13)
+**Enhancement**: Added section and speaker block tracking for LLM classification
+**Changes**:
+- Added `section_id`: Sequential section identifier (1, 2, 3...)
+- Renamed `paragraph_order` to `paragraph_id` for consistency
+- Enhanced `speaker_block_id`: Sequential speaker block identifier (1, 2, 3...)
+**Impact**: Enables section reconstruction and speaker block grouping for downstream LLM classification
 
 ## Configuration
 

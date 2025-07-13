@@ -569,7 +569,9 @@ def extract_transcript_paragraphs(
         # Parse XML (reuse logic from HTML viewer)
         transcript_data = parse_transcript_xml(xml_content)
         paragraph_records = []
-        global_paragraph_order = 1  # Sequential across entire transcript
+        global_paragraph_id = 1  # Sequential across entire transcript
+        speaker_block_id = 1  # Sequential across entire transcript
+        section_id = 1  # Sequential section identifier
         
         # Iterate through sections -> speakers -> paragraphs
         for section in transcript_data['sections']:
@@ -578,6 +580,8 @@ def extract_transcript_paragraphs(
             for speaker_block in section['speakers']:
                 speaker_id = speaker_block['id']
                 speaker_type = speaker_block.get('type', '')  # 'q', 'a', or ''
+                current_speaker_block_id = speaker_block_id
+                speaker_block_id += 1  # Increment for next speaker block
                 
                 # Get speaker details from participants
                 speaker_info = transcript_data['participants'].get(speaker_id, {})
@@ -597,15 +601,19 @@ def extract_transcript_paragraphs(
                             **original_record,  # All fields from Stage 2
                             
                             # New Stage 3 fields (reordered)
+                            "section_id": section_id,
                             "section_name": section_name,
-                            "paragraph_order": global_paragraph_order,
+                            "paragraph_id": global_paragraph_id,
+                            "speaker_block_id": current_speaker_block_id,
                             "question_answer_flag": qa_flag,
                             "speaker": speaker_string,
                             "paragraph_content": paragraph_text.strip()
                         }
                         
                         paragraph_records.append(paragraph_record)
-                        global_paragraph_order += 1
+                        global_paragraph_id += 1
+            
+            section_id += 1  # Increment for next section
         
         logger.info(f"Extracted {len(paragraph_records)} paragraphs from {original_record.get('filename', 'unknown')}")
         return paragraph_records
