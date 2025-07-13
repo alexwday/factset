@@ -513,6 +513,7 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
             "output_path": str,
             "llm_config": dict,
             "classification_thresholds": dict,
+            "content_limits": dict,
         },
         "monitored_institutions": dict,
     }
@@ -638,6 +639,14 @@ def create_breakpoint_detection_tools():
     ]
 
 
+def format_paragraph_content(content: str) -> str:
+    """Format paragraph content with configurable truncation."""
+    max_chars = config["stage_4"]["content_limits"]["max_paragraph_chars"]
+    if len(content) <= max_chars:
+        return content
+    return content[:max_chars] + "..."
+
+
 def create_individual_classification_tools():
     """Create function calling tools for individual speaker block classification."""
     return [
@@ -693,8 +702,9 @@ def classify_section_level_1(section_records: List[Dict[str, Any]]) -> Optional[
         
         # Build content preview
         content_preview = []
-        for i, record in enumerate(section_records[:5]):  # First 5 paragraphs
-            content_preview.append(f"{record['speaker']}: {record['paragraph_content'][:200]}...")
+        for record in section_records:  # ALL paragraphs
+            formatted_content = format_paragraph_content(record['paragraph_content'])
+            content_preview.append(f"{record['speaker']}: {formatted_content}")
         
         # CO-STAR prompt
         system_prompt = f"""
@@ -814,8 +824,13 @@ def classify_section_level_2(section_records: List[Dict[str, Any]]) -> Optional[
         block_index = []
         for i, (block_id, block_records) in enumerate(sorted(speaker_blocks.items()), 1):
             speaker = block_records[0]["speaker"]
-            content_preview = " ".join([r["paragraph_content"] for r in block_records])[:300]
-            block_index.append(f"{i}. [{speaker}] {content_preview}...")
+            # Format ALL paragraphs in this speaker block with truncation
+            formatted_paragraphs = []
+            for record in block_records:
+                formatted_content = format_paragraph_content(record["paragraph_content"])
+                formatted_paragraphs.append(formatted_content)
+            content_preview = " ".join(formatted_paragraphs)
+            block_index.append(f"{i}. [{speaker}] {content_preview}")
         
         # Get section metadata
         first_record = section_records[0]
@@ -956,21 +971,36 @@ def classify_section_level_3(section_records: List[Dict[str, Any]]) -> Dict[str,
                 prev_block_id = sorted_block_ids[j]
                 prev_records = speaker_blocks[prev_block_id]
                 prev_speaker = prev_records[0]["speaker"]
-                prev_content = " ".join([r["paragraph_content"] for r in prev_records])[:200]
+                # Format ALL paragraphs in previous block with truncation
+                formatted_paragraphs = []
+                for record in prev_records:
+                    formatted_content = format_paragraph_content(record["paragraph_content"])
+                    formatted_paragraphs.append(formatted_content)
+                prev_content = " ".join(formatted_paragraphs)
                 prev_classification = block_classifications.get(prev_block_id, {}).get("classification", "Unknown")
-                prev_context.append(f"Block {j+1} [{prev_speaker}] ({prev_classification}): {prev_content}...")
+                prev_context.append(f"Block {j+1} [{prev_speaker}] ({prev_classification}): {prev_content}")
             
             next_context = []
             if i + 1 < len(sorted_block_ids):
                 next_block_id = sorted_block_ids[i + 1]
                 next_records = speaker_blocks[next_block_id]
                 next_speaker = next_records[0]["speaker"]
-                next_content = " ".join([r["paragraph_content"] for r in next_records])[:200]
-                next_context.append(f"Next Block [{next_speaker}]: {next_content}...")
+                # Format ALL paragraphs in next block with truncation
+                formatted_paragraphs = []
+                for record in next_records:
+                    formatted_content = format_paragraph_content(record["paragraph_content"])
+                    formatted_paragraphs.append(formatted_content)
+                next_content = " ".join(formatted_paragraphs)
+                next_context.append(f"Next Block [{next_speaker}]: {next_content}")
             
             # Current block
             current_speaker = block_records[0]["speaker"]
-            current_content = " ".join([r["paragraph_content"] for r in block_records])
+            # Format ALL paragraphs in current block with truncation
+            formatted_paragraphs = []
+            for record in block_records:
+                formatted_content = format_paragraph_content(record["paragraph_content"])
+                formatted_paragraphs.append(formatted_content)
+            current_content = " ".join(formatted_paragraphs)
             
             # Get section metadata
             first_record = section_records[0]
@@ -1015,7 +1045,7 @@ Previous Context:
 
 Current Speaker Block:
 Speaker: {current_speaker}
-Content: {current_content[:1000]}{"..." if len(current_content) > 1000 else ""}
+Content: {current_content}
 
 Future Context:
 {chr(10).join(next_context) if next_context else "No future context"}

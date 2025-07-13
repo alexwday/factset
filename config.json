@@ -341,6 +341,10 @@
     "classification_thresholds": {
       "min_confidence": 0.7
     },
+    "content_limits": {
+      "max_paragraph_chars": 750,
+      "description": "Maximum characters per paragraph for LLM classification (preserves full structural context while managing token usage)"
+    },
     "description": "LLM-based transcript section classification"
   }
 }
