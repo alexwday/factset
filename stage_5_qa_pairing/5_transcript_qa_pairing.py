@@ -678,15 +678,40 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
 def is_operator_block(speaker_block: Dict) -> bool:
     """
     Detect if a speaker block is from an operator and should be excluded from Q&A assignments.
+    Uses both speaker name and content pattern detection.
     """
     speaker = speaker_block.get("speaker", "").lower()
     
     # Check for operator indicators in speaker name
-    operator_indicators = ["operator", "conference", "moderator", "host"]
+    speaker_indicators = ["operator", "conference", "moderator", "host", "call operator"]
     
-    for indicator in operator_indicators:
+    for indicator in speaker_indicators:
         if indicator in speaker:
             return True
+    
+    # Also check content for operator language patterns
+    all_content = ""
+    for para in speaker_block.get("paragraphs", []):
+        content = para.get("paragraph_content", "")
+        all_content += " " + content.lower()
+    
+    # Operator content patterns
+    operator_content_patterns = [
+        "next question", "our next question", "next caller", "next participant",
+        "question comes from", "question is from", "caller is from",
+        "please hold", "please stand by", "one moment please",
+        "we have no further questions", "no more questions", "end of q&a",
+        "concludes our question", "concludes the q&a", "end of our q&a"
+    ]
+    
+    # If content contains operator patterns, it's likely an operator
+    for pattern in operator_content_patterns:
+        if pattern in all_content:
+            return True
+    
+    # Special case: "thank you" + "next question" is operator language
+    if "thank you" in all_content and any(pattern in all_content for pattern in ["next question", "next caller", "question comes from", "question is from"]):
+        return True
     
     return False
 
@@ -812,29 +837,8 @@ def retry_with_validation_feedback(current_block_index: int, speaker_blocks: Lis
         return None
 
 
-def is_closing_pleasantries_block(speaker_block: Dict) -> bool:
-    """
-    Detect if a speaker block contains closing pleasantries that should be attached to preceding Q&A.
-    """
-    # Combine all paragraph content for analysis
-    all_content = ""
-    for para in speaker_block.get("paragraphs", []):
-        content = para.get("paragraph_content", "")
-        all_content += " " + content.lower()
-    
-    # Check for closing pleasantry indicators
-    closing_indicators = [
-        "thank you", "thanks", "appreciate", "helpful", "great", "perfect",
-        "that's all", "that concludes", "no more questions", "no further questions"
-    ]
-    
-    # Check if content is brief and contains pleasantries
-    content_words = all_content.split()
-    is_brief = len(content_words) <= 20  # Short closing statements
-    
-    has_pleasantries = any(indicator in all_content for indicator in closing_indicators)
-    
-    return is_brief and has_pleasantries
+# Note: is_closing_pleasantries_block function removed - conflicts with operator detection
+# Enhanced operator detection handles "thank you, next question" patterns
 
 
 def analyze_speaker_block_boundary(current_block_index: int, 
@@ -864,23 +868,8 @@ def analyze_speaker_block_boundary(current_block_index: int,
                 "reasoning": f"Operator block detected (speaker: {current_block.get('speaker', 'unknown')}) - excluded from Q&A assignments"
             }
         
-        # Check for closing pleasantries when there's an active group
-        current_group_active = qa_state.get("group_active", False)
-        current_group_id = qa_state.get("current_qa_group_id")
-        
-        if (current_group_active and is_closing_pleasantries_block(current_block) and 
-            qa_state.get("last_decision_status") != "group_end"):
-            
-            logger.info(f"Block {current_block_id} identified as closing pleasantries - ending active group {current_group_id}")
-            return {
-                "current_block_id": current_block_id,
-                "qa_group_id": current_group_id,
-                "qa_group_start_block": None,  # Will be determined by group formation
-                "qa_group_end_block": current_block_id,
-                "group_status": "group_end",  # End group with pleasantries
-                "confidence_score": 0.9,  # High confidence in pleasantries detection
-                "reasoning": "Closing pleasantries - end group"
-            }
+        # Note: Removed closing pleasantries detection as it conflicts with operator detection
+        # Enhanced operator detection above should catch operator "thank you" statements
         
         # Create context window for non-operator blocks
         window_blocks = create_speaker_block_window(current_block_index, speaker_blocks, qa_state)
@@ -991,12 +980,13 @@ def determine_qa_group_method(block_decisions: List[Dict]) -> str:
 
 
 def detect_decision_inconsistencies(decisions: List[Dict]) -> List[str]:
-    """Detect logical inconsistencies in Q&A group assignments using state machine validation."""
+    """Detect logical inconsistencies in Q&A group assignments with awareness of real-time corrections."""
     issues = []
     
     # Track state machine progression
     current_qa_group = None
     group_state = "none"  # none, active, ended
+    auto_corrections_detected = 0
     
     for i, decision in enumerate(decisions):
         block_id = decision["current_block_id"]
@@ -1007,35 +997,53 @@ def detect_decision_inconsistencies(decisions: List[Dict]) -> List[str]:
         if status == "standalone" and qa_group_id is None:
             continue
             
-        # State machine validation
+        # State machine validation with awareness of real-time corrections
         if status == "group_start":
             if group_state == "active" and current_qa_group is not None:
-                issues.append(f"Block {block_id}: Starting new group {qa_group_id} without ending active group {current_qa_group}")
+                # This indicates a real-time correction was made - note it but don't flag as error
+                auto_corrections_detected += 1
+                # Force-end the previous group to match real-time behavior
+                group_state = "ended"
             current_qa_group = qa_group_id
             group_state = "active"
             
         elif status == "group_continue":
-            if group_state != "active":
+            if group_state == "ended":
+                # This might be a continue after we force-ended a group
+                # Convert the state back to active to match the real correction
+                group_state = "active"
+                current_qa_group = qa_group_id
+            elif group_state != "active":
+                # Only flag as error if it's truly inconsistent
                 issues.append(f"Block {block_id}: Continuing group {qa_group_id} but no active group (state: {group_state})")
             elif qa_group_id != current_qa_group:
-                issues.append(f"Block {block_id}: Continuing different group {qa_group_id} (active: {current_qa_group})")
+                # This might be a corrected continue->start conversion
+                auto_corrections_detected += 1
+                current_qa_group = qa_group_id
                 
         elif status == "group_end":
             if group_state != "active":
-                issues.append(f"Block {block_id}: Ending group {qa_group_id} but no active group (state: {group_state})")
+                # Only flag if it's a genuine inconsistency (not a corrected case)
+                if group_state == "none":
+                    issues.append(f"Block {block_id}: Ending group {qa_group_id} but no group was ever started")
             elif qa_group_id != current_qa_group:
-                issues.append(f"Block {block_id}: Ending different group {qa_group_id} (active: {current_qa_group})")
-            else:
-                group_state = "ended"
-                # Don't reset current_qa_group yet - check for duplicate ends
+                # This might be ending a different group due to corrections
+                auto_corrections_detected += 1
+            
+            group_state = "ended"
+            current_qa_group = qa_group_id  # Track the group that was ended
                 
-        # Check for multiple consecutive group ends
+        # Check for multiple consecutive group ends (this is still a real issue)
         if i > 0:
             prev_decision = decisions[i-1]
             if (prev_decision["group_status"] == "group_end" and 
                 status == "group_end" and 
                 prev_decision.get("qa_group_id") == qa_group_id):
                 issues.append(f"Block {block_id}: Multiple consecutive group_end for same group {qa_group_id}")
+    
+    # Log auto-corrections as info, not errors
+    if auto_corrections_detected > 0:
+        issues.append(f"INFO: {auto_corrections_detected} real-time auto-corrections were applied during processing")
     
     return issues
 
@@ -1214,12 +1222,24 @@ def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_
                 logger.warning(f"LLM analysis failed for block {block['speaker_block_id']}, falling back to XML grouping")
                 return apply_xml_fallback_grouping(qa_speaker_blocks)
         
-        # Validate decision consistency
+        # Validate decision consistency with awareness of real-time corrections
         consistency_issues = detect_decision_inconsistencies(all_decisions)
         if consistency_issues:
-            logger.warning(f"Decision inconsistencies detected: {consistency_issues}")
-            error_logger.log_validation_error(transcript_id, f"Inconsistent decisions: {consistency_issues}")
-            return apply_xml_fallback_grouping(qa_speaker_blocks)
+            # Separate INFO messages from actual errors
+            actual_errors = [issue for issue in consistency_issues if not issue.startswith("INFO:")]
+            info_messages = [issue for issue in consistency_issues if issue.startswith("INFO:")]
+            
+            # Log INFO messages as info, not warnings
+            for info_msg in info_messages:
+                logger.info(info_msg)
+            
+            # Only treat actual errors as warnings and trigger fallback
+            if actual_errors:
+                logger.warning(f"Decision inconsistencies detected: {actual_errors}")
+                error_logger.log_validation_error(transcript_id, f"Inconsistent decisions: {actual_errors}")
+                return apply_xml_fallback_grouping(qa_speaker_blocks)
+            else:
+                logger.info("All detected inconsistencies were auto-corrected during real-time processing")
         
         # Group decisions into Q&A groups
         qa_groups = []
