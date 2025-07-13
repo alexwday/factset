@@ -1,13 +1,13 @@
 # Stage 4: LLM-Based Transcript Classification - Context for Claude
 
 ## Overview
-Stage 4 processes Stage 3 output to add LLM-based section type classification. Uses a sophisticated 3-level progressive classification system to identify "Management Discussion" vs "Investor Q&A" content with high accuracy and minimal API costs.
+Stage 4 processes Stage 3 output to add LLM-based section type classification. Uses a sophisticated 3-level progressive classification system to identify "Management Discussion" vs "Investor Q&A" content with high accuracy and comprehensive cost tracking.
 
 ## Current Status ✅ PRODUCTION READY
 - **Script**: `4_transcript_llm_classification.py` - Complete 3-level classification system
 - **Input**: `extracted_transcript_sections.json` from Stage 3 output
 - **Output**: `classified_transcript_sections.json` with section type classifications
-- **Features**: OAuth authentication, SSL support, progressive classification, comprehensive error handling
+- **Features**: OAuth authentication, SSL support, progressive classification, comprehensive cost tracking, optimized content handling
 
 ## Key Business Logic
 
@@ -146,10 +146,15 @@ Stage 4 adds exactly 3 new fields to each Stage 3 record:
     "base_url": "https://your-llm-api.com/v1",
     "token_endpoint": "https://oauth.your-api.com/token",
     "timeout": 60,
-    "max_retries": 3
+    "max_retries": 3,
+    "cost_per_1k_prompt_tokens": 0.03,
+    "cost_per_1k_completion_tokens": 0.06
   },
   "classification_thresholds": {
     "min_confidence": 0.7
+  },
+  "content_limits": {
+    "max_paragraph_chars": 750
   }
 }
 ```
@@ -192,13 +197,22 @@ def classify_transcript_sections(transcript_records):
 - **Rate Limiting**: 1-second delays between transcripts
 - **Circuit Breaker**: Retry logic with exponential backoff
 - **Fallback Classifications**: Default to "Management Discussion" on errors
-- **Comprehensive Logging**: Separate JSON files for different error types
+- **Cost Tracking**: Real-time token usage and cost monitoring with detailed summaries
+
+### Cost Tracking & Budget Management
+- **Real-time Cost Calculation**: Per-call cost display for Level 1, 2, and 3 classifications
+- **Configurable Token Rates**: Set cost_per_1k_prompt_tokens and cost_per_1k_completion_tokens in config
+- **Cumulative Cost Tracking**: Accumulates total cost and token usage throughout execution
+- **Final Cost Summary**: Detailed execution report with total cost, token usage, and efficiency metrics
+- **Example Output**: "Total tokens used: 125,847 | Total LLM cost: $4.2314 | Average cost per 1K tokens: $0.0336"
 
 ### Performance Optimization
 - **Batch Processing**: Groups records by transcript for efficiency
 - **Progressive Efficiency**: 70-80% resolved at Level 1, 15-20% at Level 2, 5-10% at Level 3
 - **API Cost Minimization**: Only escalates to higher levels when needed
+- **Content Optimization**: Full sections sent with paragraph-level character limits (750 chars per paragraph)
 - **Development Mode**: Limits transcripts processed for testing
+- **Cost Tracking**: Configurable token costs with real-time budget monitoring
 
 ## Security & Standards Compliance
 
@@ -216,7 +230,7 @@ def classify_transcript_sections(transcript_records):
 ### Error Logging ✅
 - **Specific Error Types**: LLM, authentication, classification, processing
 - **Context Preservation**: Detailed error information with recovery guidance
-- **Audit Trail**: Complete processing logs with confidence metrics
+- **Cost Tracking**: Real-time token usage and cost monitoring with detailed summaries
 
 ## Integration with Pipeline
 
@@ -256,6 +270,8 @@ python stage_4_llm_classification/4_transcript_llm_classification.py
 - **Level 2 Success**: 2 API calls per section (15-20% of cases)  
 - **Level 3 Required**: 2 + N API calls per section (5-10% of cases)
 - **Average Cost**: ~1.5 API calls per section across all levels
+- **Token Usage**: 5,000-15,000 tokens per call (increased from previous 300-500 for better accuracy)
+- **Cost Summary**: Final execution report shows total tokens, total cost, and average cost per 1K tokens
 
 ### Scalability
 - **Linear Scaling**: Performance scales with number of sections and paragraphs
