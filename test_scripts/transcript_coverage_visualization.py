@@ -21,6 +21,7 @@ from pathlib import Path
 from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 import re
+import io
 
 # Load environment variables
 load_dotenv()
@@ -32,87 +33,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Institution categories from CLAUDE.md
-INSTITUTION_CATEGORIES = {
-    "Canadian": {
-        "institutions": ["RY-CA", "TD-CA", "BNS-CA", "BMO-CA", "CM-CA", "NA-CA", "LB-CA", "CWB-CA"],
-        "names": {
-            "RY-CA": "Royal Bank of Canada",
-            "TD-CA": "Toronto-Dominion Bank", 
-            "BNS-CA": "Bank of Nova Scotia",
-            "BMO-CA": "Bank of Montreal",
-            "CM-CA": "Canadian Imperial Bank of Commerce",
-            "NA-CA": "National Bank of Canada",
-            "LB-CA": "Laurentian Bank",
-            "CWB-CA": "Canadian Western Bank"
-        }
-    },
-    "US": {
-        "institutions": ["JPM-US", "BAC-US", "WFC-US", "C-US", "GS-US", "MS-US", "USB-US", "PNC-US", "TFC-US", "COF-US", "SCHW-US"],
-        "names": {
-            "JPM-US": "JPMorgan Chase",
-            "BAC-US": "Bank of America",
-            "WFC-US": "Wells Fargo",
-            "C-US": "Citigroup",
-            "GS-US": "Goldman Sachs",
-            "MS-US": "Morgan Stanley",
-            "USB-US": "U.S. Bancorp",
-            "PNC-US": "PNC Financial Services",
-            "TFC-US": "Truist Financial",
-            "COF-US": "Capital One",
-            "SCHW-US": "Charles Schwab"
-        }
-    },
-    "European": {
-        "institutions": ["BCS-GB", "LLOY-GB", "RBS-GB", "HSBA-GB", "STAN-GB", "DBK-DE", "CBK-DE", "BNP-FR", "ACA-FR", "GLE-FR", "SAN-ES", "BBVA-ES", "ISP-IT", "UCG-IT", "ING-NL", "UBS-CH", "CSGN-CH"],
-        "names": {
-            "BCS-GB": "Barclays",
-            "LLOY-GB": "Lloyds Banking Group",
-            "RBS-GB": "NatWest Group",
-            "HSBA-GB": "HSBC",
-            "STAN-GB": "Standard Chartered",
-            "DBK-DE": "Deutsche Bank",
-            "CBK-DE": "Commerzbank",
-            "BNP-FR": "BNP Paribas",
-            "ACA-FR": "Credit Agricole",
-            "GLE-FR": "Societe Generale",
-            "SAN-ES": "Banco Santander",
-            "BBVA-ES": "BBVA",
-            "ISP-IT": "Intesa Sanpaolo",
-            "UCG-IT": "UniCredit",
-            "ING-NL": "ING Group",
-            "UBS-CH": "UBS",
-            "CSGN-CH": "Credit Suisse"
-        }
-    },
-    "Insurance": {
-        "institutions": ["MFC-CA", "SLF-CA", "GWO-CA", "IFC-CA", "FFH-CA", "UNH-US", "BRK.A-US", "AIG-US", "TRV-US", "PGR-US"],
-        "names": {
-            "MFC-CA": "Manulife Financial",
-            "SLF-CA": "Sun Life Financial",
-            "GWO-CA": "Great-West Lifeco",
-            "IFC-CA": "Intact Financial",
-            "FFH-CA": "Fairfax Financial",
-            "UNH-US": "UnitedHealth Group",
-            "BRK.A-US": "Berkshire Hathaway",
-            "AIG-US": "American International Group",
-            "TRV-US": "Travelers",
-            "PGR-US": "Progressive"
-        }
-    },
-    "Other": {
-        "institutions": ["PDO-CA", "AKBM-NO"],
-        "names": {
-            "PDO-CA": "Premium Brands Holdings",
-            "AKBM-NO": "Aker BioMarine"
-        }
-    }
-}
+# Authentication and connection settings from environment
+CONFIG_PATH = os.getenv('CONFIG_PATH')
+NAS_SHARE_NAME = os.getenv('NAS_SHARE_NAME')
+
+def nas_download_file(nas_conn: SMBConnection, file_path: str) -> bytes:
+    """Download a file from NAS and return its contents."""
+    file_obj = io.BytesIO()
+    nas_conn.retrieveFile(NAS_SHARE_NAME, file_path, file_obj)
+    return file_obj.getvalue()
+
+def load_config_from_nas(nas_conn: SMBConnection) -> Dict:
+    """Load configuration from NAS."""
+    try:
+        logger.info("Loading configuration from NAS...")
+        config_data = nas_download_file(nas_conn, CONFIG_PATH)
+        config = json.loads(config_data.decode('utf-8'))
+        logger.info("Configuration loaded successfully")
+        return config
+    except Exception as e:
+        logger.error(f"Failed to load configuration from NAS: {e}")
+        raise
 
 class NASTranscriptScanner:
     """Scans NAS for transcript files and builds coverage data"""
     
-    def __init__(self):
+    def __init__(self, config: Dict):
         # Load NAS credentials
         self.nas_username = os.getenv('NAS_USERNAME')
         self.nas_password = os.getenv('NAS_PASSWORD')
@@ -124,6 +70,13 @@ class NASTranscriptScanner:
         # Client machine name
         self.client_machine_name = os.getenv('CLIENT_MACHINE_NAME', 'DESKTOP')
         
+        # Store configuration
+        self.config = config
+        self.monitored_institutions = config.get('monitored_institutions', {})
+        
+        # Build institution categories from config
+        self.institution_categories = self._build_categories_from_config()
+        
         # Data structure to hold coverage information
         self.coverage_data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {
             "Raw": 0,
@@ -132,6 +85,39 @@ class NASTranscriptScanner:
         })))
         
         self.years_quarters = set()
+    
+    def _build_categories_from_config(self) -> Dict:
+        """Build institution categories from configuration."""
+        categories = defaultdict(lambda: {"institutions": [], "names": {}})
+        
+        for ticker, info in self.monitored_institutions.items():
+            inst_type = info.get('type', 'Other')
+            # Map the type to display name
+            type_mapping = {
+                'Canadian': 'Canadian',
+                'US': 'US',
+                'European': 'European',
+                'Insurance': 'Insurance',
+                'US_Regional': 'US Regional',
+                'Nordic': 'Nordic',
+                'Australian': 'Australian',
+                'US_Asset_Manager': 'US Asset Manager',
+                'US_Boutique': 'US Boutique',
+                'Canadian_Asset_Manager': 'Canadian Asset Manager',
+                'UK_Asset_Manager': 'UK Asset Manager',
+                'Canadian_Monoline': 'Canadian Monoline',
+                'US_Trust': 'US Trust'
+            }
+            display_type = type_mapping.get(inst_type, inst_type)
+            
+            categories[display_type]["institutions"].append(ticker)
+            categories[display_type]["names"][ticker] = info.get('name', ticker)
+        
+        # Sort institutions within each category
+        for category in categories.values():
+            category["institutions"].sort()
+        
+        return dict(categories)
         
     def connect_to_nas(self) -> SMBConnection:
         """Establish connection to NAS"""
@@ -179,7 +165,7 @@ class NASTranscriptScanner:
                                     type_folders = conn.listPath(self.nas_share_name, quarter_path)
                                     
                                     for type_entry in type_folders:
-                                        if type_entry.isDirectory and type_entry.filename in INSTITUTION_CATEGORIES:
+                                        if type_entry.isDirectory:
                                             inst_type = type_entry.filename
                                             type_path = f"{quarter_path}/{inst_type}"
                                             
@@ -205,7 +191,24 @@ class NASTranscriptScanner:
                                                                     xml_count = sum(1 for f in files if f.filename.endswith('.xml') and not f.isDirectory)
                                                                     
                                                                     if xml_count > 0:
-                                                                        self.coverage_data[inst_type][ticker][year_quarter][transcript_type] = xml_count
+                                                                        # Map folder type to display type
+                                                                        type_mapping = {
+                                                                            'Canadian': 'Canadian',
+                                                                            'US': 'US',
+                                                                            'European': 'European',
+                                                                            'Insurance': 'Insurance',
+                                                                            'US_Regional': 'US Regional',
+                                                                            'Nordic': 'Nordic',
+                                                                            'Australian': 'Australian',
+                                                                            'US_Asset_Manager': 'US Asset Manager',
+                                                                            'US_Boutique': 'US Boutique',
+                                                                            'Canadian_Asset_Manager': 'Canadian Asset Manager',
+                                                                            'UK_Asset_Manager': 'UK Asset Manager',
+                                                                            'Canadian_Monoline': 'Canadian Monoline',
+                                                                            'US_Trust': 'US Trust'
+                                                                        }
+                                                                        display_type = type_mapping.get(inst_type, inst_type)
+                                                                        self.coverage_data[display_type][ticker][year_quarter][transcript_type] = xml_count
                                                                         
                                                                 except Exception:
                                                                     # Folder doesn't exist or error accessing it
@@ -428,7 +431,7 @@ class NASTranscriptScanner:
 """
         
         # Generate rows for each category and institution
-        for category, cat_info in INSTITUTION_CATEGORIES.items():
+        for category, cat_info in self.institution_categories.items():
             # Category header row
             html_content += f"""            <tr id="{category}" class="category-header" onclick="toggleCategory('{category}')">
                 <td style="text-align: left;">
@@ -486,7 +489,7 @@ class NASTranscriptScanner:
 """
         
         # Calculate summary statistics
-        total_institutions = sum(len(cat['institutions']) for cat in INSTITUTION_CATEGORIES.values())
+        total_institutions = sum(len(cat['institutions']) for cat in self.institution_categories.values())
         institutions_with_data = set()
         total_transcripts = 0
         
@@ -521,10 +524,35 @@ def main():
     try:
         logger.info("Starting transcript coverage analysis...")
         
-        # Create scanner instance
-        scanner = NASTranscriptScanner()
+        # First, create a temporary connection to load config
+        nas_username = os.getenv('NAS_USERNAME')
+        nas_password = os.getenv('NAS_PASSWORD')
+        nas_server_ip = os.getenv('NAS_SERVER_IP')
+        nas_server_name = os.getenv('NAS_SERVER_NAME')
+        client_machine_name = os.getenv('CLIENT_MACHINE_NAME', 'DESKTOP')
         
-        # Connect to NAS
+        # Connect to NAS to load config
+        config_conn = SMBConnection(
+            nas_username,
+            nas_password,
+            client_machine_name,
+            nas_server_name,
+            use_ntlm_v2=True
+        )
+        
+        if not config_conn.connect(nas_server_ip, 139):
+            raise ConnectionError("Failed to connect to NAS for configuration")
+        
+        try:
+            # Load configuration from NAS
+            config = load_config_from_nas(config_conn)
+        finally:
+            config_conn.close()
+        
+        # Create scanner instance with config
+        scanner = NASTranscriptScanner(config)
+        
+        # Connect to NAS for scanning
         conn = scanner.connect_to_nas()
         
         try:
