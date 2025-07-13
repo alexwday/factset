@@ -90,13 +90,14 @@ def setup_logging() -> logging.Logger:
 
 
 class EnhancedErrorLogger:
-    """Handles separate error logging for different failure types."""
+    """Handles separate error logging for different failure types and LLM audit trails."""
 
     def __init__(self):
         self.llm_errors = []
         self.authentication_errors = []
         self.classification_errors = []
         self.processing_errors = []
+        self.llm_audit_trail = []
 
     def log_llm_error(self, transcript_id: str, section_id: int, error: str):
         """Log LLM API errors."""
@@ -134,6 +135,20 @@ class EnhancedErrorLogger:
             "action_required": "Review processing logic and input data"
         })
 
+    def log_llm_interaction(self, level: str, section_name: str, classification: str, confidence: float, reasoning: str, token_usage: dict = None):
+        """Log LLM classification decisions for audit trail."""
+        interaction = {
+            "timestamp": datetime.now().isoformat(),
+            "level": level,
+            "section_name": section_name,
+            "classification": classification,
+            "confidence": confidence,
+            "reasoning": reasoning
+        }
+        if token_usage:
+            interaction["token_usage"] = token_usage
+        self.llm_audit_trail.append(interaction)
+
     def save_error_logs(self, nas_conn: SMBConnection):
         """Save error logs to separate JSON files on NAS."""
         global logger
@@ -147,6 +162,19 @@ class EnhancedErrorLogger:
             ("classification_errors", self.classification_errors),
             ("processing_errors", self.processing_errors),
         ]
+        
+        # Save LLM audit trail separately
+        if self.llm_audit_trail:
+            audit_filename = f"stage_4_llm_audit_trail_{timestamp}.json"
+            audit_file_path = nas_path_join(error_base_path, audit_filename)
+            audit_content = json.dumps({
+                "run_timestamp": timestamp,
+                "total_interactions": len(self.llm_audit_trail),
+                "interactions": self.llm_audit_trail
+            }, indent=2)
+            audit_file_obj = io.BytesIO(audit_content.encode("utf-8"))
+            nas_upload_file(nas_conn, audit_file_obj, audit_file_path)
+            logger.info(f"Saved {len(self.llm_audit_trail)} LLM interactions to {audit_filename}")
 
         summary = {
             "run_timestamp": timestamp,
@@ -728,7 +756,27 @@ Unique Speakers in Section:
             tool_call = response.choices[0].message.tool_calls[0]
             result = json.loads(tool_call.function.arguments)
             
-            logger.info(f"Level 1 classification: {section_name} -> {result['classification']} (confidence: {result['confidence']})")
+            # Log token usage
+            token_usage = None
+            if hasattr(response, 'usage') and response.usage:
+                token_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+                logger.info(f"Level 1 tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}")
+            
+            logger.info(f"Level 1 classification: {section_name} -> {result['classification']} (confidence: {result['confidence']}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
+            
+            # Log to audit trail
+            error_logger.log_llm_interaction(
+                level="Level 1",
+                section_name=section_name,
+                classification=result['classification'],
+                confidence=result['confidence'],
+                reasoning=result.get('reasoning', 'No reasoning provided'),
+                token_usage=token_usage
+            )
             
             return {
                 "method": "section_uniform",
@@ -839,7 +887,27 @@ Common transition indicators:
             breakpoint_block = result["breakpoint_speaker_block"]
             confidence = result["confidence"]
             
-            logger.info(f"Level 2 breakpoint: {section_name} -> block {breakpoint_block} (confidence: {confidence})")
+            # Log token usage
+            token_usage = None
+            if hasattr(response, 'usage') and response.usage:
+                token_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens
+                }
+                logger.info(f"Level 2 tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}")
+            
+            logger.info(f"Level 2 breakpoint: {section_name} -> block {breakpoint_block} (confidence: {confidence}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
+            
+            # Log to audit trail
+            error_logger.log_llm_interaction(
+                level="Level 2",
+                section_name=section_name,
+                classification=f"Breakpoint at block {breakpoint_block}",
+                confidence=confidence,
+                reasoning=result.get('reasoning', 'No reasoning provided'),
+                token_usage=token_usage
+            )
             
             return {
                 "method": "breakpoint_detection",
@@ -977,7 +1045,27 @@ Future Context:
                     "reasoning": result["reasoning"]
                 }
                 
-                logger.debug(f"Level 3 block {i+1}: {result['classification']} (confidence: {result['confidence']})")
+                # Log token usage
+                token_usage = None
+                if hasattr(response, 'usage') and response.usage:
+                    token_usage = {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens
+                    }
+                    logger.debug(f"Level 3 block {i+1} tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}")
+                
+                logger.debug(f"Level 3 block {i+1}: {result['classification']} (confidence: {result['confidence']}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
+                
+                # Log to audit trail
+                error_logger.log_llm_interaction(
+                    level="Level 3",
+                    section_name=f"{section_name} - Block {i+1}",
+                    classification=result['classification'],
+                    confidence=result['confidence'],
+                    reasoning=result.get('reasoning', 'No reasoning provided'),
+                    token_usage=token_usage
+                )
             else:
                 # Fallback classification
                 block_classifications[block_id] = {
