@@ -261,7 +261,12 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
                 raise ValueError(f"Field '{field}' for institution {ticker} must be a string")
         
         # Validate institution type
-        valid_types = ['Canadian', 'US', 'European', 'Insurance']
+        valid_types = [
+            'Canadian', 'US', 'European', 'Insurance',
+            'US_Regional', 'Nordic', 'Australian', 'US_Asset_Manager',
+            'US_Boutique', 'Canadian_Asset_Manager', 'UK_Asset_Manager',
+            'Canadian_Monoline', 'US_Trust'
+        ]
         if institution_info['type'] not in valid_types:
             raise ValueError(f"Invalid institution type for {ticker}: {institution_info['type']}. Must be one of: {valid_types}")
     
