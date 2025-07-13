@@ -608,9 +608,11 @@
     "sort_order": ["-storyDateTime"],
     "pagination_limit": 1000,
     "pagination_offset": 0,
-    "request_delay": 2.0,
-    "max_retries": 3,
-    "retry_delay": 5.0
+    "request_delay": 3.0,
+    "max_retries": 8,
+    "retry_delay": 10.0,
+    "use_exponential_backoff": true,
+    "max_backoff_delay": 120.0
   },
   "stage_0": {
     "sync_start_date": "2023-01-01",

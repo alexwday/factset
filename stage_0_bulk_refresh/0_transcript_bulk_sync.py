@@ -190,6 +190,8 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
             'request_delay': (int, float),
             'max_retries': int,
             'retry_delay': (int, float),
+            'use_exponential_backoff': bool,
+            'max_backoff_delay': (int, float),
             'transcript_types': list
         },
         'monitored_institutions': dict,
@@ -235,6 +237,11 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
     
     if config['api_settings']['retry_delay'] < 0:
         raise ValueError("retry_delay must be non-negative")
+    
+    # Validate exponential backoff settings
+    if 'use_exponential_backoff' in config['api_settings']:
+        if config['api_settings']['use_exponential_backoff'] and config['api_settings'].get('max_backoff_delay', 0) <= 0:
+            raise ValueError("max_backoff_delay must be positive when exponential backoff is enabled")
     
     # Validate transcript types
     if not config['api_settings']['transcript_types']:
@@ -961,8 +968,18 @@ def download_transcript_with_enhanced_structure(nas_conn: SMBConnection, transcr
                 
         except requests.exceptions.RequestException as e:
             if attempt < config['api_settings']['max_retries'] - 1:
-                logger.warning(f"Download attempt {attempt + 1} failed, retrying: {e}")
-                time.sleep(config['api_settings']['retry_delay'])
+                # Calculate delay with exponential backoff if enabled
+                if config['api_settings'].get('use_exponential_backoff', False):
+                    base_delay = config['api_settings']['retry_delay']
+                    max_delay = config['api_settings'].get('max_backoff_delay', 120.0)
+                    exponential_delay = base_delay * (2 ** attempt)
+                    actual_delay = min(exponential_delay, max_delay)
+                    logger.warning(f"Download attempt {attempt + 1} failed, retrying in {actual_delay:.1f}s (exponential backoff): {e}")
+                else:
+                    actual_delay = config['api_settings']['retry_delay']
+                    logger.warning(f"Download attempt {attempt + 1} failed, retrying in {actual_delay:.1f}s: {e}")
+                
+                time.sleep(actual_delay)
             else:
                 error_logger.download_errors.append({
                     'timestamp': datetime.now().isoformat(),
