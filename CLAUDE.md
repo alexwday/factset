@@ -5,10 +5,15 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 
 ## Current Status
 - **Stage 0**: `stage_0_bulk_refresh/0_transcript_bulk_sync.py` - PRODUCTION READY ✅ (All 9 critical issues resolved)
+- **Stage 1**: `stage_1_daily_sync/1_transcript_daily_sync.py` - PRODUCTION READY ✅ (Daily incremental sync)
+- **Stage 2**: `stage_2_processing/2_transcript_consolidation.py` - PRODUCTION READY ✅ (Transcript consolidation)
+- **Stage 3**: `stage_3_content_processing/3_transcript_content_extraction.py` - PRODUCTION READY ✅ (Content extraction)
+- **Stage 4**: `stage_4_llm_classification/4_transcript_llm_classification.py` - PRODUCTION READY ✅ (LLM classification)
+- **Stage 5**: `stage_5_qa_pairing/5_transcript_qa_pairing.py` - PRODUCTION READY ✅ (Q&A boundary detection)
 - **Reference Implementation**: Production-ready code with comprehensive validation, security hardening, and proper error handling
 - **Architecture**: Stage-based approach where each stage is completely independent and follows security standards
 - **Storage**: All data stored on NAS (no local storage) using pysmb with NTLM v2 authentication
-- **Authentication**: Corporate proxy authentication required for API access
+- **Authentication**: Corporate proxy authentication required for API access, LLM OAuth for Stage 4 & 5
 
 ### Stage 0 Key Business Rules
 1. **Anti-Contamination**: Only downloads transcripts where target ticker is SOLE primary company
@@ -16,21 +21,22 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 3. **Audit Trail**: Every operation logged with timestamps and error context
 4. **Incremental Safe**: Checks existing files, safe to re-run without re-downloading
 5. **Version Management**: Automatically handles vendor version ID updates, keeps only latest version
-6. **Institution Coverage**: 47 global financial institutions across 4 regions (Canadian, US, European, Insurance)
+6. **Institution Coverage**: 100+ global financial institutions across multiple regions and types
 7. **File Organization**: Organized by institution type → company → transcript type
 8. **Standardized Naming**: Consistent filename format for easy identification and processing
 
 ## Key Technical Requirements
 
 ### Authentication & Configuration
-- **Environment Variables (.env)**: 13 required variables
+- **Environment Variables (.env)**: 15 required variables
   - API_USERNAME, API_PASSWORD (FactSet API)
   - PROXY_USER, PROXY_PASSWORD, PROXY_URL, PROXY_DOMAIN (Corporate proxy - PROXY_DOMAIN defaults to 'MAPLE')
   - NAS_USERNAME, NAS_PASSWORD, NAS_SERVER_IP, NAS_SERVER_NAME (NAS connection)
   - NAS_SHARE_NAME, NAS_BASE_PATH (NAS paths)
   - CONFIG_PATH, CLIENT_MACHINE_NAME (Configuration)
-- **NAS Config Files**: Single `config.json` with stage-specific sections
-- **SSL Certificate**: Downloaded from NAS at runtime for FactSet API connections
+  - LLM_CLIENT_ID, LLM_CLIENT_SECRET (LLM API for Stage 4 & 5)
+- **NAS Config Files**: Single `config.json` with stage-specific sections (stage_0 through stage_5)
+- **SSL Certificate**: Downloaded from NAS at runtime for FactSet API and LLM connections
 - **Proxy**: Corporate proxy with NTLM authentication required
 
 ### FactSet API Integration
@@ -50,12 +56,14 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
   - `Outputs/Logs/Errors/` - Separate error logs (parsing, download, filesystem, validation)
   - `Outputs/listing/` - Inventory JSON files (future use)
 
-### Monitored Institutions (47 Total)
-**Canadian Banks (8)**: RY-CA, TD-CA, BNS-CA, BMO-CA, CM-CA, NA-CA, LB-CA, CWB-CA  
-**US Banks (11)**: JPM-US, BAC-US, WFC-US, C-US, GS-US, MS-US, USB-US, PNC-US, TFC-US, COF-US, SCHW-US  
-**European Banks (17)**: BCS-GB, LLOY-GB, RBS-GB, HSBA-GB, STAN-GB, DBK-DE, CBK-DE, BNP-FR, ACA-FR, GLE-FR, SAN-ES, BBVA-ES, ISP-IT, UCG-IT, ING-NL, UBS-CH, CSGN-CH  
-**Insurance (10)**: MFC-CA, SLF-CA, GWO-CA, IFC-CA, FFH-CA, UNH-US, BRK.A-US, AIG-US, TRV-US, PGR-US  
-**Other (2)**: PDO-CA, AKBM-NO
+### Monitored Institutions (100+ Total)
+**Key Institution Categories**:
+- **Canadian Financial**: Banks, Asset Managers, Insurance, Monoline (30+ institutions)
+- **US Financial**: Major Banks, Regional Banks, Asset Managers, Investment Banks, Trust Banks (35+ institutions)  
+- **European/International**: UK, German, French, Spanish, Italian, Swiss, Nordic, Australian banks (30+ institutions)
+- **Specialized**: Insurance companies, Asset managers, Boutique investment banks, Trust companies (5+ institutions)
+
+*Examples*: RY-CA, TD-CA, JPM-US, BAC-US, BCS-GB, UBS-CH, MFC-CA, BLK-US, and many more
 
 ### File Naming Convention
 `{primary_id}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
@@ -110,7 +118,7 @@ Outputs/Data/
     └── Unknown/
 ```
 
-#### **4. Institution Processing Loop (47 Total)**
+#### **4. Institution Processing Loop (100+ Total)**
 For each monitored institution:
 
 **a) API Query with Critical Filters**
@@ -224,7 +232,7 @@ xml.etree.ElementTree  # Built-in Python library for XML parsing
 ## Stage Architecture Plan
 
 ### Stage 0: Bulk Refresh ✅ PRODUCTION READY
-- **Purpose**: Download ALL historical earnings transcripts from 2023-present for 47 monitored financial institutions
+- **Purpose**: Download ALL historical earnings transcripts from 2023-present for 100+ monitored financial institutions
 - **Script**: `stage_0_bulk_refresh/0_transcript_bulk_sync.py`
 - **Config**: `Inputs/config/config.json` on NAS
 - **When**: Initial setup or complete repository refresh
@@ -298,6 +306,23 @@ xml.etree.ElementTree  # Built-in Python library for XML parsing
   - Comprehensive error handling with retry logic and rate limiting
   - JSON-structured output with confidence scoring
   - Production-ready with full security validation and cost tracking
+
+### Stage 5: Q&A Pairing System ✅ PRODUCTION READY
+- **Purpose**: Q&A conversation boundary detection and pairing using speaker block analysis
+- **Script**: `stage_5_qa_pairing/5_transcript_qa_pairing.py`
+- **Config**: `Inputs/config/config.json` on NAS (uses stage_5 section)
+- **When**: After Stage 4 section classification for Q&A relationship mapping
+- **Key Features**:
+  - Speaker block-based sliding window analysis (not paragraph-level)
+  - Dynamic context windows that extend back to question starts when needed
+  - Enhanced speaker formatting with role indicators ([ANALYST], [EXECUTIVE], [OPERATOR])
+  - Per-transcript OAuth token refresh (eliminates expiration issues)
+  - LLM boundary detection with comprehensive fallback strategies
+  - Minimal schema extension (only 3 new fields: qa_group_id, qa_group_confidence, qa_group_method)
+  - Cost tracking and reporting (usage summary, no budget limits)
+  - Sophisticated CO-STAR prompting with clear decision boundaries
+  - Progressive fallback hierarchy: LLM detection → XML type attributes → conservative grouping
+  - Production-ready with full security validation and error handling
 
 ## MANDATORY Development Standards
 

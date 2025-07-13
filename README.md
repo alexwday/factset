@@ -15,6 +15,7 @@ factset/
 ├── stage_2_processing/                    # Transcript consolidation & change detection
 ├── stage_3_content_processing/            # XML content extraction & paragraph breakdown
 ├── stage_4_llm_classification/            # LLM-based section type classification
+├── stage_5_qa_pairing/                    # Q&A conversation boundary detection
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -58,8 +59,8 @@ Required environment variables:
 - `NAS_SHARE_NAME` - NAS share name
 - `NAS_BASE_PATH` - Base path within NAS share
 - `CLIENT_MACHINE_NAME` - Client machine name for SMB
-- `LLM_CLIENT_ID` - LLM API client ID (for Stage 4)
-- `LLM_CLIENT_SECRET` - LLM API client secret (for Stage 4)
+- `LLM_CLIENT_ID` - LLM API client ID (for Stage 4 & 5)
+- `LLM_CLIENT_SECRET` - LLM API client secret (for Stage 4 & 5)
 
 ### 3. Setup NAS Configuration
 
@@ -92,6 +93,9 @@ python stage_3_content_processing/3_transcript_content_extraction.py
 
 # Stage 4: LLM-based transcript section classification (implemented)
 python stage_4_llm_classification/4_transcript_llm_classification.py
+
+# Stage 5: Q&A conversation boundary detection and pairing (implemented)
+python stage_5_qa_pairing/5_transcript_qa_pairing.py
 ```
 
 **Current Status**: 
@@ -100,6 +104,7 @@ python stage_4_llm_classification/4_transcript_llm_classification.py
 - Stage 2 is production-ready with transcript consolidation and change detection ✅
 - Stage 3 is production-ready with XML content extraction and paragraph-level breakdown ✅
 - Stage 4 is production-ready with LLM-based section type classification ✅
+- Stage 5 is production-ready with Q&A conversation boundary detection and pairing ✅
 - All stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
 
 ## Testing from Work Environment
@@ -150,7 +155,7 @@ NAS_PORT=445
 CONFIG_PATH=Inputs/config/config.json
 CLIENT_MACHINE_NAME=SYNC-CLIENT
 
-# LLM Configuration (Stage 4)
+# LLM Configuration (Stage 4 & 5)
 LLM_CLIENT_ID=your_llm_client_id
 LLM_CLIENT_SECRET=your_llm_client_secret
 ```
@@ -274,6 +279,60 @@ LLM_CLIENT_SECRET=your_llm_client_secret
    - **section_type**: "Management Discussion" or "Investor Q&A"
    - **section_type_confidence**: 0.0-1.0 confidence score
    - **section_type_method**: "section_uniform", "breakpoint_detection", or "contextual_individual"
+
+### Testing Stage 5
+
+1. **Prerequisites**:
+   - Stage 4 must have run successfully (creates `classified_transcript_sections.json`)
+   - NAS config.json must include `stage_5` section with LLM configuration
+   - LLM API credentials configured in .env file (same as Stage 4)
+
+2. **Execute Q&A Pairing**:
+   ```bash
+   python stage_5_qa_pairing/5_transcript_qa_pairing.py
+   ```
+
+3. **Expected Outputs**:
+   - `qa_paired_transcript_sections.json`: Complete records with Q&A group assignments
+   - Each paragraph gets 3 new fields: qa_group_id, qa_group_confidence, qa_group_method
+   - Speaker block-based analysis with dynamic context windows
+   - Development mode processes only 2 transcripts for testing
+
+4. **Development Mode Settings**:
+   ```json
+   "stage_5": {
+     "dev_mode": true,
+     "dev_max_transcripts": 2,
+     "window_config": {
+       "context_blocks_before": 3,
+       "context_blocks_after": 2,
+       "dynamic_extension": true,
+       "full_paragraphs": true
+     },
+     "llm_config": {
+       "model": "gpt-4-turbo",
+       "temperature": 0.1,
+       "max_tokens": 1500,
+       "base_url": "https://your-llm-api.com/v1",
+       "token_endpoint": "https://oauth.your-api.com/token",
+       "cost_per_1k_prompt_tokens": 0.03,
+       "cost_per_1k_completion_tokens": 0.06
+     }
+   }
+   ```
+
+5. **Q&A Pairing Results**:
+   - **qa_group_id**: Integer grouping related question-answer exchanges
+   - **qa_group_confidence**: 0.0-1.0 aggregated confidence across speaker blocks
+   - **qa_group_method**: "llm_detection", "llm_detection_medium_confidence", or "xml_fallback"
+
+6. **Key Features**:
+   - **Speaker Block Analysis**: Processes complete speaker blocks (not individual paragraphs)
+   - **Dynamic Context Windows**: Extends back to question start when analyzing continuations
+   - **Enhanced Speaker Formatting**: Clear role indicators ([ANALYST], [EXECUTIVE], [OPERATOR])
+   - **Per-Transcript OAuth Refresh**: Fresh token for each transcript (eliminates expiration issues)
+   - **Comprehensive Fallbacks**: LLM → XML type attributes → conservative grouping
+   - **Cost Tracking**: Real-time token usage and final cost summary
 
 ### Troubleshooting
 
@@ -457,6 +516,26 @@ Provides detailed summary including:
 - **Usage**: `python stage_4_llm_classification/4_transcript_llm_classification.py`
 - **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
 - **Authentication**: Requires LLM_CLIENT_ID and LLM_CLIENT_SECRET environment variables
+
+### Stage 5: Q&A Conversation Boundary Detection ✅ PRODUCTION READY
+- **Purpose**: Identify and group question-answer conversation boundaries using speaker block analysis
+- **When to use**: After Stage 4 creates section type classifications
+- **Input**: classified_transcript_sections.json from Stage 4 output
+- **Output**: qa_paired_transcript_sections.json with Q&A group relationship mappings
+- **Features**:
+  - Speaker block-based sliding window analysis (not paragraph-level)
+  - Dynamic context windows that extend back to question starts when needed
+  - Enhanced speaker formatting with role indicators ([ANALYST], [EXECUTIVE], [OPERATOR])
+  - Per-transcript OAuth token refresh (eliminates expiration issues)
+  - LLM boundary detection with comprehensive fallback strategies
+  - Minimal schema extension (only 3 new fields: qa_group_id, qa_group_confidence, qa_group_method)
+  - Cost tracking and reporting (usage summary, no budget limits)
+  - Development mode (process only 2 transcripts for testing)
+  - Sophisticated CO-STAR prompting with clear decision boundaries
+  - Progressive fallback hierarchy: LLM detection → XML type attributes → conservative grouping
+- **Usage**: `python stage_5_qa_pairing/5_transcript_qa_pairing.py`
+- **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
+- **Authentication**: Uses same LLM credentials as Stage 4 (LLM_CLIENT_ID and LLM_CLIENT_SECRET)
 
 ## Configuration
 
