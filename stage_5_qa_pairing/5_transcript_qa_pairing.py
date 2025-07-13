@@ -545,9 +545,9 @@ SPEAKER BLOCK {block['speaker_block_id']}:
 
 def create_qa_boundary_prompt(formatted_context: str, current_block_id: int) -> str:
     """
-    Create sophisticated CO-STAR prompt for Q&A boundary detection.
+    Create sophisticated CO-STAR prompt for Q&A boundary detection with enhanced operator handling.
     """
-    return f"""**CONTEXT**: You are analyzing earnings call speaker blocks to determine Q&A conversation boundaries. Each speaker block contains one person's complete statement with their role and content clearly marked.
+    return f"""**CONTEXT**: You are analyzing earnings call speaker blocks to determine Q&A conversation boundaries. Each speaker block contains one person's complete statement with their role and content clearly marked. Your goal is to capture complete conversational exchanges between question askers and institution responders.
 
 **OBJECTIVE**: For the current speaker block (marked as DECISION POINT), determine:
 1. Does this block start a new Q&A group?
@@ -555,13 +555,18 @@ def create_qa_boundary_prompt(formatted_context: str, current_block_id: int) -> 
 3. Does this block end the current Q&A group?
 4. What is the complete Q&A group span (start_block_id to end_block_id)?
 
-**STYLE**: Analyze complete speaker blocks as units. Pay attention to:
-- Speaker roles: [ANALYST] typically ask questions, [EXECUTIVE] typically answer
-- XML Role indicators: "question" vs "answer" vs "general"
-- Content flow: Look for question/answer patterns and natural conversation breaks
-- Speaker transitions: Changes between analyst→executive or executive→analyst
+**STYLE**: Analyze complete speaker blocks as units. Focus on complete conversational exchanges:
+- **Complete Exchanges**: Capture entire back-and-forth between question asker and institution responder
+- **Related Follow-ups**: If follow-up question is on the same theme/topic, include in current Q&A group
+- **New Themes**: If follow-up question introduces different theme/topic, start new Q&A group
+- **Speaker Roles**: [ANALYST] ask questions, [EXECUTIVE] answer, [OPERATOR] manage call flow
+- **Operator Exclusion**: [OPERATOR] blocks should NEVER be assigned Q&A group IDs - they are call management only
 
-**TONE**: Conservative and methodical. When uncertain about boundaries, prefer to keep related exchanges together rather than split them. Focus on speaker transitions and content flow.
+**TONE**: Conservative and methodical. Prioritize:
+1. Complete conversational exchanges over artificial splits
+2. Thematic coherence - related questions/answers stay together
+3. Clear boundaries when themes change or new participants enter
+4. Operator blocks remain unassigned (no Q&A group)
 
 **AUDIENCE**: Financial analysts who need accurate question-answer relationship mapping for research and analysis.
 
@@ -569,16 +574,39 @@ def create_qa_boundary_prompt(formatted_context: str, current_block_id: int) -> 
 
 {formatted_context}
 
-**ANALYSIS INSTRUCTIONS**:
-- Pay close attention to speaker role contexts ([ANALYST], [EXECUTIVE], [OPERATOR])
-- Consider XML Role indicators as additional guidance ("question", "answer", "general")
-- Look for natural conversation breaks vs. continuation patterns
-- Evaluate if current block completes a logical Q&A exchange
-- Use future context to determine if answer continues beyond current block
-- Assign confidence based on clarity of speaker patterns and content flow
-- For multi-part questions or answers, keep all parts in the same Q&A group
-- Consider follow-up questions as part of extended Q&A groups
-- Operator interventions usually signal transitions between Q&A groups"""
+**CRITICAL ANALYSIS INSTRUCTIONS**:
+
+**OPERATOR BLOCK HANDLING (MANDATORY)**:
+- If current block speaker contains "operator" → assign qa_group_id: null, group_status: "standalone"
+- Operator blocks manage call flow, introduce speakers, handle technical issues
+- NEVER assign operator blocks to Q&A groups - they interrupt but don't participate in Q&A
+
+**CONVERSATION FLOW PRIORITIES**:
+1. **Complete Exchange Capture**: Ensure full question→answer→follow-up sequences stay together
+2. **Thematic Coherence**: 
+   - Same topic/theme follow-ups → continue current Q&A group
+   - Different topic/theme questions → start new Q&A group
+3. **Natural Boundaries**:
+   - "Thank you" + topic shift → end current group
+   - New analyst introduction → start new group
+   - Operator transitions between questions → natural break points
+
+**SPEAKER TRANSITION ANALYSIS**:
+- Analyst→Executive: Typically question→answer flow (continue group)
+- Executive→Analyst (same person): Often clarification/follow-up (continue if same theme)
+- Executive→Analyst (different person): Usually new question (evaluate theme)
+- Any→Operator: Call management, not Q&A content (operator gets no assignment)
+- Operator→Any: Introduction to new exchange (next block likely starts new group)
+
+**RESPONSE FORMAT**:
+- Keep reasoning brief (max 100 characters): focus on key decision factors
+- Examples: "Analyst Q start", "Exec continues A", "Theme shift to guidance", "Operator transition"
+
+**CONFIDENCE SCORING GUIDANCE**:
+- High (0.8-1.0): Clear speaker patterns, obvious theme boundaries, definitive operator blocks
+- Medium (0.6-0.79): Some ambiguity in theme continuation or speaker roles
+- Low (0.4-0.59): Unclear boundaries, mixed themes, uncertain speaker roles
+- Very Low (<0.4): Highly ambiguous content requiring XML fallback"""
 
 
 # Q&A Boundary Detection Schema
@@ -605,7 +633,11 @@ def create_qa_boundary_detection_tools():
                                     "enum": ["group_start", "group_continue", "group_end", "standalone"]
                                 },
                                 "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                                "reasoning": {"type": "string"},
+                                "reasoning": {
+                                    "type": "string",
+                                    "maxLength": 100,
+                                    "description": "Brief reasoning (max 100 chars): speaker role, theme change, or conversation flow"
+                                },
                                 "continue_to_next_block": {"type": "boolean"}
                             },
                             "required": ["current_block_id", "qa_group_id", "group_status", "confidence_score", "continue_to_next_block"]
@@ -634,12 +666,29 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     }
 
 
+def is_operator_block(speaker_block: Dict) -> bool:
+    """
+    Detect if a speaker block is from an operator and should be excluded from Q&A assignments.
+    """
+    speaker = speaker_block.get("speaker", "").lower()
+    
+    # Check for operator indicators in speaker name
+    operator_indicators = ["operator", "conference", "moderator", "host"]
+    
+    for indicator in operator_indicators:
+        if indicator in speaker:
+            return True
+    
+    return False
+
+
 def analyze_speaker_block_boundary(current_block_index: int, 
                                  speaker_blocks: List[Dict],
                                  transcript_id: str,
                                  qa_state: Dict = None) -> Optional[Dict]:
     """
     Analyze a single speaker block for Q&A boundary decisions using LLM.
+    Handles operator blocks with special exclusion logic.
     """
     global logger, error_logger, llm_client
     
@@ -647,7 +696,21 @@ def analyze_speaker_block_boundary(current_block_index: int,
         current_block = speaker_blocks[current_block_index]
         current_block_id = current_block["speaker_block_id"]
         
-        # Create context window
+        # Check if this is an operator block - exclude from Q&A assignments
+        if is_operator_block(current_block):
+            logger.info(f"Block {current_block_id} identified as operator block - excluding from Q&A groups")
+            return {
+                "current_block_id": current_block_id,
+                "qa_group_id": None,  # No Q&A group assignment
+                "qa_group_start_block": None,
+                "qa_group_end_block": None,
+                "group_status": "standalone",  # Operator blocks are standalone
+                "confidence_score": 1.0,  # High confidence in operator detection
+                "reasoning": f"Operator block detected (speaker: {current_block.get('speaker', 'unknown')}) - excluded from Q&A assignments",
+                "continue_to_next_block": True
+            }
+        
+        # Create context window for non-operator blocks
         window_blocks = create_speaker_block_window(current_block_index, speaker_blocks, qa_state)
         
         # Format context for LLM
