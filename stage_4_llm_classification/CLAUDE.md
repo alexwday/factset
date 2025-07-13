@@ -203,8 +203,10 @@ def classify_transcript_sections(transcript_records):
 - **Real-time Cost Calculation**: Per-call cost display for Level 1, 2, and 3 classifications
 - **Configurable Token Rates**: Set cost_per_1k_prompt_tokens and cost_per_1k_completion_tokens in config
 - **Cumulative Cost Tracking**: Accumulates total cost and token usage throughout execution
-- **Final Cost Summary**: Detailed execution report with total cost, token usage, and efficiency metrics
-- **Example Output**: "Total tokens used: 125,847 | Total LLM cost: $4.2314 | Average cost per 1K tokens: $0.0336"
+- **Per-File Metrics**: Tracks processing time, cost, and tokens for each transcript individually
+- **Enhanced Final Summary**: Detailed execution report with total and average metrics
+- **Average Metrics**: Includes average time per transcript and average cost per transcript
+- **Example Output**: "Total tokens used: 125,847 | Total LLM cost: $4.2314 | Average cost per 1K tokens: $0.0336 | Average time per transcript: 45.3 seconds | Average cost per transcript: $0.8462"
 
 ### Performance Optimization
 - **Batch Processing**: Groups records by transcript for efficiency
@@ -271,7 +273,8 @@ python stage_4_llm_classification/4_transcript_llm_classification.py
 - **Level 3 Required**: 2 + N API calls per section (5-10% of cases)
 - **Average Cost**: ~1.5 API calls per section across all levels
 - **Token Usage**: 5,000-15,000 tokens per call (increased from previous 300-500 for better accuracy)
-- **Cost Summary**: Final execution report shows total tokens, total cost, and average cost per 1K tokens
+- **Per-File Tracking**: Real-time logging of processing time, cost, and tokens per transcript
+- **Enhanced Cost Summary**: Final execution report shows total tokens, total cost, average cost per 1K tokens, average time per transcript, and average cost per transcript
 
 ### Scalability
 - **Linear Scaling**: Performance scales with number of sections and paragraphs
