@@ -1372,8 +1372,16 @@ def main() -> None:
         
         all_classified_records = []
         
+        # Initialize per-file tracking
+        per_file_metrics = []
+        
         for i, (transcript_key, transcript_records) in enumerate(transcripts.items(), 1):
+            transcript_start_time = datetime.now()
             logger.info(f"Processing transcript {i}/{len(transcripts)}: {transcript_key}")
+            
+            # Capture initial cost state
+            initial_cost = error_logger.total_cost
+            initial_tokens = error_logger.total_tokens
             
             # Refresh OAuth token for each transcript
             if not refresh_oauth_token_for_transcript():
@@ -1382,6 +1390,22 @@ def main() -> None:
             
             classified_records = classify_transcript_sections(transcript_records)
             all_classified_records.extend(classified_records)
+            
+            # Calculate per-file metrics
+            transcript_end_time = datetime.now()
+            transcript_time = transcript_end_time - transcript_start_time
+            transcript_cost = error_logger.total_cost - initial_cost
+            transcript_tokens = error_logger.total_tokens - initial_tokens
+            
+            per_file_metrics.append({
+                "transcript": transcript_key,
+                "processing_time": transcript_time,
+                "cost": transcript_cost,
+                "tokens": transcript_tokens,
+                "records": len(classified_records)
+            })
+            
+            logger.info(f"Transcript {transcript_key} completed - Time: {transcript_time}, Cost: ${transcript_cost:.4f}, Tokens: {transcript_tokens:,}")
             
             # Rate limiting
             time.sleep(1)  # 1 second between transcripts
@@ -1409,6 +1433,14 @@ def main() -> None:
         if error_logger.total_tokens > 0:
             avg_cost_per_1k_tokens = (error_logger.total_cost / error_logger.total_tokens) * 1000
             logger.info(f"Average cost per 1K tokens: ${avg_cost_per_1k_tokens:.4f}")
+        
+        # Add per-file averages
+        if per_file_metrics:
+            avg_time_per_file = sum(m["processing_time"].total_seconds() for m in per_file_metrics) / len(per_file_metrics)
+            avg_cost_per_file = sum(m["cost"] for m in per_file_metrics) / len(per_file_metrics)
+            logger.info(f"Average time per transcript: {avg_time_per_file:.1f} seconds")
+            logger.info(f"Average cost per transcript: ${avg_cost_per_file:.4f}")
+        
         logger.info("="*60)
 
         # Upload logs

@@ -1391,13 +1391,13 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
         
         logger.info(f"Completed Q&A pairing for transcript {transcript_id}: {len(qa_groups)} groups identified")
         
-        return enhanced_records
+        return enhanced_records, len(qa_groups)
         
     except Exception as e:
         error_msg = f"Transcript Q&A pairing failed: {e}"
         logger.error(error_msg)
         error_logger.log_processing_error(transcript_id, error_msg)
-        return transcript_records  # Return original records on failure
+        return transcript_records, 0  # Return original records on failure
 
 
 def upload_logs_to_nas(nas_conn: SMBConnection, logger: logging.Logger, error_logger: EnhancedErrorLogger):
@@ -1433,10 +1433,13 @@ def main():
         logger = setup_logging()
         error_logger = EnhancedErrorLogger()
         
+        # Start timing
+        start_time = datetime.now()
+        
         logger.info("="*60)
         logger.info("STAGE 5: Q&A PAIRING SYSTEM")
         logger.info("="*60)
-        logger.info(f"Execution started at: {datetime.now().isoformat()}")
+        logger.info(f"Execution started at: {start_time.isoformat()}")
         
         # Connect to NAS
         nas_conn = connect_to_nas()
@@ -1485,12 +1488,37 @@ def main():
         # Process each transcript
         all_enhanced_records = []
         processed_count = 0
+        total_qa_groups_count = 0  # Track total Q&A groups across all transcripts
+        per_file_metrics = []  # Track per-file metrics
         
         for transcript_id, transcript_records in transcripts.items():
+            transcript_start_time = datetime.now()
             logger.info(f"Processing transcript {processed_count + 1}/{len(transcripts)}: {transcript_id}")
             
-            enhanced_records = process_transcript_qa_pairing(transcript_records, transcript_id)
+            # Capture initial cost state
+            initial_cost = error_logger.total_cost
+            initial_tokens = error_logger.total_tokens
+            
+            enhanced_records, qa_groups_count = process_transcript_qa_pairing(transcript_records, transcript_id)
             all_enhanced_records.extend(enhanced_records)
+            total_qa_groups_count += qa_groups_count
+            
+            # Calculate per-file metrics
+            transcript_end_time = datetime.now()
+            transcript_time = transcript_end_time - transcript_start_time
+            transcript_cost = error_logger.total_cost - initial_cost
+            transcript_tokens = error_logger.total_tokens - initial_tokens
+            
+            per_file_metrics.append({
+                "transcript": transcript_id,
+                "processing_time": transcript_time,
+                "cost": transcript_cost,
+                "tokens": transcript_tokens,
+                "qa_groups": qa_groups_count,
+                "records": len(enhanced_records)
+            })
+            
+            logger.info(f"Transcript {transcript_id} completed - Time: {transcript_time}, Cost: ${transcript_cost:.4f}, Tokens: {transcript_tokens:,}, Q&A Groups: {qa_groups_count}")
             
             processed_count += 1
             
@@ -1508,8 +1536,7 @@ def main():
                                                  if any(r.get("qa_group_id") is not None 
                                                        for r in all_enhanced_records
                                                        if r.get("filename", "").startswith(t.split("_")[0]))]),
-                "total_qa_groups": len(set(r.get("qa_group_id") for r in all_enhanced_records 
-                                         if r.get("qa_group_id") is not None))
+                "total_qa_groups": total_qa_groups_count
             },
             "records": all_enhanced_records
         }
@@ -1525,22 +1552,33 @@ def main():
         
         nas_conn.storeFile(NAS_SHARE_NAME, output_path, output_bytes)
         
+        # Calculate execution time
+        end_time = datetime.now()
+        execution_time = end_time - start_time
+        
         # Final summary
         logger.info("="*60)
-        logger.info("STAGE 5 EXECUTION SUMMARY")
+        logger.info("STAGE 5 Q&A PAIRING COMPLETE")
         logger.info("="*60)
-        logger.info(f"Total transcripts processed: {processed_count}")
+        logger.info(f"Transcripts processed: {processed_count}")
         logger.info(f"Total records processed: {len(all_enhanced_records)}")
         logger.info(f"Transcripts with Q&A groups: {output_data['qa_pairing_summary']['transcripts_with_qa_groups']}")
         logger.info(f"Total Q&A groups identified: {output_data['qa_pairing_summary']['total_qa_groups']}")
-        logger.info(f"Output file: {output_filename}")
-        logger.info("")
-        logger.info("TOKEN USAGE & COST SUMMARY:")
+        logger.info(f"Execution time: {execution_time}")
         logger.info(f"Total tokens used: {error_logger.total_tokens:,}")
         logger.info(f"Total LLM cost: ${error_logger.total_cost:.4f}")
         if error_logger.total_tokens > 0:
             avg_cost_per_1k_tokens = (error_logger.total_cost / error_logger.total_tokens) * 1000
             logger.info(f"Average cost per 1K tokens: ${avg_cost_per_1k_tokens:.4f}")
+        
+        # Add per-file averages
+        if per_file_metrics:
+            avg_time_per_file = sum(m["processing_time"].total_seconds() for m in per_file_metrics) / len(per_file_metrics)
+            avg_cost_per_file = sum(m["cost"] for m in per_file_metrics) / len(per_file_metrics)
+            logger.info(f"Average time per transcript: {avg_time_per_file:.1f} seconds")
+            logger.info(f"Average cost per transcript: ${avg_cost_per_file:.4f}")
+        
+        logger.info(f"Output file: {output_filename}")
         logger.info("="*60)
         
         # Upload logs
