@@ -347,13 +347,8 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> bool:
     global logger, error_logger, ssl_cert_path
     
     try:
-        cert_nas_path = f"{NAS_BASE_PATH}/Inputs/certificate/certificate.cer"
-        
-        if not validate_nas_path(cert_nas_path):
-            error_msg = "Invalid SSL certificate path"
-            logger.error(error_msg)
-            error_logger.log_authentication_error(error_msg)
-            return False
+        # Use config path like Stage 4
+        cert_nas_path = config.get('ssl_cert_nas_path', 'Inputs/certificate/certificate.cer')
         
         # Create temporary certificate file
         temp_cert_file = tempfile.NamedTemporaryFile(
@@ -369,6 +364,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> bool:
         
         ssl_cert_path = temp_cert_file.name
         os.environ['SSL_CERT_FILE'] = ssl_cert_path
+        os.environ['REQUESTS_CA_BUNDLE'] = ssl_cert_path
         
         logger.info(f"SSL certificate setup complete: {ssl_cert_path}")
         return True
@@ -1083,13 +1079,13 @@ def main():
         if not nas_conn:
             raise Exception("Failed to connect to NAS")
         
-        # Setup SSL certificate
-        if not setup_ssl_certificate(nas_conn):
-            raise Exception("SSL certificate setup failed")
-        
         # Load configuration
         if not load_config_from_nas(nas_conn):
             raise Exception("Configuration loading failed")
+        
+        # Setup SSL certificate
+        if not setup_ssl_certificate(nas_conn):
+            raise Exception("SSL certificate setup failed")
         
         # Setup LLM client
         llm_client = setup_llm_client()
