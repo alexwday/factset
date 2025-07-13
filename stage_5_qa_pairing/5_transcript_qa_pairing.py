@@ -622,14 +622,8 @@ def create_qa_boundary_detection_tools(qa_state: Dict = None):
         status_enum = ["group_start", "standalone"]
         description = "Start new Q&A group or mark operator/non-Q&A as standalone"
     
-    # Dynamic qa_group_id handling
-    qa_group_id_def = {
-        "type": ["integer", "null"],
-        "description": f"Use {current_group_id} for continue/end, new ID for start, null for standalone"
-    } if current_group_active else {
-        "type": ["integer", "null"],
-        "description": "New group ID for start, null for standalone"
-    }
+    # Remove qa_group_id from LLM schema - we'll assign it automatically
+    # LLM only decides the action, system assigns the ID
     
     return [
         {
@@ -644,7 +638,6 @@ def create_qa_boundary_detection_tools(qa_state: Dict = None):
                             "type": "object",
                             "properties": {
                                 "current_block_id": {"type": "integer"},
-                                "qa_group_id": qa_group_id_def,
                                 "group_status": {
                                     "type": "string",
                                     "enum": status_enum
@@ -656,7 +649,7 @@ def create_qa_boundary_detection_tools(qa_state: Dict = None):
                                     "description": "Brief reasoning: speaker role and conversation flow"
                                 }
                             },
-                            "required": ["current_block_id", "qa_group_id", "group_status", "confidence_score", "reasoning"]
+                            "required": ["current_block_id", "group_status", "confidence_score", "reasoning"]
                         }
                     },
                     "required": ["qa_group_decision"]
@@ -698,41 +691,56 @@ def is_operator_block(speaker_block: Dict) -> bool:
     return False
 
 
+def assign_group_id_to_decision(decision: Dict, qa_state: Dict, current_block_id: int) -> Dict:
+    """
+    Automatically assign appropriate group ID based on decision status and current state.
+    """
+    status = decision.get("group_status")
+    current_group_active = qa_state.get("group_active", False)
+    current_group_id = qa_state.get("current_qa_group_id")
+    next_group_id = qa_state.get("next_group_id", 1)
+    
+    # Create enhanced decision with proper group ID
+    enhanced_decision = decision.copy()
+    
+    if status == "group_start":
+        # Assign next available group ID
+        enhanced_decision["qa_group_id"] = next_group_id
+        qa_state["next_group_id"] = next_group_id + 1
+        qa_state["assigned_group_ids"].add(next_group_id)
+        
+    elif status in ["group_continue", "group_end"]:
+        # Use current active group ID
+        if current_group_active and current_group_id:
+            enhanced_decision["qa_group_id"] = current_group_id
+        else:
+            # This shouldn't happen with proper validation, but handle gracefully
+            enhanced_decision["qa_group_id"] = None
+            
+    elif status == "standalone":
+        # Operator/non-Q&A blocks get null ID
+        enhanced_decision["qa_group_id"] = None
+    
+    return enhanced_decision
+
+
 def validate_llm_decision(decision: Dict, qa_state: Dict, current_block_id: int) -> str:
     """
     Validate LLM decision against current state. Returns error message if invalid, None if valid.
+    Note: We no longer validate group IDs since they're auto-assigned.
     """
     current_group_active = qa_state.get("group_active", False)
-    current_group_id = qa_state.get("current_qa_group_id")
     status = decision.get("group_status")
-    decision_group_id = decision.get("qa_group_id")
     
-    # Validate based on current state
+    # Validate status based on current state
     if current_group_active:
         # Active group: can only continue, end, or standalone
         if status not in ["group_continue", "group_end", "standalone"]:
             return f"Invalid status '{status}' for active group state"
-        
-        # If continuing/ending, must use current group ID (unless standalone)
-        if status in ["group_continue", "group_end"] and decision_group_id != current_group_id:
-            return f"Must use current group ID {current_group_id}, got {decision_group_id}"
-        
-        # Standalone should have null group ID
-        if status == "standalone" and decision_group_id is not None:
-            return f"Standalone blocks must have null group ID, got {decision_group_id}"
-    
     else:
         # No active group: can only start or standalone
         if status not in ["group_start", "standalone"]:
             return f"Invalid status '{status}' for no active group state"
-        
-        # Starting should have new group ID
-        if status == "group_start" and decision_group_id is None:
-            return "New group start must have group ID"
-        
-        # Standalone should have null group ID  
-        if status == "standalone" and decision_group_id is not None:
-            return f"Standalone blocks must have null group ID, got {decision_group_id}"
     
     return None  # Valid decision
 
@@ -788,7 +796,10 @@ def retry_with_validation_feedback(current_block_index: int, speaker_blocks: Lis
                 error_logger.log_boundary_error(transcript_id, current_block_id, f"Retry validation failed: {retry_validation_error}")
                 return None
             
-            logger.info(f"Block {current_block_id}: Retry successful - {decision['group_status']}")
+            # Auto-assign group ID for retry decision
+            decision = assign_group_id_to_decision(decision, qa_state, current_block_id)
+            
+            logger.info(f"Block {current_block_id}: Retry successful - {decision['group_status']} (group: {decision.get('qa_group_id')})")
             return decision
         else:
             logger.error(f"Block {current_block_id}: No tool call in retry response")
@@ -850,8 +861,7 @@ def analyze_speaker_block_boundary(current_block_index: int,
                 "qa_group_end_block": None,
                 "group_status": "standalone",  # Operator blocks are standalone
                 "confidence_score": 1.0,  # High confidence in operator detection
-                "reasoning": f"Operator block detected (speaker: {current_block.get('speaker', 'unknown')}) - excluded from Q&A assignments",
-                "continue_to_next_block": True
+                "reasoning": f"Operator block detected (speaker: {current_block.get('speaker', 'unknown')}) - excluded from Q&A assignments"
             }
         
         # Check for closing pleasantries when there's an active group
@@ -869,8 +879,7 @@ def analyze_speaker_block_boundary(current_block_index: int,
                 "qa_group_end_block": current_block_id,
                 "group_status": "group_end",  # End group with pleasantries
                 "confidence_score": 0.9,  # High confidence in pleasantries detection
-                "reasoning": "Closing pleasantries - end group",
-                "continue_to_next_block": True
+                "reasoning": "Closing pleasantries - end group"
             }
         
         # Create context window for non-operator blocks
@@ -907,6 +916,9 @@ def analyze_speaker_block_boundary(current_block_index: int,
                 # Retry with corrected prompt (implement single retry)
                 return retry_with_validation_feedback(current_block_index, speaker_blocks, transcript_id, qa_state, validation_error)
             
+            # Automatically assign appropriate group ID
+            decision = assign_group_id_to_decision(decision, qa_state, current_block_id)
+            
             # Log token usage and cost
             token_usage = None
             if hasattr(response, 'usage') and response.usage:
@@ -922,7 +934,7 @@ def analyze_speaker_block_boundary(current_block_index: int,
                 # Accumulate costs for final summary
                 error_logger.accumulate_costs(token_usage)
             
-            logger.info(f"Block {current_block_id} boundary decision: {decision['group_status']} (confidence: {decision['confidence_score']:.2f}) | Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
+            logger.info(f"Block {current_block_id} boundary decision: {decision['group_status']} (group: {decision.get('qa_group_id')}, confidence: {decision['confidence_score']:.2f}) | Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
             
             return decision
         else:
@@ -1129,7 +1141,9 @@ def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_
             "last_decision_status": None,
             "last_block_id": None,
             "question_start_index": None,
-            "extends_question_start": False
+            "extends_question_start": False,
+            "next_group_id": 1,  # Auto-increment group ID counter
+            "assigned_group_ids": set()  # Track used IDs for validation
         }
         
         for i, block in enumerate(qa_speaker_blocks):
@@ -1148,26 +1162,46 @@ def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_
                 status = decision["group_status"]
                 group_id = decision.get("qa_group_id")
                 
-                # State machine updates
+                # Real-time state validation and updates
                 if status == "group_start":
+                    # Validate: can't start if group already active
+                    if qa_state["group_active"]:
+                        logger.error(f"Block {block_id}: Cannot start group {group_id} - group {qa_state['current_qa_group_id']} already active")
+                        # Force end previous group first
+                        qa_state["group_active"] = False
+                        logger.warning(f"Block {block_id}: Force-ended previous group {qa_state['current_qa_group_id']}")
+                    
                     qa_state["current_qa_group_id"] = group_id
                     qa_state["group_active"] = True
                     qa_state["question_start_index"] = i
                     qa_state["extends_question_start"] = True
+                    logger.info(f"Block {block_id}: Started Q&A group {group_id}")
                     
                 elif status == "group_continue":
-                    # Group should already be active
-                    if not qa_state["group_active"] or qa_state["current_qa_group_id"] != group_id:
-                        logger.warning(f"Block {block_id}: State inconsistency - continuing group {group_id} but state shows active: {qa_state['group_active']}, current: {qa_state['current_qa_group_id']}")
+                    # Validate: must have active group
+                    if not qa_state["group_active"]:
+                        logger.error(f"Block {block_id}: Cannot continue group {group_id} - no active group")
+                        # Convert to group start
+                        qa_state["current_qa_group_id"] = group_id
+                        qa_state["group_active"] = True
+                        logger.warning(f"Block {block_id}: Converted continue to start for group {group_id}")
+                    elif qa_state["current_qa_group_id"] != group_id:
+                        logger.error(f"Block {block_id}: Group ID mismatch - continuing {group_id} but active is {qa_state['current_qa_group_id']}")
                     
                 elif status == "group_end":
+                    # Validate: must have active group to end
+                    if not qa_state["group_active"]:
+                        logger.warning(f"Block {block_id}: Cannot end group {group_id} - no active group")
+                    elif qa_state["current_qa_group_id"] != group_id:
+                        logger.warning(f"Block {block_id}: Ending group {group_id} but active is {qa_state['current_qa_group_id']}")
+                    
                     qa_state["group_active"] = False
                     qa_state["extends_question_start"] = False
-                    # Keep current_qa_group_id for duplicate end detection
+                    logger.info(f"Block {block_id}: Ended Q&A group {group_id}")
                     
                 elif status == "standalone":
                     # Operator blocks don't change group state
-                    pass
+                    logger.debug(f"Block {block_id}: Standalone block (operator/non-Q&A)")
                 
                 # Update last decision tracking
                 qa_state["last_decision_status"] = status
