@@ -240,52 +240,64 @@ class NASTranscriptScanner:
     <title>Transcript Coverage Report</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 20px;
-            background-color: #f5f5f5;
+            background-color: #f8f9fa;
         }
         
         h1 {
-            color: #333;
+            color: #003d82;
             text-align: center;
+            font-weight: 600;
+            margin-bottom: 10px;
         }
         
         .timestamp {
             text-align: center;
             color: #666;
             margin-bottom: 20px;
+            font-size: 14px;
         }
         
         table {
             border-collapse: collapse;
             width: 100%;
             background-color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0,61,130,0.1);
+            border-radius: 8px;
+            overflow: hidden;
         }
         
         th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
+            border: 1px solid #e1e5e9;
+            padding: 6px 8px;
             text-align: center;
         }
         
         th {
-            background-color: #4CAF50;
+            background-color: #003d82;
             color: white;
             position: sticky;
             top: 0;
             z-index: 10;
+            font-weight: 600;
+            font-size: 13px;
         }
         
         .category-header {
-            background-color: #e0e0e0;
-            font-weight: bold;
             cursor: pointer;
             user-select: none;
+            font-weight: 600;
+            background-color: #f8f9fa;
         }
         
-        .category-header:hover {
-            background-color: #d0d0d0;
+        .category-header td:first-child {
+            background-color: #e8f0fe;
+            border-left: 4px solid #003d82;
+        }
+        
+        .category-header:hover td:first-child {
+            background-color: #d2e3fc;
         }
         
         .institution-row {
@@ -294,31 +306,47 @@ class NASTranscriptScanner:
         
         .institution-name {
             text-align: left;
-            padding-left: 30px;
-            font-size: 14px;
+            padding-left: 25px;
+            font-size: 12px;
+            padding-top: 4px;
+            padding-bottom: 4px;
         }
         
         .has-transcripts {
-            background-color: #c8e6c9;
+            background-color: #e8f5e8;
+            color: #2e7d32;
         }
         
         .no-transcripts {
-            background-color: #ffcdd2;
+            background-color: #ffebee;
+            color: #c62828;
         }
         
-        .transcript-counts {
-            font-size: 11px;
-            line-height: 1.3;
+        .transcript-display {
+            font-size: 14px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: white;
         }
         
-        .count-type {
-            font-weight: bold;
+        .corrected {
+            background-color: #2e7d32;
+        }
+        
+        .raw {
+            background-color: #f57c00;
+        }
+        
+        .nearreal {
+            background-color: #1976d2;
         }
         
         .expand-icon {
             display: inline-block;
             width: 15px;
             transition: transform 0.2s;
+            color: #003d82;
         }
         
         .expanded .expand-icon {
@@ -327,31 +355,76 @@ class NASTranscriptScanner:
         
         .summary {
             margin: 20px 0;
-            padding: 15px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
+            padding: 20px;
+            background: linear-gradient(135deg, #003d82, #0066cc);
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,61,130,0.2);
+        }
+        
+        .summary h3 {
+            margin-top: 0;
+            color: white;
         }
         
         .legend {
-            margin: 20px 0;
-            padding: 10px;
+            margin: 15px 0;
+            padding: 12px;
             background-color: white;
-            border: 1px solid #ddd;
-            border-radius: 5px;
+            border: 1px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 13px;
         }
         
         .legend-item {
             display: inline-block;
-            margin: 0 15px;
+            margin: 0 12px 0 0;
         }
         
         .legend-box {
             display: inline-block;
-            width: 20px;
-            height: 20px;
-            margin-right: 5px;
+            width: 16px;
+            height: 16px;
+            margin-right: 4px;
             vertical-align: middle;
             border: 1px solid #999;
+            border-radius: 2px;
+        }
+        
+        .controls {
+            margin: 15px 0;
+            text-align: center;
+        }
+        
+        .btn {
+            background-color: #003d82;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            margin: 0 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .btn:hover {
+            background-color: #0066cc;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+        
+        .category-summary {
+            font-size: 12px;
+            color: #666;
+            font-weight: normal;
         }
     </style>
     <script>
@@ -363,6 +436,18 @@ class NASTranscriptScanner:
             
             for (let row of rows) {
                 row.style.display = row.style.display === 'table-row' ? 'none' : 'table-row';
+            }
+        }
+        
+        function expandCategory(categoryName) {
+            const header = document.getElementById(categoryName);
+            const rows = document.getElementsByClassName(categoryName + '-inst');
+            
+            if (header) {
+                header.classList.add('expanded');
+                for (let row of rows) {
+                    row.style.display = 'table-row';
+                }
             }
         }
         
@@ -391,6 +476,12 @@ class NASTranscriptScanner:
                 row.style.display = 'none';
             }
         }
+        
+        // Initialize with Canadian and US expanded
+        window.onload = function() {
+            expandCategory('Canadian');
+            expandCategory('US');
+        }
     </script>
 </head>
 <body>
@@ -406,13 +497,23 @@ class NASTranscriptScanner:
             <span class="legend-box no-transcripts"></span> No Transcripts
         </span>
         <span class="legend-item">
-            <strong>R:</strong> Raw, <strong>C:</strong> Corrected, <strong>N:</strong> NearRealTime
+            <span class="transcript-display corrected" style="font-size: 12px;">C</span> Corrected
+        </span>
+        <span class="legend-item">
+            <span class="transcript-display raw" style="font-size: 12px;">R</span> Raw
+        </span>
+        <span class="legend-item">
+            <span class="transcript-display nearreal" style="font-size: 12px;">N</span> NearRealTime
         </span>
     </div>
     
-    <div style="margin: 10px 0;">
-        <button onclick="expandAll()">Expand All</button>
-        <button onclick="collapseAll()">Collapse All</button>
+    <div class="controls">
+        <button class="btn" onclick="expandCategory('Canadian')">Canadian</button>
+        <button class="btn" onclick="expandCategory('US')">US</button>
+        <button class="btn" onclick="expandCategory('European')">European</button>
+        <button class="btn" onclick="expandCategory('Insurance')">Insurance</button>
+        <button class="btn btn-secondary" onclick="expandAll()">Expand All</button>
+        <button class="btn btn-secondary" onclick="collapseAll()">Collapse All</button>
     </div>
     
     <table>
@@ -448,7 +549,8 @@ class NASTranscriptScanner:
                         total_count += sum(counts.values())
                 
                 cell_class = "has-transcripts" if total_count > 0 else "no-transcripts"
-                html_content += f'                <td class="{cell_class}"><strong>{total_count}</strong></td>\n'
+                tooltip = f"Total files for all {category} institutions in {yq}"
+                html_content += f'                <td class="{cell_class}" title="{tooltip}"><strong>{total_count}</strong></td>\n'
             
             html_content += "            </tr>\n"
             
@@ -469,15 +571,19 @@ class NASTranscriptScanner:
                     cell_class = "has-transcripts" if total > 0 else "no-transcripts"
                     
                     if total > 0:
-                        cell_content = f"""<div class="transcript-counts">
-                            <span class="count-type">R:</span>{raw_count}<br>
-                            <span class="count-type">C:</span>{corrected_count}<br>
-                            <span class="count-type">N:</span>{nearreal_count}
-                        </div>"""
+                        # Priority-based display: C > R > N
+                        if corrected_count > 0:
+                            cell_content = f'<span class="transcript-display corrected">C:{corrected_count}</span>'
+                        elif raw_count > 0:
+                            cell_content = f'<span class="transcript-display raw">R:{raw_count}</span>'
+                        else:
+                            cell_content = f'<span class="transcript-display nearreal">N:{nearreal_count}</span>'
+                        
+                        # Add tooltip with all counts
+                        tooltip = f"Raw:{raw_count}, Corrected:{corrected_count}, NearRealTime:{nearreal_count}"
+                        html_content += f'                <td class="{cell_class}" title="{tooltip}">{cell_content}</td>\n'
                     else:
-                        cell_content = "-"
-                    
-                    html_content += f'                <td class="{cell_class}">{cell_content}</td>\n'
+                        html_content += f'                <td class="{cell_class}">-</td>\n'
                 
                 html_content += "            </tr>\n"
         
