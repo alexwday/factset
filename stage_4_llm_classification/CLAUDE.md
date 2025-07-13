@@ -193,7 +193,7 @@ def classify_transcript_sections(transcript_records):
 ```
 
 ### Error Handling & Recovery
-- **OAuth Token Refresh**: Automatic refresh every 5 transcripts
+- **OAuth Token Refresh**: Automatic refresh for each transcript (eliminates expiration issues)
 - **Rate Limiting**: 1-second delays between transcripts
 - **Circuit Breaker**: Retry logic with exponential backoff
 - **Fallback Classifications**: Default to "Management Discussion" on errors

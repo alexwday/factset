@@ -296,18 +296,18 @@ def setup_llm_client() -> Optional[OpenAI]:
         return None
 
 
-def refresh_oauth_token_if_needed() -> bool:
-    """Refresh OAuth token if needed and update client."""
+def refresh_oauth_token_for_transcript() -> bool:
+    """Refresh OAuth token for each new transcript."""
     global oauth_token, llm_client
     
-    # For simplicity, refresh every time (could be optimized with expiry tracking)
+    # Get fresh token for each transcript
     new_token = get_oauth_token()
-    if new_token and new_token != oauth_token:
+    if new_token:
         oauth_token = new_token
         # Update client with new token
         llm_client = setup_llm_client()
         return llm_client is not None
-    return oauth_token is not None
+    return False
 
 
 # Copy all NAS utility functions from Stage 3 (to maintain standalone nature)
@@ -1375,11 +1375,10 @@ def main() -> None:
         for i, (transcript_key, transcript_records) in enumerate(transcripts.items(), 1):
             logger.info(f"Processing transcript {i}/{len(transcripts)}: {transcript_key}")
             
-            # Refresh OAuth token periodically
-            if i % 5 == 0:  # Every 5 transcripts
-                if not refresh_oauth_token_if_needed():
-                    logger.error("Failed to refresh OAuth token")
-                    break
+            # Refresh OAuth token for each transcript
+            if not refresh_oauth_token_for_transcript():
+                logger.error(f"Failed to refresh OAuth token for transcript {transcript_key}")
+                break
             
             classified_records = classify_transcript_sections(transcript_records)
             all_classified_records.extend(classified_records)
