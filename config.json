@@ -115,6 +115,78 @@
       "region": "US",
       "type": "US"
     },
+    "RF-US": {
+      "name": "Regions Financial Corporation",
+      "path_safe_name": "Regions_Financial_Corporation",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "FITB-US": {
+      "name": "Fifth Third Bancorp",
+      "path_safe_name": "Fifth_Third_Bancorp",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "MTB-US": {
+      "name": "M&T Bank Corporation",
+      "path_safe_name": "MT_Bank_Corporation",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "HBAN-US": {
+      "name": "Huntington Bancshares Incorporated",
+      "path_safe_name": "Huntington_Bancshares_Incorporated",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "KEY-US": {
+      "name": "KeyCorp",
+      "path_safe_name": "KeyCorp",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "WAL-US": {
+      "name": "Western Alliance Bancorporation",
+      "path_safe_name": "Western_Alliance_Bancorporation",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "FLG-US": {
+      "name": "Flagstar Financial Inc",
+      "path_safe_name": "Flagstar_Financial_Inc",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "ALLY-US": {
+      "name": "Ally Financial Inc",
+      "path_safe_name": "Ally_Financial_Inc",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "FHN-US": {
+      "name": "First Horizon Corporation",
+      "path_safe_name": "First_Horizon_Corporation",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "CMA-US": {
+      "name": "Comerica Incorporated",
+      "path_safe_name": "Comerica_Incorporated",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "CFG-US": {
+      "name": "Citizens Financial Group Inc",
+      "path_safe_name": "Citizens_Financial_Group_Inc",
+      "region": "US",
+      "type": "US_Regional"
+    },
+    "SNV-US": {
+      "name": "Synovus Financial Corp",
+      "path_safe_name": "Synovus_Financial_Corp",
+      "region": "US",
+      "type": "US_Regional"
+    },
     "BCS-GB": {
       "name": "Barclays PLC",
       "path_safe_name": "Barclays_PLC",
@@ -217,6 +289,204 @@
       "region": "CH",
       "type": "European"
     },
+    "DANSKE-DK": {
+      "name": "Danske Bank A/S",
+      "path_safe_name": "Danske_Bank_AS",
+      "region": "DK",
+      "type": "Nordic"
+    },
+    "NDA-FI": {
+      "name": "Nordea Bank Abp",
+      "path_safe_name": "Nordea_Bank_Abp",
+      "region": "FI",
+      "type": "Nordic"
+    },
+    "SWED-SE": {
+      "name": "Swedbank AB",
+      "path_safe_name": "Swedbank_AB",
+      "region": "SE",
+      "type": "Nordic"
+    },
+    "SEBA-SE": {
+      "name": "Skandinaviska Enskilda Banken AB",
+      "path_safe_name": "Skandinaviska_Enskilda_Banken_AB",
+      "region": "SE",
+      "type": "Nordic"
+    },
+    "CBA-AU": {
+      "name": "Commonwealth Bank of Australia",
+      "path_safe_name": "Commonwealth_Bank_of_Australia",
+      "region": "AU",
+      "type": "Australian"
+    },
+    "WBC-AU": {
+      "name": "Westpac Banking Corporation",
+      "path_safe_name": "Westpac_Banking_Corporation",
+      "region": "AU",
+      "type": "Australian"
+    },
+    "ANZ-AU": {
+      "name": "Australia and New Zealand Banking Group",
+      "path_safe_name": "Australia_and_New_Zealand_Banking_Group",
+      "region": "AU",
+      "type": "Australian"
+    },
+    "NAB-AU": {
+      "name": "National Australia Bank",
+      "path_safe_name": "National_Australia_Bank",
+      "region": "AU",
+      "type": "Australian"
+    },
+    "BOQ-AU": {
+      "name": "Bank of Queensland",
+      "path_safe_name": "Bank_of_Queensland",
+      "region": "AU",
+      "type": "Australian"
+    },
+    "LAZ-US": {
+      "name": "Lazard Ltd",
+      "path_safe_name": "Lazard_Ltd",
+      "region": "US",
+      "type": "US_Boutique"
+    },
+    "EVR-US": {
+      "name": "Evercore Inc",
+      "path_safe_name": "Evercore_Inc",
+      "region": "US",
+      "type": "US_Boutique"
+    },
+    "HLI-US": {
+      "name": "Houlihan Lokey Inc",
+      "path_safe_name": "Houlihan_Lokey_Inc",
+      "region": "US",
+      "type": "US_Boutique"
+    },
+    "MC-US": {
+      "name": "Moelis & Company",
+      "path_safe_name": "Moelis_Company",
+      "region": "US",
+      "type": "US_Boutique"
+    },
+    "PJT-US": {
+      "name": "PJT Partners Inc",
+      "path_safe_name": "PJT_Partners_Inc",
+      "region": "US",
+      "type": "US_Boutique"
+    },
+    "SF-US": {
+      "name": "Stifel Financial Corp",
+      "path_safe_name": "Stifel_Financial_Corp",
+      "region": "US",
+      "type": "US_Boutique"
+    },
+    "RJF-US": {
+      "name": "Raymond James Financial Inc",
+      "path_safe_name": "Raymond_James_Financial_Inc",
+      "region": "US",
+      "type": "US_Boutique"
+    },
+    "CCO-CA": {
+      "name": "Canaccord Genuity Group Inc",
+      "path_safe_name": "Canaccord_Genuity_Group_Inc",
+      "region": "CA",
+      "type": "Canadian_Asset_Manager"
+    },
+    "CIX-CA": {
+      "name": "CI Financial Corp",
+      "path_safe_name": "CI_Financial_Corp",
+      "region": "CA",
+      "type": "Canadian_Asset_Manager"
+    },
+    "AGF-CA": {
+      "name": "AGF Management Limited",
+      "path_safe_name": "AGF_Management_Limited",
+      "region": "CA",
+      "type": "Canadian_Asset_Manager"
+    },
+    "IGM-CA": {
+      "name": "IGM Financial Inc",
+      "path_safe_name": "IGM_Financial_Inc",
+      "region": "CA",
+      "type": "Canadian_Asset_Manager"
+    },
+    "FCA-CA": {
+      "name": "Fiera Capital Corporation",
+      "path_safe_name": "Fiera_Capital_Corporation",
+      "region": "CA",
+      "type": "Canadian_Asset_Manager"
+    },
+    "BLK-US": {
+      "name": "BlackRock Inc",
+      "path_safe_name": "BlackRock_Inc",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "BEN-US": {
+      "name": "Franklin Resources Inc",
+      "path_safe_name": "Franklin_Resources_Inc",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "IVZ-US": {
+      "name": "Invesco Ltd",
+      "path_safe_name": "Invesco_Ltd",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "AMG-US": {
+      "name": "Affiliated Managers Group Inc",
+      "path_safe_name": "Affiliated_Managers_Group_Inc",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "AMP-US": {
+      "name": "Ameriprise Financial Inc",
+      "path_safe_name": "Ameriprise_Financial_Inc",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "AB-US": {
+      "name": "AllianceBernstein Holding LP",
+      "path_safe_name": "AllianceBernstein_Holding_LP",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "FHI-US": {
+      "name": "Federated Hermes Inc",
+      "path_safe_name": "Federated_Hermes_Inc",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "JHG-US": {
+      "name": "Janus Henderson Group plc",
+      "path_safe_name": "Janus_Henderson_Group_plc",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "TROW-US": {
+      "name": "T. Rowe Price Group Inc",
+      "path_safe_name": "T_Rowe_Price_Group_Inc",
+      "region": "US",
+      "type": "US_Asset_Manager"
+    },
+    "RAT-GB": {
+      "name": "Rathbones Group Plc",
+      "path_safe_name": "Rathbones_Group_Plc",
+      "region": "GB",
+      "type": "UK_Asset_Manager"
+    },
+    "STJ-GB": {
+      "name": "St. James's Place plc",
+      "path_safe_name": "St_Jamess_Place_plc",
+      "region": "GB",
+      "type": "UK_Asset_Manager"
+    },
+    "QLT-GB": {
+      "name": "Quilter plc",
+      "path_safe_name": "Quilter_plc",
+      "region": "GB",
+      "type": "UK_Asset_Manager"
+    },
     "MFC-CA": {
       "name": "Manulife Financial Corporation",
       "path_safe_name": "Manulife_Financial_Corporation",
@@ -276,6 +546,48 @@
       "path_safe_name": "Progressive_Corporation",
       "region": "US",
       "type": "Insurance"
+    },
+    "EQB-CA": {
+      "name": "Equitable Group Inc",
+      "path_safe_name": "Equitable_Group_Inc",
+      "region": "CA",
+      "type": "Canadian_Monoline"
+    },
+    "FN-CA": {
+      "name": "First National Financial Corporation",
+      "path_safe_name": "First_National_Financial_Corporation",
+      "region": "CA",
+      "type": "Canadian_Monoline"
+    },
+    "MKP-CA": {
+      "name": "MCAN Mortgage Corporation",
+      "path_safe_name": "MCAN_Mortgage_Corporation",
+      "region": "CA",
+      "type": "Canadian_Monoline"
+    },
+    "GSY-CA": {
+      "name": "goeasy Ltd",
+      "path_safe_name": "goeasy_Ltd",
+      "region": "CA",
+      "type": "Canadian_Monoline"
+    },
+    "BK-US": {
+      "name": "The Bank of New York Mellon Corporation",
+      "path_safe_name": "The_Bank_of_New_York_Mellon_Corporation",
+      "region": "US",
+      "type": "US_Trust"
+    },
+    "STT-US": {
+      "name": "State Street Corporation",
+      "path_safe_name": "State_Street_Corporation",
+      "region": "US",
+      "type": "US_Trust"
+    },
+    "NTRS-US": {
+      "name": "Northern Trust Corporation",
+      "path_safe_name": "Northern_Trust_Corporation",
+      "region": "US",
+      "type": "US_Trust"
     },
     "PDO-CA": {
       "name": "Precision Drilling Corporation",
@@ -350,5 +662,31 @@
       "description": "Maximum characters per paragraph for LLM classification (preserves full structural context while managing token usage)"
     },
     "description": "LLM-based transcript section classification"
+  },
+  "stage_5": {
+    "dev_mode": true,
+    "dev_max_transcripts": 2,
+    "input_source": "Outputs/Refresh/classified_transcript_sections.json",
+    "output_file": "qa_paired_transcript_sections.json",
+    "output_path": "Outputs/Refresh",
+    "window_config": {
+      "context_blocks_before": 3,
+      "context_blocks_after": 2,
+      "dynamic_extension": true,
+      "full_paragraphs": true,
+      "description": "Speaker block-based sliding window configuration for Q&A boundary detection"
+    },
+    "llm_config": {
+      "token_endpoint": "https://oauth2.example.com/token",
+      "base_url": "https://api.example.com/v1",
+      "model": "gpt-4-turbo",
+      "temperature": 0.1,
+      "max_tokens": 1500,
+      "timeout": 60,
+      "max_retries": 3,
+      "cost_per_1k_prompt_tokens": 0.03,
+      "cost_per_1k_completion_tokens": 0.06
+    },
+    "description": "Q&A conversation boundary detection and pairing using speaker block analysis"
   }
 }
