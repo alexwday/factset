@@ -518,24 +518,35 @@ Provides detailed summary including:
 - **Authentication**: Requires LLM_CLIENT_ID and LLM_CLIENT_SECRET environment variables
 
 ### Stage 5: Q&A Conversation Boundary Detection ✅ PRODUCTION READY
-- **Purpose**: Identify and group question-answer conversation boundaries using speaker block analysis
+- **Purpose**: Identify and group question-answer conversation boundaries using state-driven speaker block analysis
 - **When to use**: After Stage 4 creates section type classifications
 - **Input**: classified_transcript_sections.json from Stage 4 output
 - **Output**: qa_paired_transcript_sections.json with Q&A group relationship mappings
 - **Features**:
-  - Speaker block-based sliding window analysis (not paragraph-level)
-  - Dynamic context windows that extend back to question starts when needed
-  - Enhanced speaker formatting with role indicators ([ANALYST], [EXECUTIVE], [OPERATOR])
-  - Per-transcript OAuth token refresh (eliminates expiration issues)
-  - LLM boundary detection with comprehensive fallback strategies
-  - Minimal schema extension (only 3 new fields: qa_group_id, qa_group_confidence, qa_group_method)
-  - Cost tracking and reporting (usage summary, no budget limits)
-  - Development mode (process only 2 transcripts for testing)
-  - Sophisticated CO-STAR prompting with clear decision boundaries
-  - Progressive fallback hierarchy: LLM detection → XML type attributes → conservative grouping
+  - **State-Driven Analysis**: Dynamic tool definitions based on current group state (active vs none)
+  - **Automatic Group ID Assignment**: Sequential numbering (1,2,3...) prevents invalid sequences
+  - **Enhanced Operator Detection**: Content pattern matching for "thank you, next question" statements
+  - **Real-Time Validation**: Built-in state machine with auto-correction and retry logic
+  - **Speaker Pattern Focus**: Simple analyst→executive exchange detection vs complex thematic analysis
+  - **Complete Exchange Capture**: Ensures full question→answer→follow-up→closing sequences
+  - **Speaker Block Analysis**: Processes complete speaker blocks (not individual paragraphs)
+  - **Dynamic Context Windows**: Extends back to question starts when analyzing continuations
+  - **Enhanced Speaker Formatting**: Clear role indicators ([ANALYST], [EXECUTIVE], [OPERATOR])
+  - **Per-Transcript OAuth Refresh**: Fresh token for each transcript (eliminates expiration issues)
+  - **Comprehensive Fallback Strategies**: LLM detection → XML type attributes → conservative grouping
+  - **Minimal Schema Extension**: Only 3 new fields (qa_group_id, qa_group_confidence, qa_group_method)
+  - **Cost Tracking**: Real-time token usage and final cost summary (no budget limits)
+  - **Development Mode**: Process only 2 transcripts for testing
+  - **Validation & Retry**: Invalid LLM responses caught and retried with feedback
 - **Usage**: `python stage_5_qa_pairing/5_transcript_qa_pairing.py`
 - **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
 - **Authentication**: Uses same LLM credentials as Stage 4 (LLM_CLIENT_ID and LLM_CLIENT_SECRET)
+- **Key Improvements** (2024-07-13):
+  - Eliminated duplicate group ending issues with state machine enforcement
+  - Automatic group ID sequencing prevents invalid sequences (1,3,2,3 → 1,1,2,2,3,3)
+  - Enhanced operator detection excludes "thank you, next question" from Q&A groups
+  - Real-time validation eliminates false warnings about decision inconsistencies
+  - Simplified prompting focuses on speaker patterns vs complex thematic analysis
 
 ## Configuration
 
