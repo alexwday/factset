@@ -90,14 +90,13 @@ def setup_logging() -> logging.Logger:
 
 
 class EnhancedErrorLogger:
-    """Handles separate error logging for different failure types and LLM audit trails."""
+    """Handles separate error logging for different failure types."""
 
     def __init__(self):
         self.llm_errors = []
         self.authentication_errors = []
         self.classification_errors = []
         self.processing_errors = []
-        self.llm_audit_trail = []
         self.total_cost = 0.0
         self.total_tokens = 0
 
@@ -137,24 +136,14 @@ class EnhancedErrorLogger:
             "action_required": "Review processing logic and input data"
         })
 
-    def log_llm_interaction(self, level: str, section_name: str, classification: str, confidence: float, reasoning: str, token_usage: dict = None):
-        """Log LLM classification decisions for audit trail."""
-        interaction = {
-            "timestamp": datetime.now().isoformat(),
-            "level": level,
-            "section_name": section_name,
-            "classification": classification,
-            "confidence": confidence,
-            "reasoning": reasoning
-        }
+    def accumulate_costs(self, token_usage: dict = None):
+        """Accumulate total cost and token usage for final summary."""
         if token_usage:
-            interaction["token_usage"] = token_usage
             # Accumulate total cost and tokens
             if "cost" in token_usage:
                 self.total_cost += token_usage["cost"]["total_cost"]
             if "total_tokens" in token_usage:
                 self.total_tokens += token_usage["total_tokens"]
-        self.llm_audit_trail.append(interaction)
 
     def save_error_logs(self, nas_conn: SMBConnection):
         """Save error logs to separate JSON files on NAS."""
@@ -170,18 +159,6 @@ class EnhancedErrorLogger:
             ("processing_errors", self.processing_errors),
         ]
         
-        # Save LLM audit trail separately
-        if self.llm_audit_trail:
-            audit_filename = f"stage_4_llm_audit_trail_{timestamp}.json"
-            audit_file_path = nas_path_join(error_base_path, audit_filename)
-            audit_content = json.dumps({
-                "run_timestamp": timestamp,
-                "total_interactions": len(self.llm_audit_trail),
-                "interactions": self.llm_audit_trail
-            }, indent=2)
-            audit_file_obj = io.BytesIO(audit_content.encode("utf-8"))
-            nas_upload_file(nas_conn, audit_file_obj, audit_file_path)
-            logger.info(f"Saved {len(self.llm_audit_trail)} LLM interactions to {audit_filename}")
 
         summary = {
             "run_timestamp": timestamp,
@@ -803,15 +780,8 @@ Unique Speakers in Section:
             
             logger.info(f"Level 1 classification: {section_name} -> {result['classification']} (confidence: {result['confidence']}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
             
-            # Log to audit trail
-            error_logger.log_llm_interaction(
-                level="Level 1",
-                section_name=section_name,
-                classification=result['classification'],
-                confidence=result['confidence'],
-                reasoning=result.get('reasoning', 'No reasoning provided'),
-                token_usage=token_usage
-            )
+            # Accumulate costs for final summary
+            error_logger.accumulate_costs(token_usage)
             
             return {
                 "method": "section_uniform",
@@ -941,15 +911,8 @@ Common transition indicators:
             
             logger.info(f"Level 2 breakpoint: {section_name} -> block {breakpoint_block} (confidence: {confidence}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
             
-            # Log to audit trail
-            error_logger.log_llm_interaction(
-                level="Level 2",
-                section_name=section_name,
-                classification=f"Breakpoint at block {breakpoint_block}",
-                confidence=confidence,
-                reasoning=result.get('reasoning', 'No reasoning provided'),
-                token_usage=token_usage
-            )
+            # Accumulate costs for final summary
+            error_logger.accumulate_costs(token_usage)
             
             return {
                 "method": "breakpoint_detection",
@@ -1116,15 +1079,8 @@ Future Context:
                 
                 logger.debug(f"Level 3 block {i+1}: {result['classification']} (confidence: {result['confidence']}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
                 
-                # Log to audit trail
-                error_logger.log_llm_interaction(
-                    level="Level 3",
-                    section_name=f"{section_name} - Block {i+1}",
-                    classification=result['classification'],
-                    confidence=result['confidence'],
-                    reasoning=result.get('reasoning', 'No reasoning provided'),
-                    token_usage=token_usage
-                )
+                # Accumulate costs for final summary
+                error_logger.accumulate_costs(token_usage)
             else:
                 # Fallback classification
                 block_classifications[block_id] = {
@@ -1449,7 +1405,6 @@ def main() -> None:
         logger.info(f"Total records classified: {len(all_classified_records)}")
         logger.info(f"Average records per transcript: {len(all_classified_records) / len(transcripts) if transcripts else 0:.1f}")
         logger.info(f"Execution time: {execution_time}")
-        logger.info(f"Total LLM interactions: {len(error_logger.llm_audit_trail)}")
         logger.info(f"Total tokens used: {error_logger.total_tokens:,}")
         logger.info(f"Total LLM cost: ${error_logger.total_cost:.4f}")
         if error_logger.total_tokens > 0:
