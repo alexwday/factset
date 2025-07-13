@@ -1026,7 +1026,7 @@ def process_management_discussion_section(md_records: List[Dict[str, Any]]) -> L
                         "total_tokens": response.usage.total_tokens,
                         "cost": cost_info
                     })
-                    logger.debug(f"MD window classification - tokens: {response.usage.total_tokens}, cost: ${cost_info['total_cost']:.4f}")
+                    logger.info(f"MD window classification - tokens: {response.usage.total_tokens}, cost: ${cost_info['total_cost']:.4f}")
                 
             except Exception as e:
                 error_msg = f"Management Discussion classification failed for block {block_id}: {e}"
@@ -1286,10 +1286,16 @@ def main() -> None:
                 transcripts[transcript_key]["qa_groups"][qa_group_id].append(record)
         
         all_classified_records = []
+        per_file_metrics = []  # Track per-transcript metrics
         
         # Process each transcript
-        for transcript_key, transcript_data in transcripts.items():
-            logger.info(f"Processing transcript: {transcript_key}")
+        for i, (transcript_key, transcript_data) in enumerate(transcripts.items(), 1):
+            transcript_start_time = datetime.now()
+            logger.info(f"Processing transcript {i}/{len(transcripts)}: {transcript_key}")
+            
+            # Capture initial cost state
+            initial_cost = error_logger.total_cost
+            initial_tokens = error_logger.total_tokens
             
             # Refresh OAuth token per transcript
             if not refresh_oauth_token_for_transcript():
@@ -1307,6 +1313,22 @@ def main() -> None:
             for qa_group_id, qa_records in transcript_data["qa_groups"].items():
                 qa_classified = process_qa_group(qa_records)
                 all_classified_records.extend(qa_classified)
+            
+            # Calculate per-transcript metrics
+            transcript_end_time = datetime.now()
+            transcript_time = transcript_end_time - transcript_start_time
+            transcript_cost = error_logger.total_cost - initial_cost
+            transcript_tokens = error_logger.total_tokens - initial_tokens
+            
+            per_file_metrics.append({
+                "transcript": transcript_key,
+                "processing_time": transcript_time,
+                "cost": transcript_cost,
+                "tokens": transcript_tokens,
+                "records": len([r for r in all_classified_records if f"{r.get('ticker')}_{r.get('fiscal_year')}_{r.get('fiscal_quarter')}" == transcript_key])
+            })
+            
+            logger.info(f"Transcript {transcript_key} completed - Time: {transcript_time}, Cost: ${transcript_cost:.4f}, Tokens: {transcript_tokens:,}")
             
             time.sleep(1)  # Rate limiting
         
@@ -1333,6 +1355,13 @@ def main() -> None:
         if total_calls > 0:
             logger.info(f"Average cost per call: ${total_cost/total_calls:.4f}")
             logger.info(f"Average tokens per call: {total_tokens/total_calls:.0f}")
+        
+        # Add per-transcript averages
+        if per_file_metrics:
+            avg_time_per_transcript = sum(m["processing_time"].total_seconds() for m in per_file_metrics) / len(per_file_metrics)
+            avg_cost_per_transcript = sum(m["cost"] for m in per_file_metrics) / len(per_file_metrics)
+            logger.info(f"Average time per transcript: {avg_time_per_transcript:.1f} seconds")
+            logger.info(f"Average cost per transcript: ${avg_cost_per_transcript:.4f}")
         
         # Save output and upload logs
         save_classified_output(nas_conn, all_classified_records)
