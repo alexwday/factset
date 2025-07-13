@@ -753,21 +753,21 @@ def scan_nas_for_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any
 
                         # Build full transcript record
                         institution_info = config["monitored_institutions"][ticker]
-                        # Create output record without internal-only fields
+                        # Create output record with requested field ordering
                         transcript_record = {
-                            "fiscal_year": year,
-                            "fiscal_quarter": quarter,
-                            "institution_type": institution_type,
-                            "ticker": ticker,
-                            "company_name": institution_info["name"],
+                            "title": selected_file.get("title", ""),
+                            "filename": selected_file["filename"],
+                            "date_last_modified": selected_file["date_last_modified"],
                             "transcript_type": selected_file["transcript_type"],
                             "event_id": selected_file.get("event_id", "unknown"),
                             "report_id": selected_file.get("report_id", "unknown"),
                             "version_id": selected_file.get("version_id", "unknown"),
                             "file_path": selected_file["file_path"],
-                            "filename": selected_file["filename"],
-                            "date_last_modified": selected_file["date_last_modified"],
-                            "title": selected_file.get("title", "")
+                            "fiscal_year": year,
+                            "fiscal_quarter": quarter,
+                            "institution_type": institution_type,
+                            "ticker": ticker,
+                            "company_name": institution_info["name"]
                             # Note: version_agnostic_key not included in output (internal use only)
                         }
 

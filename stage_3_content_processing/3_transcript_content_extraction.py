@@ -596,19 +596,19 @@ def extract_transcript_paragraphs(
                 for paragraph_text in speaker_block['paragraphs']:
                     if paragraph_text.strip():  # Skip empty paragraphs
                         
-                        # Create record with original Stage 2 fields + Stage 3 fields in requested order
+                        # Create record with Stage 2 fields first, then Stage 3 fields at the end
                         paragraph_record = {
-                            # Stage 3 fields in requested order
+                            # Stage 2 fields in requested order
+                            **original_record,
+                            
+                            # Stage 3 fields at the end
                             "section_id": section_id,
                             "speaker_block_id": current_speaker_block_id,
                             "paragraph_id": global_paragraph_id,
                             "section_name": section_name,
                             "speaker": speaker_string,
                             "question_answer_flag": qa_flag,
-                            "paragraph_content": paragraph_text.strip(),
-                            
-                            # Original Stage 2 fields (cleaned)
-                            **original_record
+                            "paragraph_content": paragraph_text.strip()
                         }
                         
                         paragraph_records.append(paragraph_record)
