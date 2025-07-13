@@ -224,9 +224,8 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     global logger, error_logger
     
     try:
-        # Download certificate from NAS
-        cert_nas_path = nas_path_join(NAS_BASE_PATH, "Inputs", "certificate", "certificate.cer")
-        cert_data = nas_download_file(nas_conn, cert_nas_path)
+        # Download certificate from NAS using config path
+        cert_data = nas_download_file(nas_conn, config['ssl_cert_nas_path'])
         
         if not cert_data:
             error_msg = "Failed to download SSL certificate from NAS"
@@ -241,8 +240,9 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
         cert_temp_file.write(cert_data)
         cert_temp_file.close()
         
-        # Set SSL environment variable
+        # Set SSL environment variables
         os.environ["SSL_CERT_FILE"] = cert_temp_file.name
+        os.environ["REQUESTS_CA_BUNDLE"] = cert_temp_file.name
         
         logger.info(f"SSL certificate setup complete: {cert_temp_file.name}")
         return cert_temp_file.name
@@ -476,6 +476,7 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
     global logger
 
     required_structure = {
+        "ssl_cert_nas_path": str,
         "stage_4": {
             "dev_mode": bool,
             "dev_max_transcripts": int,
