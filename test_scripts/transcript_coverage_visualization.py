@@ -18,8 +18,7 @@ from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set
 from pathlib import Path
-import pysmb
-from pysmb.SMBConnection import SMBConnection
+from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 import re
 
