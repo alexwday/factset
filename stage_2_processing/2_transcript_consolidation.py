@@ -766,16 +766,7 @@ def scan_nas_for_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any
                             "file_path": selected_file["file_path"],
                             "filename": selected_file["filename"],
                             "date_last_modified": selected_file["date_last_modified"],
-                            "selection_priority": get_priority_score(
-                                selected_file["transcript_type"]
-                            ),
-                            "version_agnostic_key": selected_file.get(
-                                "version_agnostic_key", ""
-                            ),
-                            "title": selected_file.get("title", ""),
-                            "call_type": selected_file.get("call_type", "unknown"),
-                            "call_suffix": selected_file.get("call_suffix", None),
-                            "selection_reason": "primary_earnings_call"
+                            "title": selected_file.get("title", "")
                         }
 
                         transcript_inventory[comparison_key] = transcript_record
@@ -814,11 +805,8 @@ def get_all_files_with_metadata(
             xml_content = nas_download_file(nas_conn, file_path)
             if xml_content:
                 title = extract_title_from_xml(xml_content)
-                call_type, call_suffix = classify_earnings_call(title)
             else:
                 title = None
-                call_type = "unknown"
-                call_suffix = None
                 error_logger.validation_errors.append({
                     'timestamp': datetime.now().isoformat(),
                     'ticker': ticker,
@@ -828,8 +816,6 @@ def get_all_files_with_metadata(
         except Exception as e:
             logger.warning(f"Failed to extract title from {filename}: {e}")
             title = None
-            call_type = "unknown"  
-            call_suffix = None
         
         # Parse metadata from filename  
         parts = filename.replace(".xml", "").split("_")
@@ -853,17 +839,13 @@ def get_all_files_with_metadata(
             "transcript_type": transcript_type,
             "version_id": version_id or 0,
             "date_last_modified": modified_time.isoformat() if modified_time else datetime.now().isoformat(),
-            "version_agnostic_key": version_agnostic_key,
             "event_id": event_id,
             "report_id": report_id,
-            "title": title,
-            "call_type": call_type,
-            "call_suffix": call_suffix,
-            "selection_priority": get_priority_score(transcript_type)
+            "title": title
         }
         
         result_files.append(file_record)
-        logger.debug(f"Found {call_type} call: {title} ({filename})")
+        logger.debug(f"Found call: {title} ({filename})")
     
     return result_files
 
@@ -909,7 +891,14 @@ def select_primary_earnings_call(
         return latest_calls[0]
     
     # Tier 1: Look for exact primary calls first
-    primary_calls = [call for call in latest_calls if call["call_type"] == "primary"]
+    # Check for primary calls using title patterns instead of removed call_type field
+    primary_calls = []
+    for call in latest_calls:
+        title = call.get("title", "")
+        # Primary call patterns: exact match or no suffix
+        if re.match(r"^Q[1-4] 20\d{2} Earnings Call$", title) or \
+           ("Earnings Call" in title and " - " not in title):
+            primary_calls.append(call)
     
     if len(primary_calls) == 1:
         logger.info(f"Selected primary call for {ticker} {year} {quarter}: {primary_calls[0]['title']}")
@@ -1089,7 +1078,6 @@ def create_file_record(
         "date_last_modified": (
             modified_time.isoformat() if modified_time else datetime.now().isoformat()
         ),
-        "version_agnostic_key": version_agnostic_key,
         "event_id": event_id,
         "report_id": report_id,
     }
