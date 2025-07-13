@@ -753,6 +753,7 @@ def scan_nas_for_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any
 
                         # Build full transcript record
                         institution_info = config["monitored_institutions"][ticker]
+                        # Create output record without internal-only fields
                         transcript_record = {
                             "fiscal_year": year,
                             "fiscal_quarter": quarter,
@@ -767,6 +768,7 @@ def scan_nas_for_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any
                             "filename": selected_file["filename"],
                             "date_last_modified": selected_file["date_last_modified"],
                             "title": selected_file.get("title", "")
+                            # Note: version_agnostic_key not included in output (internal use only)
                         }
 
                         transcript_inventory[comparison_key] = transcript_record
@@ -839,6 +841,7 @@ def get_all_files_with_metadata(
             "transcript_type": transcript_type,
             "version_id": version_id or 0,
             "date_last_modified": modified_time.isoformat() if modified_time else datetime.now().isoformat(),
+            "version_agnostic_key": version_agnostic_key,  # Keep for internal processing
             "event_id": event_id,
             "report_id": report_id,
             "title": title
@@ -1078,6 +1081,7 @@ def create_file_record(
         "date_last_modified": (
             modified_time.isoformat() if modified_time else datetime.now().isoformat()
         ),
+        "version_agnostic_key": version_agnostic_key,  # Keep for internal processing
         "event_id": event_id,
         "report_id": report_id,
     }
