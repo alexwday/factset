@@ -5,7 +5,7 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 
 ## Current Status
 - **Stage 0**: `stage_0_bulk_refresh/0_transcript_bulk_sync.py` - PRODUCTION READY ✅ (All 9 critical issues resolved)
-- **Working Script**: `0_transcript_bulk_sync_working.py` contains the original functional bulk sync script (551 lines)
+- **Reference Implementation**: Production-ready code with comprehensive validation, security hardening, and proper error handling
 - **Architecture**: Stage-based approach where each stage is completely independent and follows security standards
 - **Storage**: All data stored on NAS (no local storage) using pysmb with NTLM v2 authentication
 - **Authentication**: Corporate proxy authentication required for API access
@@ -16,16 +16,16 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 3. **Audit Trail**: Every operation logged with timestamps and error context
 4. **Incremental Safe**: Checks existing files, safe to re-run without re-downloading
 5. **Version Management**: Automatically handles vendor version ID updates, keeps only latest version
-6. **Institution Coverage**: 6 Canadian banks, 6 US banks, 3 insurance companies
+6. **Institution Coverage**: 47 global financial institutions across 4 regions (Canadian, US, European, Insurance)
 7. **File Organization**: Organized by institution type → company → transcript type
 8. **Standardized Naming**: Consistent filename format for easy identification and processing
 
 ## Key Technical Requirements
 
 ### Authentication & Configuration
-- **Environment Variables (.env)**: 12 required variables
+- **Environment Variables (.env)**: 13 required variables
   - API_USERNAME, API_PASSWORD (FactSet API)
-  - PROXY_USER, PROXY_PASSWORD, PROXY_URL, PROXY_DOMAIN (Corporate proxy)
+  - PROXY_USER, PROXY_PASSWORD, PROXY_URL, PROXY_DOMAIN (Corporate proxy - PROXY_DOMAIN defaults to 'MAPLE')
   - NAS_USERNAME, NAS_PASSWORD, NAS_SERVER_IP, NAS_SERVER_NAME (NAS connection)
   - NAS_SHARE_NAME, NAS_BASE_PATH (NAS paths)
   - CONFIG_PATH, CLIENT_MACHINE_NAME (Configuration)
@@ -50,10 +50,12 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
   - `Outputs/Logs/Errors/` - Separate error logs (parsing, download, filesystem, validation)
   - `Outputs/listing/` - Inventory JSON files (future use)
 
-### Monitored Institutions
-**Canadian Banks**: RY-CA, TD-CA, BNS-CA, BMO-CA, CM-CA, NA-CA  
-**US Banks**: JPM-US, BAC-US, WFC-US, C-US, GS-US, MS-US  
-**Insurance**: MFC-CA, SLF-CA, UNH-US
+### Monitored Institutions (47 Total)
+**Canadian Banks (8)**: RY-CA, TD-CA, BNS-CA, BMO-CA, CM-CA, NA-CA, LB-CA, CWB-CA  
+**US Banks (11)**: JPM-US, BAC-US, WFC-US, C-US, GS-US, MS-US, USB-US, PNC-US, TFC-US, COF-US, SCHW-US  
+**European Banks (17)**: BCS-GB, LLOY-GB, RBS-GB, HSBA-GB, STAN-GB, DBK-DE, CBK-DE, BNP-FR, ACA-FR, GLE-FR, SAN-ES, BBVA-ES, ISP-IT, UCG-IT, ING-NL, UBS-CH, CSGN-CH  
+**Insurance (10)**: MFC-CA, SLF-CA, GWO-CA, IFC-CA, FFH-CA, UNH-US, BRK.A-US, AIG-US, TRV-US, PGR-US  
+**Other (2)**: PDO-CA, AKBM-NO
 
 ### File Naming Convention
 `{primary_id}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
@@ -74,7 +76,7 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 ### Complete Step-by-Step Process
 
 #### **1. Security & Authentication Setup**
-- Validates all required credentials from `.env` file (12 environment variables)
+- Validates all required credentials from `.env` file (13 environment variables)
 - Connects to NAS using secure NTLM v2 authentication
 - Downloads SSL certificate from NAS for secure FactSet API connections
 - Configures corporate proxy authentication for API access with domain escaping
@@ -108,7 +110,7 @@ Outputs/Data/
     └── Unknown/
 ```
 
-#### **4. Institution Processing Loop (15 Total)**
+#### **4. Institution Processing Loop (47 Total)**
 For each monitored institution:
 
 **a) API Query with Critical Filters**
@@ -213,6 +215,8 @@ requests
 python-dotenv
 pysmb
 python-dateutil
+openai  # Required for Stage 4 LLM classification
+pytz    # Required for test scripts
 # Enhanced folder structure parsing:
 xml.etree.ElementTree  # Built-in Python library for XML parsing
 ```
@@ -220,7 +224,7 @@ xml.etree.ElementTree  # Built-in Python library for XML parsing
 ## Stage Architecture Plan
 
 ### Stage 0: Bulk Refresh ✅ PRODUCTION READY
-- **Purpose**: Download ALL historical earnings transcripts from 2023-present for 15 monitored financial institutions
+- **Purpose**: Download ALL historical earnings transcripts from 2023-present for 47 monitored financial institutions
 - **Script**: `stage_0_bulk_refresh/0_transcript_bulk_sync.py`
 - **Config**: `Inputs/config/config.json` on NAS
 - **When**: Initial setup or complete repository refresh
@@ -253,10 +257,45 @@ xml.etree.ElementTree  # Built-in Python library for XML parsing
   - Optional `earnings_monitor.py` for real-time notifications
   - Configurable lookback period (sync_date_range)
 
-### Stage 2: Processing (Future Development)
-- **Purpose**: Process and analyze downloaded transcripts
-- **Script**: `stage_2_processing/2_transcript_processing.py` (not yet implemented)
-- **Config**: `Inputs/config/stage_2_config.json` on NAS
+### Stage 2: Transcript Consolidation ✅ PRODUCTION READY
+- **Purpose**: Consolidate and organize downloaded transcripts, create master database  
+- **Script**: `stage_2_processing/2_transcript_consolidation.py`
+- **Config**: `Inputs/config/config.json` on NAS (uses stage_2 section)
+- **When**: After bulk download or periodic consolidation
+- **Key Features**:
+  - Enhanced file selection algorithm with intelligent duplicate handling
+  - Multi-call earnings transcript consolidation (e.g., preliminary + corrected calls)
+  - Master database creation with comprehensive transcript metadata
+  - Version-aware file processing with automatic latest version selection
+  - Comprehensive error logging with separate JSON files for different error types
+  - Read-only approach - validates and consolidates without modifying original files
+  - Smart fallback handling for edge cases and parsing failures
+
+### Stage 3: Content Processing ✅ PRODUCTION READY
+- **Purpose**: Extract and structure content from XML transcripts
+- **Script**: `stage_3_content_processing/3_transcript_content_extraction.py`
+- **Config**: `Inputs/config/config.json` on NAS (uses stage_3 section)
+- **When**: After transcript consolidation
+- **Key Features**:
+  - Paragraph-level content extraction from XML transcripts
+  - Speaker attribution and role identification (Operator, Executive, Analyst)
+  - Q&A session detection and separation
+  - Structured content output with speaker metadata
+  - Comprehensive error logging and validation
+  - Preserves original XML structure while extracting meaningful content
+
+### Stage 4: LLM Classification ✅ PRODUCTION READY
+- **Purpose**: LLM-based transcript section classification and analysis
+- **Script**: `stage_4_llm_classification/4_transcript_llm_classification.py`
+- **Config**: `Inputs/config/config.json` on NAS (uses stage_4 section)
+- **When**: After content extraction for detailed analysis
+- **Key Features**:
+  - 3-level progressive classification system (Company Overview → Business Performance → Financial Metrics)
+  - OAuth 2.0 authentication for secure LLM API access
+  - CO-STAR prompt framework for consistent, structured responses
+  - Comprehensive error handling with retry logic and rate limiting
+  - JSON-structured output with confidence scoring
+  - Production-ready with full security validation and audit trails
 
 ## MANDATORY Development Standards
 
@@ -383,7 +422,7 @@ The stage 0 script underwent comprehensive security and reliability review, reso
 9. **Input Validation** (LOW): Added validation for API responses, file paths, and configuration
 
 ### Reference Implementation
-- **Original Working Script**: `0_transcript_bulk_sync_working.py` (551 lines) - functional baseline
+- **Historical Reference**: Previous version removed during cleanup (commit 1b3ff6c)
 - **Production-Ready Script**: `stage_0_bulk_refresh/0_transcript_bulk_sync.py` - follows all security standards
 - **Development Standards**: See `stage_0_bulk_refresh/CLAUDE.md` for detailed lessons learned
 

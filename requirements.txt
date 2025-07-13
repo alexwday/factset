@@ -12,3 +12,7 @@ pysmb
 
 # Utility libraries
 python-dateutil
+pytz
+
+# LLM integration (Stage 4)
+openai
