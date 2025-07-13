@@ -290,12 +290,14 @@ xml.etree.ElementTree  # Built-in Python library for XML parsing
 - **Config**: `Inputs/config/config.json` on NAS (uses stage_4 section)
 - **When**: After content extraction for detailed analysis
 - **Key Features**:
-  - 3-level progressive classification system (Company Overview → Business Performance → Financial Metrics)
+  - 3-level progressive classification system (Management Discussion vs Investor Q&A)
   - OAuth 2.0 authentication for secure LLM API access
   - CO-STAR prompt framework for consistent, structured responses
+  - Comprehensive cost tracking with configurable token rates and real-time budget monitoring
+  - Full section context with paragraph-level character limits (750 chars per paragraph)
   - Comprehensive error handling with retry logic and rate limiting
   - JSON-structured output with confidence scoring
-  - Production-ready with full security validation and audit trails
+  - Production-ready with full security validation and cost tracking
 
 ## MANDATORY Development Standards
 

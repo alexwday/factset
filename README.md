@@ -257,10 +257,15 @@ LLM_CLIENT_SECRET=your_llm_client_secret
        "model": "gpt-4-turbo",
        "temperature": 0.1,
        "base_url": "https://your-llm-api.com/v1",
-       "token_endpoint": "https://oauth.your-api.com/token"
+       "token_endpoint": "https://oauth.your-api.com/token",
+       "cost_per_1k_prompt_tokens": 0.03,
+       "cost_per_1k_completion_tokens": 0.06
      },
      "classification_thresholds": {
        "min_confidence": 0.7
+     },
+     "content_limits": {
+       "max_paragraph_chars": 750
      }
    }
    ```
@@ -443,6 +448,8 @@ Provides detailed summary including:
   - 3-level progressive classification system (Direct → Breakpoint → Individual)
   - OAuth 2.0 authentication with SSL certificate management
   - CO-STAR prompt framework with structured function calling
+  - Comprehensive cost tracking with configurable token rates and real-time budget monitoring
+  - Full section context with paragraph-level character limits (750 chars per paragraph)
   - Development mode (process only 2 transcripts for testing)
   - Comprehensive error handling and recovery mechanisms
   - Progressive API cost optimization (avg 1.5 calls per section)
