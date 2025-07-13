@@ -98,6 +98,8 @@ class EnhancedErrorLogger:
         self.classification_errors = []
         self.processing_errors = []
         self.llm_audit_trail = []
+        self.total_cost = 0.0
+        self.total_tokens = 0
 
     def log_llm_error(self, transcript_id: str, section_id: int, error: str):
         """Log LLM API errors."""
@@ -147,6 +149,11 @@ class EnhancedErrorLogger:
         }
         if token_usage:
             interaction["token_usage"] = token_usage
+            # Accumulate total cost and tokens
+            if "cost" in token_usage:
+                self.total_cost += token_usage["cost"]["total_cost"]
+            if "total_tokens" in token_usage:
+                self.total_tokens += token_usage["total_tokens"]
         self.llm_audit_trail.append(interaction)
 
     def save_error_logs(self, nas_conn: SMBConnection):
@@ -647,6 +654,22 @@ def format_paragraph_content(content: str) -> str:
     return content[:max_chars] + "..."
 
 
+def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
+    """Calculate cost based on token usage and configured rates."""
+    prompt_cost_per_1k = config["stage_4"]["llm_config"]["cost_per_1k_prompt_tokens"]
+    completion_cost_per_1k = config["stage_4"]["llm_config"]["cost_per_1k_completion_tokens"]
+    
+    prompt_cost = (prompt_tokens / 1000) * prompt_cost_per_1k
+    completion_cost = (completion_tokens / 1000) * completion_cost_per_1k
+    total_cost = prompt_cost + completion_cost
+    
+    return {
+        "prompt_cost": round(prompt_cost, 6),
+        "completion_cost": round(completion_cost, 6),
+        "total_cost": round(total_cost, 6)
+    }
+
+
 def create_individual_classification_tools():
     """Create function calling tools for individual speaker block classification."""
     return [
@@ -766,15 +789,17 @@ Unique Speakers in Section:
             tool_call = response.choices[0].message.tool_calls[0]
             result = json.loads(tool_call.function.arguments)
             
-            # Log token usage
+            # Log token usage and cost
             token_usage = None
             if hasattr(response, 'usage') and response.usage:
+                cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
                 token_usage = {
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
+                    "total_tokens": response.usage.total_tokens,
+                    "cost": cost_info
                 }
-                logger.info(f"Level 1 tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}")
+                logger.info(f"Level 1 tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}, cost: ${cost_info['total_cost']:.4f}")
             
             logger.info(f"Level 1 classification: {section_name} -> {result['classification']} (confidence: {result['confidence']}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
             
@@ -902,15 +927,17 @@ Common transition indicators:
             breakpoint_block = result["breakpoint_speaker_block"]
             confidence = result["confidence"]
             
-            # Log token usage
+            # Log token usage and cost
             token_usage = None
             if hasattr(response, 'usage') and response.usage:
+                cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
                 token_usage = {
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
+                    "total_tokens": response.usage.total_tokens,
+                    "cost": cost_info
                 }
-                logger.info(f"Level 2 tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}")
+                logger.info(f"Level 2 tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}, cost: ${cost_info['total_cost']:.4f}")
             
             logger.info(f"Level 2 breakpoint: {section_name} -> block {breakpoint_block} (confidence: {confidence}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
             
@@ -1075,15 +1102,17 @@ Future Context:
                     "reasoning": result["reasoning"]
                 }
                 
-                # Log token usage
+                # Log token usage and cost
                 token_usage = None
                 if hasattr(response, 'usage') and response.usage:
+                    cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
                     token_usage = {
                         "prompt_tokens": response.usage.prompt_tokens,
                         "completion_tokens": response.usage.completion_tokens,
-                        "total_tokens": response.usage.total_tokens
+                        "total_tokens": response.usage.total_tokens,
+                        "cost": cost_info
                     }
-                    logger.debug(f"Level 3 block {i+1} tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}")
+                    logger.debug(f"Level 3 block {i+1} tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}, cost: ${cost_info['total_cost']:.4f}")
                 
                 logger.debug(f"Level 3 block {i+1}: {result['classification']} (confidence: {result['confidence']}) | Reasoning: {result.get('reasoning', 'No reasoning provided')}")
                 
@@ -1412,12 +1441,21 @@ def main() -> None:
         end_time = datetime.now()
         execution_time = end_time - start_time
 
-        # Final summary
+        # Final summary with cost tracking
+        logger.info("="*60)
         logger.info("STAGE 4 LLM CLASSIFICATION COMPLETE")
+        logger.info("="*60)
         logger.info(f"Transcripts processed: {len(transcripts)}")
         logger.info(f"Total records classified: {len(all_classified_records)}")
         logger.info(f"Average records per transcript: {len(all_classified_records) / len(transcripts) if transcripts else 0:.1f}")
         logger.info(f"Execution time: {execution_time}")
+        logger.info(f"Total LLM interactions: {len(error_logger.llm_audit_trail)}")
+        logger.info(f"Total tokens used: {error_logger.total_tokens:,}")
+        logger.info(f"Total LLM cost: ${error_logger.total_cost:.4f}")
+        if error_logger.total_tokens > 0:
+            avg_cost_per_1k_tokens = (error_logger.total_cost / error_logger.total_tokens) * 1000
+            logger.info(f"Average cost per 1K tokens: ${avg_cost_per_1k_tokens:.4f}")
+        logger.info("="*60)
 
         # Upload logs
         upload_logs_to_nas(nas_conn, logger, error_logger)
