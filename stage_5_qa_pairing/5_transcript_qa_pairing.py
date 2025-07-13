@@ -545,125 +545,98 @@ SPEAKER BLOCK {block['speaker_block_id']}:
 
 def create_qa_boundary_prompt(formatted_context: str, current_block_id: int, qa_state: Dict = None) -> str:
     """
-    Create sophisticated CO-STAR prompt for Q&A boundary detection with state awareness and look-ahead context.
+    Create state-driven prompt for Q&A boundary detection with clear decision options.
     """
     # Extract state information
     current_group_active = qa_state.get("group_active", False) if qa_state else False
     current_group_id = qa_state.get("current_qa_group_id") if qa_state else None
     last_status = qa_state.get("last_decision_status") if qa_state else None
-    next_block = qa_state.get("next_block") if qa_state else None
+    
+    # Determine valid options based on current state
+    if current_group_active:
+        valid_options = "CONTINUE current group OR END current group"
+        primary_objective = f"Decide if current block continues or ends Q&A group {current_group_id}"
+    else:
+        valid_options = "START new group OR mark as STANDALONE (operator/non-Q&A)"
+        primary_objective = "Decide if current block starts a new Q&A exchange"
     
     # Create state context
     state_context = f"""**CURRENT STATE**:
 - Q&A Group Active: {"YES" if current_group_active else "NO"}
 - Active Group ID: {current_group_id if current_group_id else "None"}
 - Last Decision: {last_status if last_status else "None"}
-- Next Block Preview: {next_block.get('speaker', 'None') if next_block else 'End of transcript'}"""
+- Your Options: {valid_options}"""
     
-    # Create enhanced look-ahead guidance
-    lookahead_guidance = ""
-    current_block_index = qa_state.get("current_block_index", 0) if qa_state else 0
-    
-    if next_block:
-        next_speaker = next_block.get('speaker', '').lower()
-        is_next_operator = 'operator' in next_speaker
-        is_next_pleasantries = is_closing_pleasantries_block(next_block)
-        
-        if is_next_operator:
-            lookahead_guidance = "\n**LOOK-AHEAD ALERT**: Next block is operator - current block likely ends conversation."
-        elif is_next_pleasantries:
-            lookahead_guidance = "\n**LOOK-AHEAD ALERT**: Next block contains closing pleasantries - consider including in current group if active."
-        elif current_group_active and 'analyst' in next_speaker:
-            lookahead_guidance = "\n**LOOK-AHEAD ALERT**: Next block is new analyst - current block should end active group."
-    else:
-        lookahead_guidance = "\n**LOOK-AHEAD ALERT**: End of transcript - current block should end any active group."
-    
-    return f"""**CONTEXT**: You are analyzing earnings call speaker blocks to determine Q&A conversation boundaries. Each speaker block contains one person's complete statement with their role and content clearly marked. Your goal is to capture complete conversational exchanges between question askers and institution responders.
+    return f"""**CONTEXT**: You are analyzing earnings call speaker blocks to capture complete analyst-responder exchanges. Focus on speaker patterns to determine conversation boundaries.
 
-{state_context}{lookahead_guidance}
+{state_context}
 
-**OBJECTIVE**: For the current speaker block (marked as DECISION POINT), determine:
-1. Does this block start a new Q&A group?
-2. Does this block continue an existing Q&A group?  
-3. Does this block end the current Q&A group?
-4. What is the complete Q&A group span (start_block_id to end_block_id)?
-
-**STYLE**: Analyze complete speaker blocks as units. Focus on complete conversational exchanges:
-- **Complete Exchanges**: Capture entire back-and-forth between question asker and institution responder
-- **Related Follow-ups**: If follow-up question is on the same theme/topic, include in current Q&A group
-- **New Themes**: If follow-up question introduces different theme/topic, start new Q&A group
-- **Speaker Roles**: [ANALYST] ask questions, [EXECUTIVE] answer, [OPERATOR] manage call flow
-- **Operator Exclusion**: [OPERATOR] blocks should NEVER be assigned Q&A group IDs - they are call management only
-
-**TONE**: Conservative and methodical. Prioritize:
-1. Complete conversational exchanges over artificial splits
-2. Thematic coherence - related questions/answers stay together
-3. Clear boundaries when themes change or new participants enter
-4. Operator blocks remain unassigned (no Q&A group)
-
-**AUDIENCE**: Financial analysts who need accurate question-answer relationship mapping for research and analysis.
-
-**RESPONSE**: Use the analyze_speaker_block_boundaries function with structured output.
+**OBJECTIVE**: {primary_objective}
 
 {formatted_context}
 
-**CRITICAL ANALYSIS INSTRUCTIONS**:
+**DECISION LOGIC**:
 
-**STATE-AWARE DECISION LOGIC (MANDATORY)**:
-- If NO active group: Look for question starts or operator management
-- If active group: Look for continuation, completion, or premature interruption
-- If group just ended: Don't create duplicate endings - look for new starts or pleasantries
-- Use next block preview to make better ending decisions
+**Speaker Pattern Analysis**:
+- **ANALYST speakers**: Usually start new Q&A exchanges with questions
+- **EXECUTIVE speakers**: Usually respond to analyst questions  
+- **OPERATOR speakers**: Manage call flow - always mark as STANDALONE
 
-**OPERATOR BLOCK HANDLING (MANDATORY)**:
-- If current block speaker contains "operator" → assign qa_group_id: null, group_status: "standalone"
-- Operator blocks manage call flow, introduce speakers, handle technical issues
-- NEVER assign operator blocks to Q&A groups - they interrupt but don't participate in Q&A
+**Exchange Completion Rules**:
+1. Capture ENTIRE analyst question → executive response → any follow-up → closing
+2. An exchange ends when: 
+   - Executive finishes responding AND next speaker is different analyst
+   - Executive finishes responding AND operator speaks
+   - Analyst says brief thanks/closing after getting response
+3. Continue exchange when:
+   - Same executive continues multi-part answer
+   - Same analyst asks follow-up to same executive
+   - Brief acknowledgments within ongoing conversation
 
-**CONVERSATION FLOW PRIORITIES**:
-1. **Complete Exchange Capture**: Ensure full question→answer→follow-up sequences stay together
-2. **Thematic Coherence**: 
-   - Same topic/theme follow-ups → continue current Q&A group
-   - Different topic/theme questions → start new Q&A group
-3. **Natural Boundaries with Look-ahead**:
-   - "Thank you" + next block is operator/new speaker → end current group
-   - "Thank you" + next block continues theme → include thanks in group
-   - New analyst introduction → start new group (unless thanking previous)
-   - Operator transitions → natural break points
+**Current Block Analysis**:
+- Look at CURRENT speaker role and content
+- Consider PRIOR speaker context for conversation flow
+- Consider NEXT speaker to avoid cutting off mid-exchange
 
-**CLOSING PLEASANTRIES HANDLING**:
-- If current block contains "thank you", "appreciate", "helpful" AND active group exists:
-  - Check next block: if operator/new topic → include thanks and end group
-  - If unclear → include thanks in current group for completeness
-- Avoid creating separate groups for brief thanks - attach to preceding Q&A
-
-**SPEAKER TRANSITION ANALYSIS**:
-- Analyst→Executive: Typically question→answer flow (continue group)
-- Executive→Analyst (same person): Often clarification/follow-up (continue if same theme)
-- Executive→Analyst (different person): Usually new question (evaluate theme)
-- Any→Operator: Call management, not Q&A content (operator gets no assignment)
-- Operator→Any: Introduction to new exchange (next block likely starts new group)
-
-**RESPONSE FORMAT**:
-- Keep reasoning brief (max 100 characters): focus on key decision factors
-- Examples: "Analyst Q start", "Exec continues A", "Theme shift to guidance", "Operator transition"
-
-**CONFIDENCE SCORING GUIDANCE**:
-- High (0.8-1.0): Clear speaker patterns, obvious theme boundaries, definitive operator blocks
-- Medium (0.6-0.79): Some ambiguity in theme continuation or speaker roles
-- Low (0.4-0.59): Unclear boundaries, mixed themes, uncertain speaker roles
-- Very Low (<0.4): Highly ambiguous content requiring XML fallback"""
+**Response Requirements**:
+- Brief reasoning (max 100 chars): focus on speaker pattern
+- Examples: "Analyst starts Q", "Exec continues answer", "Exchange complete", "Operator manages"
+- High confidence (0.8+) for clear patterns, lower for ambiguous cases"""
 
 
 # Q&A Boundary Detection Schema
-def create_qa_boundary_detection_tools():
-    """Create function calling tools for Q&A boundary detection."""
+def create_qa_boundary_detection_tools(qa_state: Dict = None):
+    """Create dynamic function calling tools based on current Q&A state."""
+    
+    # Extract state information
+    current_group_active = qa_state.get("group_active", False) if qa_state else False
+    current_group_id = qa_state.get("current_qa_group_id") if qa_state else None
+    
+    # Create dynamic enum based on current state
+    if current_group_active:
+        # If group is active, can only continue or end
+        status_enum = ["group_continue", "group_end", "standalone"]
+        description = f"Continue or end active Q&A group {current_group_id}, or mark operator as standalone"
+    else:
+        # If no active group, can only start new or mark standalone
+        status_enum = ["group_start", "standalone"]
+        description = "Start new Q&A group or mark operator/non-Q&A as standalone"
+    
+    # Dynamic qa_group_id handling
+    qa_group_id_def = {
+        "type": ["integer", "null"],
+        "description": f"Use {current_group_id} for continue/end, new ID for start, null for standalone"
+    } if current_group_active else {
+        "type": ["integer", "null"],
+        "description": "New group ID for start, null for standalone"
+    }
+    
     return [
         {
             "type": "function",
             "function": {
                 "name": "analyze_speaker_block_boundaries",
-                "description": "Analyze speaker block boundaries for Q&A group assignment",
+                "description": description,
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -671,22 +644,19 @@ def create_qa_boundary_detection_tools():
                             "type": "object",
                             "properties": {
                                 "current_block_id": {"type": "integer"},
-                                "qa_group_id": {"type": "integer"},
-                                "qa_group_start_block": {"type": "integer"},
-                                "qa_group_end_block": {"type": "integer"},
+                                "qa_group_id": qa_group_id_def,
                                 "group_status": {
                                     "type": "string",
-                                    "enum": ["group_start", "group_continue", "group_end", "standalone"]
+                                    "enum": status_enum
                                 },
                                 "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                                 "reasoning": {
                                     "type": "string",
                                     "maxLength": 100,
-                                    "description": "Brief reasoning (max 100 chars): speaker role, theme change, or conversation flow"
-                                },
-                                "continue_to_next_block": {"type": "boolean"}
+                                    "description": "Brief reasoning: speaker role and conversation flow"
+                                }
                             },
-                            "required": ["current_block_id", "qa_group_id", "group_status", "confidence_score", "continue_to_next_block"]
+                            "required": ["current_block_id", "qa_group_id", "group_status", "confidence_score", "reasoning"]
                         }
                     },
                     "required": ["qa_group_decision"]
@@ -726,6 +696,109 @@ def is_operator_block(speaker_block: Dict) -> bool:
             return True
     
     return False
+
+
+def validate_llm_decision(decision: Dict, qa_state: Dict, current_block_id: int) -> str:
+    """
+    Validate LLM decision against current state. Returns error message if invalid, None if valid.
+    """
+    current_group_active = qa_state.get("group_active", False)
+    current_group_id = qa_state.get("current_qa_group_id")
+    status = decision.get("group_status")
+    decision_group_id = decision.get("qa_group_id")
+    
+    # Validate based on current state
+    if current_group_active:
+        # Active group: can only continue, end, or standalone
+        if status not in ["group_continue", "group_end", "standalone"]:
+            return f"Invalid status '{status}' for active group state"
+        
+        # If continuing/ending, must use current group ID (unless standalone)
+        if status in ["group_continue", "group_end"] and decision_group_id != current_group_id:
+            return f"Must use current group ID {current_group_id}, got {decision_group_id}"
+        
+        # Standalone should have null group ID
+        if status == "standalone" and decision_group_id is not None:
+            return f"Standalone blocks must have null group ID, got {decision_group_id}"
+    
+    else:
+        # No active group: can only start or standalone
+        if status not in ["group_start", "standalone"]:
+            return f"Invalid status '{status}' for no active group state"
+        
+        # Starting should have new group ID
+        if status == "group_start" and decision_group_id is None:
+            return "New group start must have group ID"
+        
+        # Standalone should have null group ID  
+        if status == "standalone" and decision_group_id is not None:
+            return f"Standalone blocks must have null group ID, got {decision_group_id}"
+    
+    return None  # Valid decision
+
+
+def retry_with_validation_feedback(current_block_index: int, speaker_blocks: List[Dict], 
+                                 transcript_id: str, qa_state: Dict, validation_error: str) -> Optional[Dict]:
+    """
+    Retry LLM call with validation feedback. Single retry only.
+    """
+    global logger, error_logger, llm_client
+    
+    try:
+        current_block = speaker_blocks[current_block_index]
+        current_block_id = current_block["speaker_block_id"]
+        
+        logger.info(f"Block {current_block_id}: Retrying with validation feedback: {validation_error}")
+        
+        # Create context window
+        window_blocks = create_speaker_block_window(current_block_index, speaker_blocks, qa_state)
+        
+        # Format context for LLM
+        formatted_context = format_speaker_block_context(window_blocks, 
+                                                       next(i for i, b in enumerate(window_blocks) 
+                                                           if b["speaker_block_id"] == current_block_id))
+        
+        # Create prompt with validation feedback
+        base_prompt = create_qa_boundary_prompt(formatted_context, current_block_id, qa_state)
+        retry_prompt = f"""{base_prompt}
+        
+**VALIDATION ERROR FROM PREVIOUS ATTEMPT**: {validation_error}
+**RETRY INSTRUCTION**: Please provide a decision that matches the current state requirements."""
+        
+        # Make retry LLM API call
+        response = llm_client.chat.completions.create(
+            model=config["stage_5"]["llm_config"]["model"],
+            messages=[{"role": "user", "content": retry_prompt}],
+            tools=create_qa_boundary_detection_tools(qa_state),
+            tool_choice="required",
+            temperature=config["stage_5"]["llm_config"]["temperature"],
+            max_tokens=config["stage_5"]["llm_config"]["max_tokens"]
+        )
+        
+        # Parse retry response
+        if response.choices[0].message.tool_calls:
+            tool_call = response.choices[0].message.tool_calls[0]
+            result = json.loads(tool_call.function.arguments)
+            decision = result["qa_group_decision"]
+            
+            # Validate retry decision
+            retry_validation_error = validate_llm_decision(decision, qa_state, current_block_id)
+            if retry_validation_error:
+                logger.error(f"Block {current_block_id}: Retry also failed validation - {retry_validation_error}")
+                error_logger.log_boundary_error(transcript_id, current_block_id, f"Retry validation failed: {retry_validation_error}")
+                return None
+            
+            logger.info(f"Block {current_block_id}: Retry successful - {decision['group_status']}")
+            return decision
+        else:
+            logger.error(f"Block {current_block_id}: No tool call in retry response")
+            return None
+            
+    except Exception as e:
+        error_msg = f"Retry failed for block {current_block_id}: {e}"
+        logger.error(error_msg)
+        error_logger.log_boundary_error(transcript_id, current_block_id, error_msg)
+        return None
 
 
 def is_closing_pleasantries_block(speaker_block: Dict) -> bool:
@@ -811,21 +884,28 @@ def analyze_speaker_block_boundary(current_block_index: int,
         # Create prompt with state awareness
         prompt = create_qa_boundary_prompt(formatted_context, current_block_id, qa_state)
         
-        # Make LLM API call
+        # Make LLM API call with dynamic tools
         response = llm_client.chat.completions.create(
             model=config["stage_5"]["llm_config"]["model"],
             messages=[{"role": "user", "content": prompt}],
-            tools=create_qa_boundary_detection_tools(),
+            tools=create_qa_boundary_detection_tools(qa_state),
             tool_choice="required",
             temperature=config["stage_5"]["llm_config"]["temperature"],
             max_tokens=config["stage_5"]["llm_config"]["max_tokens"]
         )
         
-        # Parse response
+        # Parse and validate response
         if response.choices[0].message.tool_calls:
             tool_call = response.choices[0].message.tool_calls[0]
             result = json.loads(tool_call.function.arguments)
             decision = result["qa_group_decision"]
+            
+            # Validate decision against current state
+            validation_error = validate_llm_decision(decision, qa_state, current_block_id)
+            if validation_error:
+                logger.warning(f"Block {current_block_id}: Invalid LLM decision - {validation_error}")
+                # Retry with corrected prompt (implement single retry)
+                return retry_with_validation_feedback(current_block_index, speaker_blocks, transcript_id, qa_state, validation_error)
             
             # Log token usage and cost
             token_usage = None
