@@ -322,12 +322,11 @@ def connect_to_nas() -> Optional[SMBConnection]:
             password=NAS_PASSWORD,
             my_name=CLIENT_MACHINE_NAME,
             remote_name=NAS_SERVER_NAME,
-            domain=PROXY_DOMAIN,
             use_ntlm_v2=True,
             is_direct_tcp=True
         )
         
-        if conn.connect(NAS_SERVER_IP, NAS_PORT, timeout=30):
+        if conn.connect(NAS_SERVER_IP, NAS_PORT):
             logger.info("Successfully connected to NAS")
             return conn
         else:
