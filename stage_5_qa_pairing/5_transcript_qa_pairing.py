@@ -1256,12 +1256,18 @@ def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_
                 current_group_decisions = [decision]
                 current_group_id = decision["qa_group_id"]
                 
+            elif decision["group_status"] == "standalone":
+                # Skip standalone blocks (operators) - they don't belong to any group
+                continue
+                
             elif decision["qa_group_id"] == current_group_id:
                 current_group_decisions.append(decision)
             
             else:
-                # Handle group ID mismatch
-                logger.warning(f"Group ID mismatch in decision sequence")
+                # Handle group ID mismatch (real issues only)
+                decision_group_id = decision.get("qa_group_id")
+                decision_status = decision.get("group_status")
+                logger.warning(f"Group ID mismatch in decision sequence: decision has group {decision_group_id} (status: {decision_status}) but current group is {current_group_id}")
                 current_group_decisions.append(decision)
         
         # Finalize last group
