@@ -180,10 +180,10 @@ class EnhancedErrorLogger:
             error_log_content = json.dumps(error_data, indent=2)
             error_log_file = f"stage_6_detailed_classification_{timestamp}_errors.json"
             
-            nas_conn.storeFile(
-                NAS_SHARE_NAME,
-                f"{NAS_BASE_PATH}/Outputs/Logs/Errors/{error_log_file}",
-                io.BytesIO(error_log_content.encode('utf-8'))
+            nas_upload_file(
+                nas_conn,
+                io.BytesIO(error_log_content.encode('utf-8')),
+                f"{NAS_BASE_PATH}/Outputs/Logs/Errors/{error_log_file}"
             )
             
             logger.info(f"Error logs saved to NAS: {error_log_file}")
@@ -204,14 +204,29 @@ def validate_file_path(path: str) -> bool:
 
 
 def validate_nas_path(path: str) -> bool:
-    """Ensure safe NAS paths only."""
-    try:
-        if not path or not isinstance(path, str):
-            return False
-        safe_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./\\')
-        return all(c in safe_chars for c in path) and validate_file_path(path)
-    except Exception:
+    """Validate NAS path structure."""
+    global logger
+    
+    if not path or not isinstance(path, str):
+        logger.debug(f"NAS path validation failed: empty or not string: '{path}'")
         return False
+
+    normalized = path.strip("/")
+    if not normalized:
+        logger.debug(f"NAS path validation failed: empty after normalization: '{path}'")
+        return False
+        
+    parts = normalized.split("/")
+
+    for part in parts:
+        if not part or part in [".", ".."]:
+            logger.debug(f"NAS path validation failed: invalid part '{part}' in path: '{path}'")
+            return False
+        if not validate_file_path(part):
+            logger.debug(f"NAS path validation failed: file path validation failed for part '{part}' in path: '{path}'")
+            return False
+
+    return True
 
 
 def sanitize_url_for_logging(url: str) -> str:
@@ -227,29 +242,115 @@ def sanitize_url_for_logging(url: str) -> str:
 
 
 def get_nas_connection() -> Optional[SMBConnection]:
-    """Establish secure NAS connection with validation."""
+    """Create and return an SMB connection to the NAS."""
     global logger
-    
     try:
-        if not all([NAS_USERNAME, NAS_PASSWORD, NAS_SERVER_NAME, CLIENT_MACHINE_NAME]):
-            logger.error("Missing NAS connection parameters")
-            return None
-            
         conn = SMBConnection(
-            NAS_USERNAME, NAS_PASSWORD, CLIENT_MACHINE_NAME, NAS_SERVER_NAME,
-            domain=PROXY_DOMAIN, use_ntlm_v2=True, is_direct_tcp=True
+            username=NAS_USERNAME,
+            password=NAS_PASSWORD,
+            my_name=CLIENT_MACHINE_NAME,
+            remote_name=NAS_SERVER_NAME,
+            use_ntlm_v2=True,
+            is_direct_tcp=True,
         )
-        
-        if not conn.connect(NAS_SERVER_IP, NAS_PORT, timeout=30):
-            logger.error("Failed to establish NAS connection")
+
+        if conn.connect(NAS_SERVER_IP, NAS_PORT):
+            logger.info("Connected to NAS successfully")
+            return conn
+        else:
+            logger.error("Failed to connect to NAS")
             return None
-            
-        logger.info("Successfully connected to NAS")
-        return conn
-        
+
     except Exception as e:
-        logger.error(f"NAS connection failed: {e}")
+        logger.error(f"Error connecting to NAS: {e}")
         return None
+
+
+def nas_path_join(*parts: str) -> str:
+    """Join path parts for NAS paths using forward slashes."""
+    clean_parts = []
+    for part in parts:
+        if part:
+            clean_part = str(part).strip("/")
+            if clean_part:
+                clean_parts.append(clean_part)
+    return "/".join(clean_parts)
+
+
+def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
+    """Check if a file exists on the NAS."""
+    global logger
+    try:
+        conn.getAttributes(NAS_SHARE_NAME, file_path)
+        return True
+    except Exception as e:
+        logger.debug(f"File existence check failed for {file_path}: {e}")
+        return False
+
+
+def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes]:
+    """Download a file from NAS and return as bytes."""
+    global logger
+
+    if not validate_nas_path(nas_file_path):
+        logger.error(f"Invalid NAS file path: {nas_file_path}")
+        return None
+
+    try:
+        file_obj = io.BytesIO()
+        conn.retrieveFile(NAS_SHARE_NAME, nas_file_path, file_obj)
+        file_obj.seek(0)
+        return file_obj.read()
+    except Exception as e:
+        logger.error(f"Failed to download file from NAS {nas_file_path}: {e}")
+        return None
+
+
+def nas_create_directory(conn: SMBConnection, dir_path: str) -> bool:
+    """Create directory on NAS with safe iterative parent creation."""
+    global logger
+
+    normalized_path = dir_path.strip("/").rstrip("/")
+    if not normalized_path:
+        logger.error("Cannot create directory with empty path")
+        return False
+
+    path_parts = [part for part in normalized_path.split("/") if part]
+    if not path_parts:
+        logger.error("Cannot create directory with invalid path")
+        return False
+
+    current_path = ""
+    for part in path_parts:
+        current_path = f"{current_path}/{part}" if current_path else part
+        
+        try:
+            conn.createDirectory(NAS_SHARE_NAME, current_path)
+        except Exception:
+            # Directory might already exist, continue
+            pass
+    
+    return True
+
+
+def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_path: str) -> bool:
+    """Upload a file object to NAS."""
+    global logger
+
+    if not validate_nas_path(nas_file_path):
+        logger.error(f"Invalid NAS file path: {nas_file_path}")
+        return False
+
+    try:
+        parent_dir = "/".join(nas_file_path.split("/")[:-1])
+        if parent_dir:
+            nas_create_directory(conn, parent_dir)
+
+        conn.storeFile(NAS_SHARE_NAME, nas_file_path, local_file_obj)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to upload file to NAS {nas_file_path}: {e}")
+        return False
 
 
 def load_stage_config(nas_conn: SMBConnection) -> Dict:
@@ -257,66 +358,73 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict:
     global logger, error_logger
     
     try:
-        if not validate_nas_path(CONFIG_PATH):
-            raise ValueError("Invalid CONFIG_PATH")
+        logger.info("Loading shared configuration from NAS...")
+        config_data = nas_download_file(nas_conn, CONFIG_PATH)
+
+        if config_data:
+            full_config = json.loads(config_data.decode("utf-8"))
+            logger.info("Successfully loaded shared configuration from NAS")
+
+            if "stage_6" not in full_config:
+                raise ValueError("Stage 6 configuration not found in config file")
+                
+            stage_config = full_config["stage_6"]
             
-        config_buffer = io.BytesIO()
-        nas_conn.retrieveFile(NAS_SHARE_NAME, CONFIG_PATH, config_buffer)
-        config_buffer.seek(0)
-        
-        full_config = json.loads(config_buffer.read().decode('utf-8'))
-        
-        if "stage_6" not in full_config:
-            raise ValueError("Stage 6 configuration not found in config file")
+            # Validate required configuration sections
+            required_sections = ["llm_config", "processing_config"]
+            for section in required_sections:
+                if section not in stage_config:
+                    raise ValueError(f"Missing required config section: {section}")
             
-        stage_config = full_config["stage_6"]
-        
-        # Validate required configuration sections
-        required_sections = ["llm_config", "processing_config"]
-        for section in required_sections:
-            if section not in stage_config:
-                raise ValueError(f"Missing required config section: {section}")
-        
-        logger.info("Successfully loaded Stage 6 configuration from NAS")
-        return stage_config
-        
+            return full_config  # Return full config like Stage 4/5
+        else:
+            logger.error("Config file not found on NAS - script cannot proceed")
+            raise FileNotFoundError(f"Configuration file not found at {CONFIG_PATH}")
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in config file: {e}")
+        raise
+    except ValueError as e:
+        logger.error(f"Configuration validation failed: {e}")
+        raise
     except Exception as e:
-        error_msg = f"Failed to load configuration: {e}"
-        logger.error(error_msg)
-        error_logger.log_processing_error("config_load", error_msg)
+        logger.error(f"Error loading config from NAS: {e}")
         raise
 
 
-def setup_ssl_certificate(nas_conn: SMBConnection) -> str:
-    """Download and setup SSL certificate for LLM API connections."""
-    global logger, error_logger
+def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
+    """Download and setup SSL certificate for LLM API calls."""
+    global logger, error_logger, config
     
     try:
-        cert_path = f"{NAS_BASE_PATH}/Inputs/certificate/certificate.cer"
+        # Download certificate from NAS using config path
+        cert_data = nas_download_file(nas_conn, config.get('ssl_cert_nas_path', 'Inputs/certificate/certificate.cer'))
         
-        if not validate_nas_path(cert_path):
-            raise ValueError("Invalid certificate path")
-            
-        cert_buffer = io.BytesIO()
-        nas_conn.retrieveFile(NAS_SHARE_NAME, cert_path, cert_buffer)
-        cert_buffer.seek(0)
+        if not cert_data:
+            error_msg = "Failed to download SSL certificate from NAS"
+            logger.error(error_msg)
+            error_logger.log_authentication_error(error_msg)
+            return None
         
         # Save to temporary file
-        temp_cert = tempfile.NamedTemporaryFile(mode='wb', suffix='.cer', delete=False)
-        temp_cert.write(cert_buffer.read())
-        temp_cert.close()
+        cert_temp_file = tempfile.NamedTemporaryFile(
+            mode="wb", suffix=".cer", prefix="llm_cert_", delete=False
+        )
+        cert_temp_file.write(cert_data)
+        cert_temp_file.close()
         
-        # Set environment variable for SSL verification
-        os.environ['SSL_CERT_FILE'] = temp_cert.name
+        # Set SSL environment variables
+        os.environ["SSL_CERT_FILE"] = cert_temp_file.name
+        os.environ["REQUESTS_CA_BUNDLE"] = cert_temp_file.name
         
-        logger.info(f"SSL certificate setup completed: {temp_cert.name}")
-        return temp_cert.name
+        logger.info(f"SSL certificate setup complete: {cert_temp_file.name}")
+        return cert_temp_file.name
         
     except Exception as e:
         error_msg = f"SSL certificate setup failed: {e}"
         logger.error(error_msg)
         error_logger.log_authentication_error(error_msg)
-        raise
+        return None
 
 
 def get_oauth_token() -> Optional[str]:
@@ -324,7 +432,7 @@ def get_oauth_token() -> Optional[str]:
     global logger, error_logger, config
     
     try:
-        token_endpoint = config["llm_config"]["token_endpoint"]
+        token_endpoint = config["stage_6"]["llm_config"]["token_endpoint"]
         
         auth_data = {
             'grant_type': 'client_credentials',
@@ -334,12 +442,17 @@ def get_oauth_token() -> Optional[str]:
         
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
         
+        # Set up SSL context if certificate available
+        verify_ssl = True
+        if ssl_cert_path and os.path.exists(ssl_cert_path):
+            verify_ssl = ssl_cert_path
+        
         response = requests.post(
             token_endpoint,
             data=auth_data,
             headers=headers,
-            timeout=30,
-            verify=ssl_cert_path
+            verify=verify_ssl,
+            timeout=30
         )
         
         if response.status_code == 200:
@@ -369,8 +482,8 @@ def setup_llm_client() -> Optional[OpenAI]:
             
         client = OpenAI(
             api_key=oauth_token,
-            base_url=config["llm_config"]["base_url"],
-            timeout=config["llm_config"]["timeout"]
+            base_url=config["stage_6"]["llm_config"]["base_url"],
+            timeout=config["stage_6"]["llm_config"]["timeout"]
         )
         
         logger.info("LLM client setup completed")
@@ -399,8 +512,8 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> Dict:
     """Calculate token costs based on configuration."""
     global config
     
-    prompt_cost_per_1k = config["llm_config"]["cost_per_1k_prompt_tokens"]
-    completion_cost_per_1k = config["llm_config"]["cost_per_1k_completion_tokens"]
+    prompt_cost_per_1k = config["stage_6"]["llm_config"]["cost_per_1k_prompt_tokens"]
+    completion_cost_per_1k = config["stage_6"]["llm_config"]["cost_per_1k_completion_tokens"]
     
     prompt_cost = (prompt_tokens / 1000) * prompt_cost_per_1k
     completion_cost = (completion_tokens / 1000) * completion_cost_per_1k
@@ -421,7 +534,7 @@ def load_stage5_output(nas_conn: SMBConnection) -> Dict:
     global logger, error_logger, config
     
     try:
-        input_path = f"{NAS_BASE_PATH}/{config['input_source']}"
+        input_path = f"{NAS_BASE_PATH}/{config['stage_6']['input_source']}"
         
         if not validate_nas_path(input_path):
             raise ValueError("Invalid input file path")
@@ -777,7 +890,7 @@ def process_management_discussion_section(md_records: List[Dict[str, Any]]) -> L
         
         # Process in 5-paragraph windows
         previous_classifications = []
-        window_size = config["processing_config"]["md_paragraph_window_size"]
+        window_size = config["stage_6"]["processing_config"]["md_paragraph_window_size"]
         
         for window_start in range(0, len(block_records), window_size):
             window_end = min(window_start + window_size, len(block_records))
@@ -786,8 +899,8 @@ def process_management_discussion_section(md_records: List[Dict[str, Any]]) -> L
             # Get prior blocks context (750-char previews)
             prior_blocks_context = get_prior_blocks_context(
                 speaker_blocks, block_id, 
-                max_blocks=config["processing_config"]["max_speaker_blocks_context"], 
-                preview_chars=config["processing_config"]["prior_block_preview_chars"]
+                max_blocks=config["stage_6"]["processing_config"]["max_speaker_blocks_context"], 
+                preview_chars=config["stage_6"]["processing_config"]["prior_block_preview_chars"]
             )
             
             # Format context
@@ -810,15 +923,15 @@ def process_management_discussion_section(md_records: List[Dict[str, Any]]) -> L
             # Call LLM
             try:
                 response = llm_client.chat.completions.create(
-                    model=config["llm_config"]["model"],
+                    model=config["stage_6"]["llm_config"]["model"],
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": context}
                     ],
                     tools=create_management_discussion_tools(),
                     tool_choice="required",
-                    temperature=config["llm_config"]["temperature"],
-                    max_tokens=config["llm_config"]["max_tokens"]
+                    temperature=config["stage_6"]["llm_config"]["temperature"],
+                    max_tokens=config["stage_6"]["llm_config"]["max_tokens"]
                 )
                 
                 # Parse and apply classifications
@@ -887,15 +1000,15 @@ def process_qa_group(qa_group_records: List[Dict[str, Any]]) -> List[Dict[str, A
     try:
         # Single LLM call for entire conversation
         response = llm_client.chat.completions.create(
-            model=config["llm_config"]["model"],
+            model=config["stage_6"]["llm_config"]["model"],
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": conversation_context}
             ],
             tools=create_qa_conversation_tools(),
             tool_choice="required",
-            temperature=config["llm_config"]["temperature"],
-            max_tokens=config["llm_config"]["max_tokens"]
+            temperature=config["stage_6"]["llm_config"]["temperature"],
+            max_tokens=config["stage_6"]["llm_config"]["max_tokens"]
         )
         
         # Parse and apply to ALL records in group
@@ -963,20 +1076,20 @@ def save_classified_output(nas_conn: SMBConnection, classified_records: List[Dic
         }
         
         # Save to NAS
-        output_path = f"{NAS_BASE_PATH}/{config['output_path']}/{config['output_file']}"
+        output_path = f"{NAS_BASE_PATH}/{config['stage_6']['output_path']}/{config['stage_6']['output_file']}"
         
         if not validate_nas_path(output_path):
             raise ValueError("Invalid output file path")
             
         output_content = json.dumps(output_data, indent=2)
         
-        nas_conn.storeFile(
-            NAS_SHARE_NAME,
-            output_path,
-            io.BytesIO(output_content.encode('utf-8'))
+        nas_upload_file(
+            nas_conn,
+            io.BytesIO(output_content.encode('utf-8')),
+            output_path
         )
         
-        logger.info(f"Classified output saved to NAS: {config['output_file']}")
+        logger.info(f"Classified output saved to NAS: {config['stage_6']['output_file']}")
         logger.info(f"Total records: {len(classified_records)}")
         logger.info(f"Records with classifications: {output_data['classification_summary']['total_with_classifications']}")
         
@@ -1001,10 +1114,10 @@ def upload_logs_to_nas(nas_conn: SMBConnection, main_logger: logging.Logger,
                 log_content = f.read()
             
             log_filename = f"stage_6_detailed_classification_{timestamp}.log"
-            nas_conn.storeFile(
-                NAS_SHARE_NAME,
-                f"{NAS_BASE_PATH}/Outputs/Logs/{log_filename}",
-                io.BytesIO(log_content.encode('utf-8'))
+            nas_upload_file(
+                nas_conn,
+                io.BytesIO(log_content.encode('utf-8')),
+                f"{NAS_BASE_PATH}/Outputs/Logs/{log_filename}"
             )
             
             logger.info(f"Execution log uploaded to NAS: {log_filename}")
@@ -1052,9 +1165,19 @@ def main() -> None:
         return
 
     try:
-        # Setup (identical to Stage 4/5)
+        # Load configuration
         config = load_stage_config(nas_conn)
+        logger.info("Loaded configuration for Stage 6")
+        logger.info(f"Development mode: {config['stage_6']['dev_mode']}")
+        
+        if config['stage_6']['dev_mode']:
+            logger.info(f"Max transcripts in dev mode: {config['stage_6']['dev_max_transcripts']}")
+
+        # Setup SSL certificate
         ssl_cert_path = setup_ssl_certificate(nas_conn)
+        if not ssl_cert_path:
+            logger.error("Failed to setup SSL certificate - aborting")
+            return
         
         # Load Stage 5 output
         stage5_data = load_stage5_output(nas_conn)
