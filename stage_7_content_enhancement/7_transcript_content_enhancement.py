@@ -58,7 +58,11 @@ required_env_vars = [
 
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
-    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+    try:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+    except Exception as e:
+        print(f"Error in environment variable check join: missing_vars={missing_vars}, type={type(missing_vars)}, error={e}")
+        raise ValueError(f"Missing required environment variables: {str(missing_vars)}")
 
 # Global variables for configuration
 config = {}
@@ -282,7 +286,11 @@ def nas_path_join(*parts: str) -> str:
             clean_part = str(part).strip("/")
             if clean_part:
                 clean_parts.append(clean_part)
-    return "/".join(clean_parts)
+    try:
+        return "/".join(clean_parts)
+    except Exception as e:
+        logger.error(f"Error in nas_path_join: parts={parts}, clean_parts={clean_parts}, error={e}")
+        return "ERROR_PATH"
 
 
 def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
@@ -350,7 +358,8 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
         return False
 
     try:
-        parent_dir = "/".join(nas_file_path.split("/")[:-1])
+        path_parts = nas_file_path.split("/")[:-1]
+        parent_dir = "/".join(path_parts)
         if parent_dir:
             nas_create_directory(conn, parent_dir)
 
@@ -613,9 +622,13 @@ def create_content_enhancement_prompt(company_name: str, fiscal_info: str,
                                     financial_categories: List[str],
                                     speaker_block_total_paragraphs: int) -> str:
     """CO-STAR prompt for content enhancement with sliding window context."""
-    if financial_categories and isinstance(financial_categories, list):
-        categories_str = ', '.join(financial_categories)
-    else:
+    try:
+        if financial_categories and isinstance(financial_categories, list):
+            categories_str = ', '.join(financial_categories)
+        else:
+            categories_str = 'General Business'
+    except Exception as e:
+        logger.error(f"Error in create_content_enhancement_prompt join: financial_categories={financial_categories}, type={type(financial_categories)}, error={e}")
         categories_str = 'General Business'
     
     return f"""
@@ -718,9 +731,13 @@ def format_sliding_window_context(
     context_parts.append(f"Speaker: {current_speaker_block_records[0]['speaker']}")
     context_parts.append(f"Total Paragraphs in Block: {total_paragraphs}")
     categories = current_speaker_block_records[0].get('category_type', ['General'])
-    if categories and isinstance(categories, list):
-        categories_str = ', '.join(categories)
-    else:
+    try:
+        if categories and isinstance(categories, list):
+            categories_str = ', '.join(categories)
+        else:
+            categories_str = 'General'
+    except Exception as e:
+        logger.error(f"Error in format_sliding_window_context join: categories={categories}, type={type(categories)}, error={e}")
         categories_str = 'General'
     context_parts.append(f"Financial Categories: {categories_str}")
     
@@ -761,7 +778,11 @@ def format_sliding_window_context(
     context_parts.append(f"3. Write summaries for retrieval systems (what would analysts search for?)")
     context_parts.append(f"4. Use the context above and below to calibrate importance scores")
     
-    return "\n".join(context_parts)
+    try:
+        return "\n".join(context_parts)
+    except Exception as e:
+        logger.error(f"Error in format_sliding_window_context final join: context_parts={len(context_parts) if context_parts else 'None'}, error={e}")
+        return "ERROR: Context formatting failed"
 
 
 def validate_summary_response(response_data: Dict, expected_batch_size: int, 
@@ -849,12 +870,20 @@ def process_transcript_with_sliding_window(transcript_records: List[Dict], trans
                 )
                 
                 # Create CO-STAR prompt
+                # Extract and validate financial categories
+                raw_categories = valid_batch[0].get("category_type")
+                if isinstance(raw_categories, list):
+                    financial_categories = raw_categories
+                else:
+                    logger.warning(f"Invalid category_type for batch: {raw_categories}, type: {type(raw_categories)}")
+                    financial_categories = []
+                
                 system_prompt = create_content_enhancement_prompt(
                     company_name=valid_batch[0].get("company_name", "Unknown"),
                     fiscal_info=f"{valid_batch[0].get('fiscal_year')} {valid_batch[0].get('fiscal_quarter')}",
                     speaker=valid_batch[0]["speaker"],
                     batch_size=len(valid_batch),
-                    financial_categories=valid_batch[0].get("category_type") if isinstance(valid_batch[0].get("category_type"), list) else [],
+                    financial_categories=financial_categories,
                     speaker_block_total_paragraphs=len(current_block_records)
                 )
                 

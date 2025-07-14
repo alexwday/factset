@@ -1116,11 +1116,11 @@ def process_management_discussion_section(md_records: List[Dict[str, Any]]) -> L
                     block_records[0].get("filename", "unknown"), "Management Discussion", error_msg
                 )
                 
-                # No fallback - set classification fields to None for failed paragraphs
+                # Fallback to "Other" for failed paragraphs
                 for record in paragraph_window:
-                    record["category_type"] = None
-                    record["category_type_confidence"] = None
-                    record["category_type_method"] = None
+                    record["category_type"] = ["Other"]
+                    record["category_type_confidence"] = 0.0
+                    record["category_type_method"] = "error_fallback"
                     classified_records.append(record)
     
     return classified_records
@@ -1193,11 +1193,11 @@ def process_qa_group(qa_group_records: List[Dict[str, Any]]) -> List[Dict[str, A
             qa_group_records[0].get("filename", "unknown"), "Investor Q&A", error_msg
         )
         
-        # No fallback - set classification fields to None
+        # Fallback to "Other" for failed Q&A group
         for record in qa_group_records:
-            record["category_type"] = None
-            record["category_type_confidence"] = None
-            record["category_type_method"] = None
+            record["category_type"] = ["Other"]
+            record["category_type_confidence"] = 0.0
+            record["category_type_method"] = "error_fallback"
         
         return qa_group_records
 
@@ -1417,9 +1417,9 @@ def main() -> None:
         for record in records:
             if (record.get("section_type") not in ["Management Discussion", "Investor Q&A"] or
                 (record.get("section_type") == "Investor Q&A" and not record.get("qa_group_id"))):
-                record["category_type"] = None
-                record["category_type_confidence"] = None
-                record["category_type_method"] = None
+                record["category_type"] = ["Other"]
+                record["category_type_confidence"] = 0.0
+                record["category_type_method"] = "no_classification_needed"
                 all_classified_records.append(record)
         
         # Final summary
