@@ -68,6 +68,9 @@ llm_client = None
 oauth_token = None
 ssl_cert_path = None
 
+# Valid financial categories for validation (loaded from config)
+VALID_CATEGORIES = set()
+
 
 def setup_logging() -> logging.Logger:
     """Set up logging configuration."""
@@ -237,6 +240,120 @@ def validate_nas_path(path: str) -> bool:
     return True
 
 
+def validate_categories(categories: List[str]) -> Tuple[bool, List[str], List[str]]:
+    """
+    Validate that all categories are in the expected set.
+    
+    Returns:
+        (is_valid, valid_categories, invalid_categories)
+    """
+    if not categories:
+        return True, [], []
+    
+    valid_cats = []
+    invalid_cats = []
+    
+    for category in categories:
+        if category in VALID_CATEGORIES:
+            valid_cats.append(category)
+        else:
+            invalid_cats.append(category)
+    
+    is_valid = len(invalid_cats) == 0
+    return is_valid, valid_cats, invalid_cats
+
+
+def validate_management_discussion_response(result: Dict) -> Tuple[bool, str, Dict]:
+    """
+    Validate Management Discussion LLM response and fix invalid categories.
+    
+    Returns:
+        (is_valid, error_message, corrected_result)
+    """
+    global logger
+    
+    try:
+        if "paragraph_classifications" not in result:
+            return False, "Missing 'paragraph_classifications' in response", result
+        
+        classifications = result["paragraph_classifications"]
+        total_invalid = 0
+        corrected_result = {"paragraph_classifications": []}
+        
+        for i, para_class in enumerate(classifications):
+            if "categories" not in para_class:
+                return False, f"Missing 'categories' in paragraph {i+1}", result
+            
+            categories = para_class["categories"]
+            is_valid, valid_cats, invalid_cats = validate_categories(categories)
+            
+            if not is_valid:
+                total_invalid += len(invalid_cats)
+                logger.warning(f"Paragraph {i+1}: Invalid categories {invalid_cats}, keeping valid ones: {valid_cats}")
+                
+                # If no valid categories remain, assign "Other"
+                if not valid_cats:
+                    valid_cats = ["Other"]
+                    logger.warning(f"Paragraph {i+1}: No valid categories, assigning 'Other'")
+            
+            # Create corrected classification
+            corrected_class = para_class.copy()
+            corrected_class["categories"] = valid_cats
+            corrected_result["paragraph_classifications"].append(corrected_class)
+        
+        if total_invalid > 0:
+            error_msg = f"Found {total_invalid} invalid categories across paragraphs"
+            logger.warning(f"MD Response validation: {error_msg}")
+            return False, error_msg, corrected_result
+        
+        return True, "", result
+        
+    except Exception as e:
+        return False, f"Response validation error: {e}", result
+
+
+def validate_qa_conversation_response(result: Dict) -> Tuple[bool, str, Dict]:
+    """
+    Validate Q&A conversation LLM response and fix invalid categories.
+    
+    Returns:
+        (is_valid, error_message, corrected_result)
+    """
+    global logger
+    
+    try:
+        if "conversation_classification" not in result:
+            return False, "Missing 'conversation_classification' in response", result
+        
+        conv_class = result["conversation_classification"]
+        if "categories" not in conv_class:
+            return False, "Missing 'categories' in conversation_classification", result
+        
+        categories = conv_class["categories"]
+        is_valid, valid_cats, invalid_cats = validate_categories(categories)
+        
+        if not is_valid:
+            logger.warning(f"Q&A Conversation: Invalid categories {invalid_cats}, keeping valid ones: {valid_cats}")
+            
+            # If no valid categories remain, assign "Other"
+            if not valid_cats:
+                valid_cats = ["Other"]
+                logger.warning("Q&A Conversation: No valid categories, assigning 'Other'")
+            
+            # Create corrected result
+            corrected_result = result.copy()
+            corrected_result["conversation_classification"]["categories"] = valid_cats
+            
+            error_msg = f"Found invalid categories: {invalid_cats}"
+            logger.warning(f"Q&A Response validation: {error_msg}")
+            return False, error_msg, corrected_result
+        
+        return True, "", result
+        
+    except Exception as e:
+        return False, f"Response validation error: {e}", result
+
+
 def sanitize_url_for_logging(url: str) -> str:
     """Remove auth tokens from URLs before logging."""
     try:
@@ -363,7 +480,7 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
 
 def load_stage_config(nas_conn: SMBConnection) -> Dict:
     """Load and validate Stage 6 configuration from NAS."""
-    global logger, error_logger
+    global logger, error_logger, VALID_CATEGORIES
     
     try:
         logger.info("Loading shared configuration from NAS...")
@@ -379,10 +496,17 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict:
             stage_config = full_config["stage_6"]
             
             # Validate required configuration sections
-            required_sections = ["llm_config", "processing_config"]
+            required_sections = ["llm_config", "processing_config", "financial_categories"]
             for section in required_sections:
                 if section not in stage_config:
                     raise ValueError(f"Missing required config section: {section}")
+            
+            # Load valid categories from config
+            if "financial_categories" in stage_config:
+                VALID_CATEGORIES = {cat["name"] for cat in stage_config["financial_categories"]}
+                logger.info(f"Loaded {len(VALID_CATEGORIES)} financial categories from config")
+            else:
+                raise ValueError("No financial categories found in configuration")
             
             return full_config  # Return full config like Stage 4/5
         else:
@@ -565,6 +689,8 @@ def load_stage5_output(nas_conn: SMBConnection) -> Dict:
 
 def create_management_discussion_tools() -> List[Dict]:
     """Function calling schema for Management Discussion classification."""
+    global VALID_CATEGORIES
+    
     return [{
         "type": "function",
         "function": {
@@ -581,19 +707,7 @@ def create_management_discussion_tools() -> List[Dict]:
                                 "paragraph_number": {"type": "integer", "description": "Paragraph number in window"},
                                 "categories": {
                                     "type": "array",
-                                    "items": {"type": "string", "enum": [
-                                        "Financial Performance & Results",
-                                        "Credit Quality & Risk Management", 
-                                        "Capital & Regulatory Management",
-                                        "Strategic Initiatives & Transformation",
-                                        "Market Environment & Outlook", 
-                                        "Operating Efficiency & Expenses",
-                                        "Asset & Liability Management",
-                                        "Non-Interest Revenue & Segments",
-                                        "ESG & Sustainability",
-                                        "Insurance Operations",
-                                        "Other"
-                                    ]},
+                                    "items": {"type": "string", "enum": sorted(list(VALID_CATEGORIES))},
                                     "description": "All applicable categories for this paragraph. Use 'Other' for non-contributory content like introductions or transitions."
                                 },
                                 "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
@@ -608,8 +722,56 @@ def create_management_discussion_tools() -> List[Dict]:
     }]
 
 
+def build_categories_description() -> str:
+    """Build category descriptions from config for prompts."""
+    global config
+    
+    if "stage_6" not in config or "financial_categories" not in config["stage_6"]:
+        return "Categories not available in configuration"
+    
+    categories = config["stage_6"]["financial_categories"]
+    category_lines = []
+    
+    for i, cat in enumerate(categories, 1):
+        name = cat["name"]
+        description = cat["description"]
+        
+        # Start with basic info
+        line = f"{i}. **{name}**: {description}"
+        
+        # Add key indicators if available
+        if "key_indicators" in cat:
+            line += f"\n   - **Key Indicators**: {cat['key_indicators']}"
+        
+        # Add usage guidance if available
+        if "use_when" in cat:
+            line += f"\n   - **Use When**: {cat['use_when']}"
+        
+        # Add do not use guidance if available
+        if "do_not_use_when" in cat:
+            line += f"\n   - **Do NOT Use When**: {cat['do_not_use_when']}"
+        
+        # Add statistical evidence if available
+        if "statistical_evidence" in cat:
+            line += f"\n   - **Statistical Evidence**: {cat['statistical_evidence']}"
+        
+        # Add example phrases if available
+        if "example_phrases" in cat:
+            line += f"\n   - **Example Phrases**: {cat['example_phrases']}"
+        
+        # Add important notes for special categories
+        if "important_note" in cat:
+            line += f"\n   - **Important**: {cat['important_note']}"
+        
+        category_lines.append(line)
+    
+    return "\n\n".join(category_lines)
+
+
 def create_qa_conversation_tools() -> List[Dict]:
     """Function calling schema for Q&A conversation classification."""
+    global VALID_CATEGORIES
+    
     return [{
         "type": "function", 
         "function": {
@@ -623,19 +785,7 @@ def create_qa_conversation_tools() -> List[Dict]:
                         "properties": {
                             "categories": {
                                 "type": "array",
-                                "items": {"type": "string", "enum": [
-                                    "Financial Performance & Results",
-                                    "Credit Quality & Risk Management",
-                                    "Capital & Regulatory Management", 
-                                    "Strategic Initiatives & Transformation",
-                                    "Market Environment & Outlook",
-                                    "Operating Efficiency & Expenses",
-                                    "Asset & Liability Management",
-                                    "Non-Interest Revenue & Segments", 
-                                    "ESG & Sustainability",
-                                    "Insurance Operations",
-                                    "Other"
-                                ]},
+                                "items": {"type": "string", "enum": sorted(list(VALID_CATEGORIES))},
                                 "description": "All applicable categories for this conversation. Use 'Other' for non-contributory content like introductions or transitions."
                             },
                             "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
@@ -653,6 +803,8 @@ def create_management_discussion_costar_prompt(company_name: str, fiscal_info: s
                                              speaker: str, window_position: str,
                                              total_paragraphs: int) -> str:
     """CO-STAR prompt with full category descriptions for Management Discussion."""
+    categories_description = build_categories_description()
+    
     return f"""
 <context>
   <institution>{company_name}</institution>
@@ -687,68 +839,7 @@ Financial analysts requiring detailed content categorization for earnings analys
 </audience>
 
 <categories>
-1. **Financial Performance & Results**: High-level financial results and company performance metrics. Captures overall financial health without diving into specific drivers.
-   - **Key Indicators**: Revenue growth/decline, earnings per share (EPS), net income, profitability margins, return on equity (ROE), return on assets (ROA), earnings beats/misses, record profits, overall financial strength.
-   - **Use When**: Discussing quarterly or annual financial results at a high level, mentioning overall revenue/earnings/profitability figures, comparing performance to prior periods or expectations, discussing financial health broadly.
-   - **Do NOT Use When**: Discussing specific drivers like net interest margin (use ALM), talking about fee income specifically (use Non-Interest Revenue), focusing on expense details (use Operating Efficiency).
-   - **Example Phrases**: "We delivered 10% earnings growth this quarter", "Revenue exceeded expectations", "Return on equity improved", "Posted record earnings", "Financial performance remained strong".
-
-2. **Credit Quality & Risk Management**: Asset quality metrics, credit risk assessment, and loan loss provisioning. Critical for assessing the health of the loan portfolio and potential future losses.
-   - **Key Indicators**: Loan loss provisions, provision expense, non-performing loans (NPLs/NPEs), charge-offs, charge-off rates, delinquencies, reserve coverage ratios, allowance for credit losses (ACL), criticized assets, credit migration.
-   - **Use When**: Discussing loan losses or provisions (always classify here), mentioning NPL ratios or delinquency trends, talking about reserve builds or releases, discussing credit quality by portfolio, forward-looking credit expectations.
-   - **Statistical Evidence**: 86% probability of credit quality questions in bank earnings calls, making this one of the most critical categories.
-   - **Example Phrases**: "Credit losses remained benign", "We built reserves given economic uncertainty", "NPL ratio improved", "Charge-offs came in below expectations", "Commercial real estate showing signs of stress".
-
-3. **Capital & Regulatory Management**: Capital adequacy, regulatory compliance, capital allocation decisions, and regulatory requirements. Merges capital strength metrics with regulatory context.
-   - **Key Indicators**: CET1 ratio, Tier 1 capital, leverage ratio, total capital ratio, stress test results (CCAR, DFAST, EBA), dividend payments, share buybacks, capital returns, Basel III/IV requirements, regulatory buffers, TLAC, G-SIB surcharge.
-   - **Use When**: Mentioning any capital ratio or metric, discussing dividends or buyback programs, talking about stress test results, regulatory capital requirements or changes, capital planning or allocation strategies.
-   - **Statistical Evidence**: Nearly 100% of bank calls include capital questions; virtually every regional bank call includes questions on capital levels.
-   - **Example Phrases**: "CET1 ratio stands at 13.2%", "Returned $2 billion to shareholders", "Basel III endgame could impact our capital", "Passed stress tests with substantial buffer", "Increased dividend".
-
-4. **Strategic Initiatives & Transformation**: Forward-looking strategic actions including digital transformation, technology investments, mergers & acquisitions, market expansion, new products/services, and major organizational changes.
-   - **Key Indicators**: Digital transformation, AI/ML investments, fintech partnerships, core banking modernization, merger/acquisition activity, branch optimization, new market entry, product launches, restructuring, strategic partnerships.
-   - **Use When**: Discussing technology or digital investments, M&A activity, new product or service launches, geographic or market expansion, major organizational restructuring, strategic partnerships.
-   - **Statistical Evidence**: 99% probability of M&A questions for acquisitive banks; digital transformation increasingly prominent post-COVID.
-   - **Example Phrases**: "Investing $500 million in AI and digital capabilities", "Completed acquisition of [Company]", "Launching new digital banking platform", "Entering three new markets next year", "Strategic partnership with [fintech company]".
-
-5. **Market Environment & Outlook**: External market conditions, macroeconomic factors, competitive landscape, industry trends, AND the company's forward guidance and outlook.
-   - **Key Indicators**: Interest rate environment, Federal Reserve/ECB policy, economic growth/recession, inflation, unemployment, competitive dynamics, market share, industry consolidation, guidance, forecasts, outlook statements.
-   - **Use When**: Discussing economic conditions or forecasts, interest rate environment and expectations, competitive landscape or market position, providing guidance or outlook for future periods, industry trends affecting the business.
-   - **Statistical Evidence**: 20% of analyst questions focus on macro environment and outlook, highlighting the importance of external context.
-   - **Example Phrases**: "Given the uncertain economic environment", "Expect mid-single digit loan growth next year", "Fed rate cuts should benefit margins", "Seeing increased competition for deposits", "Guiding to X% revenue growth".
-
-6. **Operating Efficiency & Expenses**: Operating cost management, efficiency initiatives, expense trends, and productivity metrics. Universal across all financial institutions.
-   - **Key Indicators**: Operating expenses, non-interest expenses, efficiency ratio, cost-to-income ratio, compensation costs, technology expenses, occupancy costs, professional fees, headcount changes, productivity initiatives.
-   - **Use When**: Discussing expense levels or trends, efficiency ratio or cost metrics, cost-cutting or efficiency programs, investment spending (ongoing operations), headcount or compensation changes.
-   - **Example Phrases**: "Operating expenses increased 3% year-over-year", "Efficiency ratio improved to 55%", "Targeting $XXX million in cost saves", "Positive operating leverage", "Investing in technology while controlling core costs".
-
-7. **Asset & Liability Management (ALM)**: Core banking spread business encompassing net interest income/margin dynamics, deposit trends and pricing, loan yields, funding strategies, and interest rate risk management.
-   - **Key Indicators**: Net interest income (NII), net interest margin (NIM), deposit costs, deposit betas, loan yields, asset yields, funding mix, interest rate sensitivity, duration, deposit growth/outflows.
-   - **Use When**: Discussing NII or NIM (always classify here), deposit pricing/costs/competition, loan pricing or yields, interest rate sensitivity or positioning, balance sheet optimization, funding strategies.
-   - **Statistical Evidence**: Deposits are the single most questioned topic in earnings calls; NIM is fundamental to bank profitability.
-   - **Example Phrases**: "NIM compressed 5 basis points", "Deposit costs increased X bps", "Seeing deposit growth of 8%", "Loan yields benefiting from higher rates", "Asset sensitive position benefits from rate increases".
-
-8. **Non-Interest Revenue & Segments**: All non-spread revenue sources including fees, trading, commissions, and performance by business segment or division.
-   - **Key Indicators**: Fee income, service charges, wealth management fees, trading revenues, investment banking fees (M&A advisory, underwriting), mortgage banking, card fees, trust income, segment results (retail, commercial, wealth, etc.).
-   - **Use When**: Discussing any fee-based revenue, trading or capital markets income, investment banking performance, wealth or asset management results, breaking down performance by business line, segment reporting.
-   - **Example Phrases**: "Trading revenues up 20% on increased volatility", "Wealth management fees grew with AUM", "Investment banking fees pressured by low deal activity", "Retail banking segment posted strong results", "Card fees benefited from spending growth".
-
-9. **ESG & Sustainability**: Environmental, social, and governance initiatives including climate risk management, sustainable finance, diversity programs, and ESG reporting.
-   - **Key Indicators**: Climate risk, net-zero commitments, sustainable finance, green bonds, ESG scores, diversity metrics, community investment, governance improvements, TCFD reporting, Scope 1/2/3 emissions.
-   - **Use When**: Environmental or climate initiatives, social responsibility programs, governance improvements, sustainability targets or reporting, ESG-linked lending or investments.
-   - **Regulatory Context**: Mandatory under CSRD in Europe, increasingly important for investors in US/Canada, growing globally with standardized frameworks.
-   - **Example Phrases**: "Committed to net-zero by 2050", "Increased sustainable finance to $XX billion", "Improved ESG rating", "Climate stress testing implementation", "30% board diversity achieved".
-
-10. **Insurance Operations**: Insurance-specific operational metrics including premium growth, underwriting performance, claims experience, and reserve adequacy. (Only for companies with insurance businesses)
-   - **Key Indicators**: Written/earned premiums, combined ratio, loss ratio, expense ratio, catastrophe losses, reserve development, reinsurance, policy retention, new business growth.
-   - **Use When**: Premium volumes or growth, underwriting profitability metrics, claims experience or trends, catastrophe or weather events, reserve strengthening/releases, insurance-specific operations.
-   - **When to Include**: Only when >20% of companies in portfolio have material insurance operations.
-   - **Example Phrases**: "Premiums grew 8% driven by rate increases", "Combined ratio improved to 95%", "Catastrophe losses of $XXX million", "Favorable reserve development", "Underwriting margin expanded".
-
-11. **Other**: Non-contributory content that doesn't belong in financial categories.
-   - **Use When**: Operator introductions ("Good morning and welcome to the call"), executive introductions ("I'm pleased to introduce our new CFO"), call logistics ("We'll start with prepared remarks then move to Q&A"), pleasantries ("Thank you for joining us today"), transitions without substance ("Let's move to the next topic").
-   - **Important**: Use "Other" rather than forcing non-financial content into financial categories. If content has no meaningful financial information, classify as "Other".
-   - **Null Handling**: If LLM returns empty categories, system automatically assigns "Other" to ensure clean data.
+{categories_description}
 </categories>
 
 <response_format>
@@ -761,6 +852,8 @@ with applicable categories and confidence scores.
 def create_qa_conversation_costar_prompt(company_name: str, fiscal_info: str,
                                        conversation_length: int) -> str:
     """CO-STAR prompt with category descriptions for Q&A conversations."""
+    categories_description = build_categories_description()
+    
     return f"""
 <context>
   <institution>{company_name}</institution>
@@ -794,27 +887,7 @@ Financial analysts studying earnings call topic coverage and conversation themes
 </audience>
 
 <categories>
-1. **Financial Performance & Results**: High-level financial results and company performance metrics. Key indicators: Revenue growth/decline, earnings per share (EPS), net income, profitability margins, return on equity (ROE), return on assets (ROA), earnings beats/misses, record profits, overall financial strength.
-
-2. **Credit Quality & Risk Management**: Asset quality metrics, credit risk assessment, and loan loss provisioning. Key indicators: Loan loss provisions, provision expense, non-performing loans (NPLs/NPEs), charge-offs, charge-off rates, delinquencies, reserve coverage ratios, allowance for credit losses (ACL), criticized assets, credit migration.
-
-3. **Capital & Regulatory Management**: Capital adequacy, regulatory compliance, capital allocation decisions, and regulatory requirements. Key indicators: CET1 ratio, Tier 1 capital, leverage ratio, stress test results, dividend payments, share buybacks, capital returns, Basel III/IV requirements, regulatory buffers.
-
-4. **Strategic Initiatives & Transformation**: Forward-looking strategic actions including digital transformation, technology investments, mergers & acquisitions, market expansion, new products/services, and major organizational changes. Key indicators: Digital transformation, AI/ML investments, fintech partnerships, M&A activity, branch optimization, new market entry, product launches, restructuring.
-
-5. **Market Environment & Outlook**: External market conditions, macroeconomic factors, competitive landscape, industry trends, AND the company's forward guidance and outlook. Key indicators: Interest rate environment, Federal Reserve/ECB policy, economic growth/recession, inflation, competitive dynamics, market share, guidance, forecasts, outlook statements.
-
-6. **Operating Efficiency & Expenses**: Operating cost management, efficiency initiatives, expense trends, and productivity metrics. Key indicators: Operating expenses, non-interest expenses, efficiency ratio, cost-to-income ratio, compensation costs, technology expenses, occupancy costs, headcount changes, productivity initiatives.
-
-7. **Asset & Liability Management**: Core banking spread business encompassing net interest income/margin dynamics, deposit trends and pricing, loan yields, funding strategies, and interest rate risk management. Key indicators: Net interest income (NII), net interest margin (NIM), deposit costs, deposit betas, loan yields, asset yields, funding mix, interest rate sensitivity.
-
-8. **Non-Interest Revenue & Segments**: All non-spread revenue sources including fees, trading, commissions, and performance by business segment or division. Key indicators: Fee income, service charges, wealth management fees, trading revenues, investment banking fees, mortgage banking, card fees, trust income, segment results.
-
-9. **ESG & Sustainability**: Environmental, social, and governance initiatives including climate risk management, sustainable finance, diversity programs, and ESG reporting. Key indicators: Climate risk, net-zero commitments, sustainable finance, green bonds, ESG scores, diversity metrics, community investment, governance improvements.
-
-10. **Insurance Operations**: Insurance-specific operational metrics including premium growth, underwriting performance, claims experience, and reserve adequacy. Key indicators: Written/earned premiums, combined ratio, loss ratio, expense ratio, catastrophe losses, reserve development, reinsurance, policy retention, new business growth.
-
-11. **Other**: Non-contributory content that doesn't belong in financial categories. Use for operator introductions, executive introductions, call logistics, pleasantries, transitions without substance. If content has no meaningful financial information, classify as "Other".
+{categories_description}
 </categories>
 
 <response_format>

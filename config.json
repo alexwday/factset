@@ -712,6 +712,92 @@
       "cost_per_1k_prompt_tokens": 0.03,
       "cost_per_1k_completion_tokens": 0.06
     },
+    "financial_categories": [
+      {
+        "name": "Financial Performance & Results",
+        "description": "High-level financial results and company performance metrics. Captures overall financial health without diving into specific drivers.",
+        "key_indicators": "Revenue growth/decline, earnings per share (EPS), net income, profitability margins, return on equity (ROE), return on assets (ROA), earnings beats/misses, record profits, overall financial strength",
+        "use_when": "Discussing quarterly or annual financial results at a high level, mentioning overall revenue/earnings/profitability figures, comparing performance to prior periods or expectations, discussing financial health broadly",
+        "do_not_use_when": "Discussing specific drivers like net interest margin (use ALM), talking about fee income specifically (use Non-Interest Revenue), focusing on expense details (use Operating Efficiency)",
+        "example_phrases": "We delivered 10% earnings growth this quarter, Revenue exceeded expectations, Return on equity improved, Posted record earnings, Financial performance remained strong"
+      },
+      {
+        "name": "Credit Quality & Risk Management",
+        "description": "Asset quality metrics, credit risk assessment, and loan loss provisioning. Critical for assessing the health of the loan portfolio and potential future losses.",
+        "key_indicators": "Loan loss provisions, provision expense, non-performing loans (NPLs/NPEs), charge-offs, charge-off rates, delinquencies, reserve coverage ratios, allowance for credit losses (ACL), criticized assets, credit migration",
+        "use_when": "Discussing loan losses or provisions (always classify here), mentioning NPL ratios or delinquency trends, talking about reserve builds or releases, discussing credit quality by portfolio, forward-looking credit expectations",
+        "statistical_evidence": "86% probability of credit quality questions in bank earnings calls",
+        "example_phrases": "Credit losses remained benign, We built reserves given economic uncertainty, NPL ratio improved, Charge-offs came in below expectations, Commercial real estate showing signs of stress"
+      },
+      {
+        "name": "Capital & Regulatory Management",
+        "description": "Capital adequacy, regulatory compliance, capital allocation decisions, and regulatory requirements. Merges capital strength metrics with regulatory context.",
+        "key_indicators": "CET1 ratio, Tier 1 capital, leverage ratio, total capital ratio, stress test results (CCAR, DFAST, EBA), dividend payments, share buybacks, capital returns, Basel III/IV requirements, regulatory buffers, TLAC, G-SIB surcharge",
+        "use_when": "Mentioning any capital ratio or metric, discussing dividends or buyback programs, talking about stress test results, regulatory capital requirements or changes, capital planning or allocation strategies",
+        "statistical_evidence": "Nearly 100% of bank calls include capital questions",
+        "example_phrases": "CET1 ratio stands at 13.2%, Returned $2 billion to shareholders, Basel III endgame could impact our capital, Passed stress tests with substantial buffer, Increased dividend"
+      },
+      {
+        "name": "Strategic Initiatives & Transformation",
+        "description": "Forward-looking strategic actions including digital transformation, technology investments, mergers & acquisitions, market expansion, new products/services, and major organizational changes.",
+        "key_indicators": "Digital transformation, AI/ML investments, fintech partnerships, core banking modernization, merger/acquisition activity, branch optimization, new market entry, product launches, restructuring, strategic partnerships",
+        "use_when": "Discussing technology or digital investments, M&A activity, new product or service launches, geographic or market expansion, major organizational restructuring, strategic partnerships",
+        "statistical_evidence": "99% probability of M&A questions for acquisitive banks",
+        "example_phrases": "Investing $500 million in AI and digital capabilities, Completed acquisition of [Company], Launching new digital banking platform, Entering three new markets next year, Strategic partnership with [fintech company]"
+      },
+      {
+        "name": "Market Environment & Outlook",
+        "description": "External market conditions, macroeconomic factors, competitive landscape, industry trends, AND the company's forward guidance and outlook.",
+        "key_indicators": "Interest rate environment, Federal Reserve/ECB policy, economic growth/recession, inflation, unemployment, competitive dynamics, market share, industry consolidation, guidance, forecasts, outlook statements",
+        "use_when": "Discussing economic conditions or forecasts, interest rate environment and expectations, competitive landscape or market position, providing guidance or outlook for future periods, industry trends affecting the business",
+        "statistical_evidence": "20% of analyst questions focus on macro environment and outlook",
+        "example_phrases": "Given the uncertain economic environment, Expect mid-single digit loan growth next year, Fed rate cuts should benefit margins, Seeing increased competition for deposits, Guiding to X% revenue growth"
+      },
+      {
+        "name": "Operating Efficiency & Expenses",
+        "description": "Operating cost management, efficiency initiatives, expense trends, and productivity metrics. Universal across all financial institutions.",
+        "key_indicators": "Operating expenses, non-interest expenses, efficiency ratio, cost-to-income ratio, compensation costs, technology expenses, occupancy costs, professional fees, headcount changes, productivity initiatives",
+        "use_when": "Discussing expense levels or trends, efficiency ratio or cost metrics, cost-cutting or efficiency programs, investment spending (ongoing operations), headcount or compensation changes",
+        "example_phrases": "Operating expenses increased 3% year-over-year, Efficiency ratio improved to 55%, Targeting $XXX million in cost saves, Positive operating leverage, Investing in technology while controlling core costs"
+      },
+      {
+        "name": "Asset & Liability Management",
+        "description": "Core banking spread business encompassing net interest income/margin dynamics, deposit trends and pricing, loan yields, funding strategies, and interest rate risk management.",
+        "key_indicators": "Net interest income (NII), net interest margin (NIM), deposit costs, deposit betas, loan yields, asset yields, funding mix, interest rate sensitivity, duration, deposit growth/outflows",
+        "use_when": "Discussing NII or NIM (always classify here), deposit pricing/costs/competition, loan pricing or yields, interest rate sensitivity or positioning, balance sheet optimization, funding strategies",
+        "statistical_evidence": "Deposits are the single most questioned topic in earnings calls",
+        "example_phrases": "NIM compressed 5 basis points, Deposit costs increased X bps, Seeing deposit growth of 8%, Loan yields benefiting from higher rates, Asset sensitive position benefits from rate increases"
+      },
+      {
+        "name": "Non-Interest Revenue & Segments",
+        "description": "All non-spread revenue sources including fees, trading, commissions, and performance by business segment or division.",
+        "key_indicators": "Fee income, service charges, wealth management fees, trading revenues, investment banking fees (M&A advisory, underwriting), mortgage banking, card fees, trust income, segment results (retail, commercial, wealth, etc.)",
+        "use_when": "Discussing any fee-based revenue, trading or capital markets income, investment banking performance, wealth or asset management results, breaking down performance by business line, segment reporting",
+        "example_phrases": "Trading revenues up 20% on increased volatility, Wealth management fees grew with AUM, Investment banking fees pressured by low deal activity, Retail banking segment posted strong results, Card fees benefited from spending growth"
+      },
+      {
+        "name": "ESG & Sustainability",
+        "description": "Environmental, social, and governance initiatives including climate risk management, sustainable finance, diversity programs, and ESG reporting.",
+        "key_indicators": "Climate risk, net-zero commitments, sustainable finance, green bonds, ESG scores, diversity metrics, community investment, governance improvements, TCFD reporting, Scope 1/2/3 emissions",
+        "use_when": "Environmental or climate initiatives, social responsibility programs, governance improvements, sustainability targets or reporting, ESG-linked lending or investments",
+        "regulatory_context": "Mandatory under CSRD in Europe, increasingly important for investors in US/Canada",
+        "example_phrases": "Committed to net-zero by 2050, Increased sustainable finance to $XX billion, Improved ESG rating, Climate stress testing implementation, 30% board diversity achieved"
+      },
+      {
+        "name": "Insurance Operations",
+        "description": "Insurance-specific operational metrics including premium growth, underwriting performance, claims experience, and reserve adequacy. Only for companies with insurance businesses.",
+        "key_indicators": "Written/earned premiums, combined ratio, loss ratio, expense ratio, catastrophe losses, reserve development, reinsurance, policy retention, new business growth",
+        "use_when": "Premium volumes or growth, underwriting profitability metrics, claims experience or trends, catastrophe or weather events, reserve strengthening/releases, insurance-specific operations",
+        "when_to_include": "Only when >20% of companies in portfolio have material insurance operations",
+        "example_phrases": "Premiums grew 8% driven by rate increases, Combined ratio improved to 95%, Catastrophe losses of $XXX million, Favorable reserve development, Underwriting margin expanded"
+      },
+      {
+        "name": "Other",
+        "description": "Non-contributory content that doesn't belong in financial categories.",
+        "use_when": "Operator introductions (Good morning and welcome to the call), executive introductions (I'm pleased to introduce our new CFO), call logistics (We'll start with prepared remarks then move to Q&A), pleasantries (Thank you for joining us today), transitions without substance (Let's move to the next topic)",
+        "important_note": "Use 'Other' rather than forcing non-financial content into financial categories"
+      }
+    ],
     "description": "Detailed paragraph-level classification for Management Discussion and Q&A topic analysis"
   }
 }
