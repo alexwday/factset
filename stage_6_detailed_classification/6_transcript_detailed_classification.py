@@ -162,7 +162,15 @@ class EnhancedErrorLogger:
         }
 
     def save_error_logs(self, nas_conn: SMBConnection) -> bool:
-        """Save detailed error logs to NAS."""
+        """Save detailed error logs to NAS only if there are errors."""
+        total_errors = (len(self.llm_errors) + len(self.authentication_errors) + 
+                       len(self.classification_errors) + len(self.processing_errors))
+        
+        # Only save error logs if there are actual errors
+        if total_errors == 0:
+            logger.info("No errors to log - skipping error log creation")
+            return True
+            
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             
@@ -1134,12 +1142,12 @@ def save_classified_output(nas_conn: SMBConnection, classified_records: List[Dic
             "classification_summary": {
                 "management_discussion_classified": len([r for r in classified_records 
                                                        if r.get("section_type") == "Management Discussion" 
-                                                       and r.get("detailed_classification")]),
+                                                       and r.get("category_type") is not None]),
                 "qa_groups_classified": len(set(r.get("qa_group_id") for r in classified_records 
                                               if r.get("section_type") == "Investor Q&A" 
-                                              and r.get("detailed_classification") 
+                                              and r.get("category_type") is not None 
                                               and r.get("qa_group_id"))),
-                "total_with_classifications": len([r for r in classified_records if r.get("detailed_classification")])
+                "total_with_classifications": len([r for r in classified_records if r.get("category_type") is not None])
             },
             "cost_summary": error_logger.get_summary(),
             "records": classified_records
@@ -1348,7 +1356,7 @@ def main() -> None:
         
         logger.info("=== STAGE 6 EXECUTION SUMMARY ===")
         logger.info(f"Total records processed: {len(all_classified_records)}")
-        logger.info(f"Records with detailed classifications: {len([r for r in all_classified_records if r.get('category_type')])}")
+        logger.info(f"Records with detailed classifications: {len([r for r in all_classified_records if r.get('category_type') is not None])}")
         logger.info(f"Total LLM API calls: {total_calls}")
         logger.info(f"Total tokens used: {total_tokens:,}")
         logger.info(f"Total LLM cost: ${total_cost:.4f}")
