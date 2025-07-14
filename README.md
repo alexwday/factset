@@ -17,6 +17,7 @@ factset/
 ├── stage_4_llm_classification/            # LLM-based section type classification
 ├── stage_5_qa_pairing/                    # Q&A conversation boundary detection
 ├── stage_6_detailed_classification/       # Detailed financial category classification
+├── stage_7_content_enhancement/           # Paragraph-level content enhancement
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -100,6 +101,9 @@ python stage_5_qa_pairing/5_transcript_qa_pairing.py
 
 # Stage 6: Detailed financial category classification (implemented)
 python stage_6_detailed_classification/6_transcript_detailed_classification.py
+
+# Stage 7: Content enhancement system (implemented)
+python stage_7_content_enhancement/7_transcript_content_enhancement.py
 ```
 
 **Current Status**: 
@@ -110,6 +114,7 @@ python stage_6_detailed_classification/6_transcript_detailed_classification.py
 - Stage 4 is production-ready with LLM-based section type classification and enhanced execution metrics ✅
 - Stage 5 is production-ready with Q&A conversation boundary detection, fixed group counting, and comprehensive timing ✅
 - Stage 6 is production-ready with detailed financial category classification using dual processing approaches ✅
+- Stage 7 is production-ready with paragraph-level content enhancement using sliding window approach ✅
 - All stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
 
 ## Testing from Work Environment
