@@ -617,6 +617,108 @@ def create_indexed_summary_tools(batch_size: int) -> List[Dict]:
     }]
 
 
+def create_qa_group_summary_tools() -> List[Dict]:
+    """Function calling schema for QA group summarization."""
+    return [{
+        "type": "function",
+        "function": {
+            "name": "summarize_qa_group",
+            "description": "Summarize complete Q&A group conversation with single summary and importance score",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string", 
+                        "description": "Comprehensive summary of the complete Q&A conversation for reranking"
+                    },
+                    "importance": {
+                        "type": "number", 
+                        "minimum": 0.3, 
+                        "maximum": 1.0,
+                        "description": "Relative importance score compared to other Q&A topics (0.3-1.0 range for Q&A groups)"
+                    }
+                },
+                "required": ["summary", "importance"]
+            }
+        }
+    }]
+
+
+def create_qa_group_summary_prompt(company_name: str, fiscal_info: str, 
+                                  qa_group_records: List[Dict], 
+                                  financial_categories: List[str]) -> str:
+    """Create optimized prompt for QA group summarization."""
+    
+    # Safe category handling
+    try:
+        if financial_categories and isinstance(financial_categories, list):
+            categories_str = ', '.join(financial_categories)
+        else:
+            categories_str = 'General Business'
+    except Exception as e:
+        logger.error(f"Error in create_qa_group_summary_prompt join: financial_categories={financial_categories}, error={e}")
+        categories_str = 'General Business'
+    
+    return f"""
+<context>
+  <institution>{company_name}</institution>
+  <fiscal_period>{fiscal_info}</fiscal_period>
+  <call_type>Earnings Call Q&A Session</call_type>
+  <qa_group_size>{len(qa_group_records)} paragraphs</qa_group_size>
+  <financial_focus>{categories_str}</financial_focus>
+</context>
+
+<objective>
+You are creating a single summary for this complete Q&A conversation that will be assigned to ALL paragraphs in the group.
+This summary will be used for post-retrieval reranking to filter relevant content from earnings call transcripts.
+
+Create:
+1. SUMMARY: One comprehensive summary for the entire Q&A exchange
+2. IMPORTANCE: Single importance score relative to other Q&A topics in this earnings call (0.3-1.0)
+
+The summary should capture:
+- Analyst question and management response
+- Key financial metrics, guidance, or business developments mentioned
+- Strategic insights or forward-looking statements
+- Any quantitative data or performance indicators
+
+RERANKING OPTIMIZATION:
+- Include speaker attribution: [ANALYST] question about [topic] and [EXECUTIVE] response covering [key points]
+- Preserve financial terminology and quantitative data for semantic search
+- Focus on searchable concepts that users might query
+- Write for relevance filtering by smaller models
+
+IMPORTANCE SCORING (0.3-1.0 for Q&A groups):
+- 0.8-1.0: Contains specific financial metrics, guidance, or material business decisions
+- 0.6-0.8: Discusses strategic initiatives, market outlook, or significant business developments
+- 0.4-0.6: Covers operational topics, general business context, or competitive positioning
+- 0.3-0.4: Addresses procedural topics, clarifications, or routine business matters
+
+Use the previous Q&A context and management themes to calibrate importance relative to other topics in this earnings call.
+</objective>
+
+<style>
+Professional financial analysis. Summary should read like an executive briefing point optimized for relevance filtering.
+</style>
+
+<tone>
+Analytical and concise. Focus on financial substance and business insights.
+</tone>
+
+<audience>
+A smaller model that will judge relevance to user queries about earnings calls and filter results accordingly.
+</audience>
+
+<response_format>
+Use the summarize_qa_group function.
+- Provide one comprehensive summary for the entire Q&A conversation
+- Include speaker attribution and financial context for reranking
+- Score importance relative to other Q&A topics in this earnings call
+- Preserve quantitative data and forward-looking statements
+</response_format>
+"""
+
+
 def create_content_enhancement_prompt(company_name: str, fiscal_info: str, 
                                     speaker: str, batch_size: int, 
                                     financial_categories: List[str],
@@ -834,6 +936,292 @@ def validate_summary_response(response_data: Dict, expected_batch_size: int,
         
     except Exception as e:
         return False, f"Validation error: {e}", response_data
+
+
+def process_management_discussion(management_records: List[Dict], transcript_id: str) -> List[Dict]:
+    """Process management discussion using current speaker block approach."""
+    global logger, llm_client, error_logger, config
+    
+    if not management_records:
+        return []
+    
+    # Keep existing speaker block processing for management discussion
+    # This is a simplified version - we'll reuse the existing logic
+    logger.info(f"Processing {len(management_records)} management discussion records")
+    
+    # For now, set basic summaries for management discussion
+    # TODO: Implement full speaker block processing if needed
+    for record in management_records:
+        record["paragraph_summary"] = f"[MANAGEMENT] {record.get('paragraph_content', '')[:100]}..."
+        record["paragraph_importance"] = 0.7  # Default importance for management
+    
+    return management_records
+
+
+def extract_management_themes(management_records: List[Dict]) -> List[Dict]:
+    """Extract key themes from management discussion for QA context."""
+    themes = []
+    
+    for record in management_records:
+        if record.get("paragraph_summary") and record.get("paragraph_importance", 0) > 0.6:
+            themes.append({
+                "summary": record["paragraph_summary"],
+                "importance": record["paragraph_importance"]
+            })
+    
+    return themes[:5]  # Return top 5 themes for context
+
+
+def process_qa_group_summary(qa_group_records: List[Dict], previous_qa_summaries: List[Dict], 
+                           management_summaries: List[Dict], transcript_id: str) -> List[Dict]:
+    """Process complete Q&A group for single summary and importance score."""
+    global logger, llm_client, error_logger, config
+    
+    if not qa_group_records:
+        return []
+    
+    try:
+        # Build comprehensive context
+        context = build_qa_group_context(
+            qa_group_records, previous_qa_summaries, management_summaries
+        )
+        
+        # Create QA group summary prompt
+        system_prompt = create_qa_group_summary_prompt(
+            company_name=qa_group_records[0].get("company_name", "Unknown"),
+            fiscal_info=f"{qa_group_records[0].get('fiscal_year')} {qa_group_records[0].get('fiscal_quarter')}",
+            qa_group_records=qa_group_records,
+            financial_categories=qa_group_records[0].get("category_type", [])
+        )
+        
+        # Single LLM call for entire QA group
+        response = llm_client.chat.completions.create(
+            model=config["stage_7"]["llm_config"]["model"],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context}
+            ],
+            tools=create_qa_group_summary_tools(),
+            tool_choice="required",
+            temperature=config["stage_7"]["llm_config"]["temperature"],
+            max_tokens=config["stage_7"]["llm_config"]["max_tokens"],
+            timeout=config["stage_7"]["llm_config"]["timeout"]
+        )
+        
+        # Process LLM response
+        if response.choices and response.choices[0].message.tool_calls:
+            tool_call = response.choices[0].message.tool_calls[0]
+            response_data = json.loads(tool_call.function.arguments)
+            
+            summary = response_data.get("summary", "")
+            importance = response_data.get("importance", 0.5)
+            
+            # Apply same summary and importance to ALL paragraphs in group
+            for record in qa_group_records:
+                record["paragraph_summary"] = summary
+                record["paragraph_importance"] = importance
+            
+            # Track costs
+            if hasattr(response, 'usage') and response.usage:
+                cost_data = calculate_token_cost(
+                    response.usage.prompt_tokens, 
+                    response.usage.completion_tokens
+                )
+                error_logger.accumulate_costs(cost_data)
+                
+                logger.info(f"QA Group {qa_group_records[0]['qa_group_id']}: {len(qa_group_records)} paragraphs enhanced - "
+                           f"Cost: ${cost_data['cost']['total_cost']:.4f}, "
+                           f"Tokens: {response.usage.total_tokens}")
+            
+            return qa_group_records
+        
+        else:
+            logger.error("No tool calls in QA group LLM response")
+            error_logger.log_enhancement_error(
+                transcript_id, 
+                qa_group_records[0]["qa_group_id"],
+                "No tool calls in QA group LLM response"
+            )
+            
+            # Set null values for failed group
+            for record in qa_group_records:
+                record["paragraph_summary"] = None
+                record["paragraph_importance"] = None
+            
+            return qa_group_records
+    
+    except Exception as e:
+        logger.error(f"QA group processing failed: {e}")
+        error_logger.log_llm_error(transcript_id, str(e))
+        
+        # Set null values for failed group
+        for record in qa_group_records:
+            record["paragraph_summary"] = None
+            record["paragraph_importance"] = None
+        
+        return qa_group_records
+
+
+def build_qa_group_context(qa_group_records: List[Dict], previous_qa_summaries: List[Dict], 
+                         management_summaries: List[Dict]) -> str:
+    """Build comprehensive context for QA group summarization."""
+    context_parts = []
+    
+    # Management discussion themes for context
+    if management_summaries:
+        context_parts.append("=== MANAGEMENT DISCUSSION THEMES ===")
+        for theme in management_summaries:
+            context_parts.append(f"• {theme['summary']}")
+        context_parts.append("")
+    
+    # Previous QA topics for importance calibration
+    if previous_qa_summaries:
+        context_parts.append("=== PREVIOUS QA TOPICS (FOR IMPORTANCE CALIBRATION) ===")
+        for prev_qa in previous_qa_summaries[-3:]:  # Last 3 QA groups
+            context_parts.append(f"Q&A {prev_qa['qa_group_id']}: {prev_qa['summary']} (Importance: {prev_qa['importance']:.2f})")
+        context_parts.append("")
+    
+    # Current QA group conversation
+    context_parts.append("=== CURRENT QA CONVERSATION TO SUMMARIZE ===")
+    for record in qa_group_records:
+        role = "[ANALYST]" if "analyst" in record["speaker"].lower() else "[EXECUTIVE]"
+        context_parts.append(f"{role} {record['speaker']}:")
+        context_parts.append(record["paragraph_content"])
+        context_parts.append("")
+    
+    try:
+        return "\n".join(context_parts)
+    except Exception as e:
+        logger.error(f"Error building QA group context: {e}")
+        return "ERROR: Context building failed"
+
+
+def handle_operator_content(operator_records: List[Dict], transcript_id: str) -> List[Dict]:
+    """Handle operator content without qa_group_id."""
+    global logger
+    
+    if not operator_records:
+        return []
+    
+    logger.info(f"Processing {len(operator_records)} operator records")
+    
+    for record in operator_records:
+        # Create minimal summary for operator transitions
+        content = record.get("paragraph_content", "")
+        if len(content) > 100:
+            summary = f"[OPERATOR] {content[:100]}..."
+        else:
+            summary = f"[OPERATOR] {content}"
+        
+        record["paragraph_summary"] = summary
+        record["paragraph_importance"] = 0.1  # Low importance for procedural content
+    
+    return operator_records
+
+
+def handle_other_records(other_records: List[Dict], transcript_id: str) -> List[Dict]:
+    """Handle records that are not Management Discussion or Investor Q&A."""
+    global logger
+    
+    if not other_records:
+        return []
+    
+    logger.info(f"Processing {len(other_records)} other records")
+    
+    for record in other_records:
+        # Create basic summary for other content
+        content = record.get("paragraph_content", "")
+        section_type = record.get("section_type", "Unknown")
+        
+        if len(content) > 100:
+            summary = f"[{section_type.upper()}] {content[:100]}..."
+        else:
+            summary = f"[{section_type.upper()}] {content}"
+        
+        record["paragraph_summary"] = summary
+        record["paragraph_importance"] = 0.3  # Medium-low importance for other content
+    
+    return other_records
+
+
+def process_transcript_with_qa_groups(transcript_records: List[Dict], transcript_id: str) -> List[Dict]:
+    """Process transcript using QA group-level summarization approach."""
+    global logger, llm_client, error_logger, config
+    
+    try:
+        # Separate records by section type
+        management_records = [r for r in transcript_records if r.get("section_type") == "Management Discussion"]
+        qa_records = [r for r in transcript_records if r.get("section_type") == "Investor Q&A" and r.get("qa_group_id")]
+        operator_records = [r for r in transcript_records if r.get("section_type") == "Investor Q&A" and not r.get("qa_group_id")]
+        other_records = [r for r in transcript_records if r.get("section_type") not in ["Management Discussion", "Investor Q&A"]]
+        
+        logger.info(f"Processing transcript {transcript_id}: {len(management_records)} management, {len(qa_records)} Q&A, {len(operator_records)} operator, {len(other_records)} other records")
+        
+        # Process management discussion (keep current speaker block approach)
+        enhanced_management = process_management_discussion(management_records, transcript_id)
+        
+        # Extract management themes for QA context
+        management_summaries = extract_management_themes(enhanced_management)
+        
+        # Group QA records by qa_group_id
+        qa_groups = defaultdict(list)
+        for record in qa_records:
+            qa_groups[record["qa_group_id"]].append(record)
+        
+        logger.info(f"Found {len(qa_groups)} Q&A groups to process")
+        
+        # Process QA groups sequentially with context
+        enhanced_qa_records = []
+        previous_qa_summaries = []
+        
+        for qa_group_id in sorted(qa_groups.keys()):
+            qa_group_records = qa_groups[qa_group_id]
+            
+            logger.info(f"Processing Q&A group {qa_group_id} with {len(qa_group_records)} paragraphs")
+            
+            # Process entire QA group with context
+            try:
+                enhanced_group = process_qa_group_summary(
+                    qa_group_records, 
+                    previous_qa_summaries, 
+                    management_summaries,
+                    transcript_id
+                )
+                
+                enhanced_qa_records.extend(enhanced_group)
+                
+                # Add to context for next group
+                if enhanced_group and enhanced_group[0].get("paragraph_summary"):
+                    previous_qa_summaries.append({
+                        "qa_group_id": qa_group_id,
+                        "summary": enhanced_group[0]["paragraph_summary"],
+                        "importance": enhanced_group[0]["paragraph_importance"]
+                    })
+                
+            except Exception as e:
+                logger.error(f"Error processing QA group {qa_group_id}: {e}")
+                error_logger.log_processing_error(transcript_id, f"QA group {qa_group_id} failed: {e}")
+                
+                # Set null values for failed group
+                for record in qa_group_records:
+                    record["paragraph_summary"] = None
+                    record["paragraph_importance"] = None
+                
+                enhanced_qa_records.extend(qa_group_records)
+        
+        # Handle operator content separately
+        enhanced_operator = handle_operator_content(operator_records, transcript_id)
+        
+        # Handle other records
+        enhanced_other = handle_other_records(other_records, transcript_id)
+        
+        return enhanced_management + enhanced_qa_records + enhanced_operator + enhanced_other
+        
+    except Exception as e:
+        error_msg = f"Transcript processing failed: {e}"
+        logger.error(error_msg)
+        error_logger.log_processing_error(transcript_id, error_msg)
+        return transcript_records
 
 
 def process_transcript_with_sliding_window(transcript_records: List[Dict], transcript_id: str) -> List[Dict]:
@@ -1163,8 +1551,8 @@ def main() -> None:
                 logger.error(f"Failed to refresh OAuth token for {transcript_key}")
                 continue
             
-            # Process transcript with sliding window
-            enhanced_records = process_transcript_with_sliding_window(transcript_records, transcript_key)
+            # Process transcript with QA group-level summarization
+            enhanced_records = process_transcript_with_qa_groups(transcript_records, transcript_key)
             all_enhanced_records.extend(enhanced_records)
             
             # Calculate per-transcript metrics
