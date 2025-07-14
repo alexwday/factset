@@ -613,7 +613,10 @@ def create_content_enhancement_prompt(company_name: str, fiscal_info: str,
                                     financial_categories: List[str],
                                     speaker_block_total_paragraphs: int) -> str:
     """CO-STAR prompt for content enhancement with sliding window context."""
-    categories_str = ', '.join(financial_categories) if financial_categories else 'General Business'
+    if financial_categories and isinstance(financial_categories, list):
+        categories_str = ', '.join(financial_categories)
+    else:
+        categories_str = 'General Business'
     
     return f"""
 <context>
@@ -714,7 +717,12 @@ def format_sliding_window_context(
     context_parts.append(f"\n=== CURRENT SPEAKER BLOCK {current_speaker_block_records[0]['speaker_block_id']} ===")
     context_parts.append(f"Speaker: {current_speaker_block_records[0]['speaker']}")
     context_parts.append(f"Total Paragraphs in Block: {total_paragraphs}")
-    context_parts.append(f"Financial Categories: {', '.join(current_speaker_block_records[0].get('category_type', ['General']))}")
+    categories = current_speaker_block_records[0].get('category_type', ['General'])
+    if categories and isinstance(categories, list):
+        categories_str = ', '.join(categories)
+    else:
+        categories_str = 'General'
+    context_parts.append(f"Financial Categories: {categories_str}")
     
     # Already processed paragraphs
     if processed_summaries:
@@ -846,7 +854,7 @@ def process_transcript_with_sliding_window(transcript_records: List[Dict], trans
                     fiscal_info=f"{valid_batch[0].get('fiscal_year')} {valid_batch[0].get('fiscal_quarter')}",
                     speaker=valid_batch[0]["speaker"],
                     batch_size=len(valid_batch),
-                    financial_categories=valid_batch[0].get("category_type", []),
+                    financial_categories=valid_batch[0].get("category_type") if isinstance(valid_batch[0].get("category_type"), list) else [],
                     speaker_block_total_paragraphs=len(current_block_records)
                 )
                 
