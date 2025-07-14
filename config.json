@@ -809,8 +809,7 @@
     "processing_config": {
       "batch_size": 5,
       "max_previous_speaker_blocks": 2,
-      "min_paragraph_length": 50,
-      "description": "Content enhancement processing parameters with sliding window context"
+      "description": "Content enhancement processing parameters with sliding window context - processes all content regardless of length"
     },
     "llm_config": {
       "token_endpoint": "https://oauth2.example.com/token",

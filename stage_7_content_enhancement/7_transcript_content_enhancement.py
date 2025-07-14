@@ -642,24 +642,42 @@ def create_content_enhancement_prompt(company_name: str, fiscal_info: str,
 </context>
 
 <objective>
-You will process ONLY the numbered paragraphs [1] through [{batch_size}] in the current batch.
+You are creating summaries for a financial transcript retrieval system. These summaries will be used by a smaller model to judge relevance to user queries about earnings calls, financial performance, guidance, and business developments.
+
+Process ONLY the numbered paragraphs [1] through [{batch_size}] in the current batch.
 For each numbered paragraph, provide:
 
-1. SUMMARY: A condensed summary focusing on financial substance
+1. SUMMARY: A reranking-optimized summary that scales with content importance
 2. IMPORTANCE: A relative importance score within this speaker block (0.0-1.0)
 
-CRITICAL REQUIREMENTS FOR SUMMARIES:
-- ALWAYS shorter than the original paragraph - never expand or elaborate
-- For very short paragraphs (greetings, brief acknowledgments), use minimal summaries
-- Focus on FINANCIAL SUBSTANCE, not speaker pleasantries or transitions
-- Capture KEY BUSINESS METRICS, decisions, or insights mentioned
-- Write for RETRIEVAL SYSTEMS - what would someone search for?
-- If paragraph has no financial substance, use brief descriptive summaries
+CONTENT-ADAPTIVE SUMMARIZATION RULES:
+- NEVER skip content - summarize everything, even single sentences
+- Scale detail proportionally: short content = minimal summary, long content = detailed summary
+- Preserve key financial terms, numbers, and speaker attributions
+- Focus on searchable concepts that users might query
 
-SUMMARY LENGTH EXAMPLES:
-- Original: "Hello, good morning everyone" → Summary: "Call opening greeting"
-- Original: "Thank you for joining us today. I hope everyone is well." → Summary: "Introductory pleasantries"
-- Original: "Our ROE improved to 15.2% this quarter, driven by higher margins and cost discipline across our commercial banking operations." → Summary: "ROE increased to 15.2% from improved margins and cost management"
+SUMMARY SCALING BY CONTENT LENGTH:
+- For content under 50 characters: Create 5-15 word summaries capturing speaker type, topic, and key sentiment
+  Example: "Good morning everyone" → "[EXECUTIVE] Call opening greeting"
+  
+- For content 50-200 characters: Create 15-30 word summaries including who spoke, specific topic, and quantitative information
+  Example: "Thank you for joining us today. Let's review our Q3 results." → "[EXECUTIVE] Opens call with Q3 financial results review"
+  
+- For content over 200 characters: Create proportional summaries (20-40% of original length) preserving all key financial metrics, guidance, strategic initiatives, and analyst concerns
+  Example: Long detailed response → Comprehensive summary with all financial data and strategic insights
+
+FINANCIAL RELEVANCE MARKERS (Always include when present):
+- Financial metrics (revenue, earnings, margins, ROE, etc.)
+- Forward-looking statements and guidance
+- Market conditions and competitive positioning
+- Strategic initiatives and business developments
+- Analyst questions and management responses
+
+SPEAKER ATTRIBUTION FOR RERANKING:
+Include speaker type markers:
+- [ANALYST]: For analyst questions and comments
+- [EXECUTIVE]: For management responses and prepared remarks
+- [OPERATOR]: For call logistics and transitions
 
 CRITICAL REQUIREMENTS FOR IMPORTANCE SCORES:
 - Score RELATIVE to other paragraphs in this {speaker_block_total_paragraphs}-paragraph speaker block
@@ -669,38 +687,39 @@ CRITICAL REQUIREMENTS FOR IMPORTANCE SCORES:
 - 0.2-0.4: Contains procedural information or basic acknowledgments
 - 0.0-0.2: Contains only pleasantries, transitions, or non-business content
 
-SCORING CALIBRATION EXAMPLES:
-- "Our ROE increased to 15.2% this quarter" → HIGH (0.8-1.0)
-- "We're seeing strong momentum in our commercial lending business" → MEDIUM-HIGH (0.6-0.8)
-- "The regulatory environment continues to evolve" → MEDIUM (0.4-0.6)
-- "Thank you for joining our call today" → LOW (0.0-0.2)
+RERANKING OPTIMIZATION:
+- Include relevant financial terminology and context for semantic search
+- Preserve quantitative data and comparisons
+- Maintain forward-looking statements and guidance
+- Keep analyst concerns and management responses connected
 </objective>
 
 <style>
 Write summaries in third person, present tense. Focus on business facts and metrics.
-Be concise and analytical. Always condense, never expand.
+Be concise and analytical. Scale detail with content importance.
 </style>
 
 <tone>
-Professional financial analysis. Summaries should read like executive briefing points.
+Professional financial analysis. Summaries should read like executive briefing points optimized for relevance filtering.
 </tone>
 
 <audience>
-Financial analysts using retrieval systems to find specific business information and metrics.
+A smaller model that will judge relevance to user queries about earnings calls and filter results accordingly.
 </audience>
 
 <response_format>
 Use the summarize_indexed_paragraphs function. 
 - Provide exactly one entry per numbered paragraph [1] through [{batch_size}]
 - Match your response indexes exactly to the input paragraph numbers
-- Summaries must always be shorter than the original paragraph
-- Importance scores should reflect relative ranking within the speaker block context
+- Scale summary detail with content length and importance
+- Include speaker attribution markers for reranking context
+- Preserve financial terminology and quantitative data
 
 VALIDATION: Before responding, verify:
 1. You have exactly {batch_size} summaries
-2. Each summary is shorter than its original paragraph
+2. Each summary is appropriately scaled to content length and importance
 3. Each importance score considers the full speaker block context
-4. Summaries focus on financial substance or accurately describe procedural content
+4. Summaries include speaker attribution and financial context for reranking
 </response_format>
 """
 
@@ -845,20 +864,8 @@ def process_transcript_with_sliding_window(transcript_records: List[Dict], trans
                 batch_end = min(batch_start + batch_size, len(current_block_records))
                 current_batch = current_block_records[batch_start:batch_end]
                 
-                # Skip very short content
-                valid_batch = []
-                for record in current_batch:
-                    content = record.get("paragraph_content", "").strip()
-                    if len(content) >= config["stage_7"]["processing_config"]["min_paragraph_length"]:
-                        valid_batch.append(record)
-                    else:
-                        # Set null enhancement fields for very short content
-                        record["paragraph_summary"] = None
-                        record["paragraph_importance"] = None
-                        enhanced_records.append(record)
-                
-                if not valid_batch:
-                    continue
+                # Process ALL content - no skipping based on length
+                valid_batch = current_batch
                 
                 # Format sliding window context
                 context = format_sliding_window_context(
