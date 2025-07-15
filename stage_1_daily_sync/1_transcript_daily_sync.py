@@ -645,36 +645,10 @@ def create_base_directory_structure(nas_conn: SMBConnection) -> None:
     nas_create_directory(nas_conn, data_path)
     nas_create_directory(nas_conn, logs_path)
     
-    # Create type-based folders: Canadian, US, European, Insurance
-    type_folders = [
-        "Canadian", "US", "European", "Insurance",
-        "US_Regional", "Nordic", "Australian", "US_Asset_Manager",
-        "US_Boutique", "Canadian_Asset_Manager", "UK_Asset_Manager",
-        "Canadian_Monoline", "US_Trust"
-    ]
-    for type_folder in type_folders:
-        type_path = nas_path_join(data_path, type_folder)
-        nas_create_directory(nas_conn, type_path)
+    # Enhanced structure creates type folders dynamically within fiscal year/quarter folders
+    # No need to pre-create legacy type-based folders
 
-def create_ticker_directory_structure(nas_conn: SMBConnection, ticker: str, institution_type: str) -> None:
-    """Create directory structure for a specific ticker when transcripts are found."""
-    global config
-    data_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Data")
-    
-    # Get path-safe name for the ticker folder
-    institution_info = config['monitored_institutions'].get(ticker, {})
-    path_safe_name = institution_info.get('path_safe_name', ticker)
-    ticker_folder_name = f"{ticker}_{path_safe_name}"
-    
-    ticker_path = nas_path_join(data_path, institution_type, ticker_folder_name)
-    
-    # Create ticker folder
-    nas_create_directory(nas_conn, ticker_path)
-    
-    # Create transcript type subfolders
-    for transcript_type in config['api_settings']['transcript_types']:
-        transcript_type_path = nas_path_join(ticker_path, transcript_type)
-        nas_create_directory(nas_conn, transcript_type_path)
+# Removed create_ticker_directory_structure - replaced by enhanced directory structure
 
 def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str] = None) -> str:
     """Create standardized filename from transcript data."""
