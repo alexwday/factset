@@ -1,6 +1,7 @@
 # FactSet SDK
 fds.sdk.EventsandTranscripts
 fds.sdk.FactSetFundamentals
+fds.sdk.StreetAccountNews
 
 # Core dependencies
 pandas

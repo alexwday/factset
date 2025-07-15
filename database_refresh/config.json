@@ -823,5 +823,39 @@
       "cost_per_1k_completion_tokens": 0.06
     },
     "description": "Paragraph-level content enhancement with sliding window context for retrieval optimization"
+  },
+  "streetaccount_news": {
+    "api_endpoints": {
+      "headlines": "/streetaccount/v1/headlines",
+      "filters": "/streetaccount/v1/filters",
+      "views": "/streetaccount/v1/views"
+    },
+    "default_filters": {
+      "sectors": ["Financial"],
+      "regions": ["North America"],
+      "categories": ["Earnings", "Corporate Actions", "Guidance", "Company News"],
+      "topics": ["Market Summaries", "Company News", "Analyst Reports"]
+    },
+    "monitored_financial_sectors": {
+      "banking": ["Commercial Banking", "Investment Banking", "Regional Banking"],
+      "insurance": ["Life Insurance", "Property & Casualty Insurance", "Reinsurance"],
+      "asset_management": ["Asset Management", "Investment Management", "Wealth Management"],
+      "financial_services": ["Financial Services", "Capital Markets", "Trading"]
+    },
+    "pagination": {
+      "default_limit": 100,
+      "max_limit": 1000
+    },
+    "rate_limiting": {
+      "requests_per_second": 5,
+      "retry_attempts": 3,
+      "retry_delay_seconds": 2
+    },
+    "output_settings": {
+      "max_headline_length": 200,
+      "include_story_body": true,
+      "timezone": "America/Halifax"
+    },
+    "description": "StreetAccountNews API configuration for financial services headline retrieval"
   }
 }

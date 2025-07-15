@@ -8,16 +8,19 @@ A multi-stage pipeline for downloading, processing, and analyzing earnings trans
 factset/
 ├── .env                                    # Shared authentication (create from .env.example)
 ├── .env.example                           # Template for environment variables
-├── 0_transcript_bulk_sync_working.py      # Working version of bulk sync script
+├── database_refresh/                      # Database refresh pipeline
+│   ├── config.json                        # Configuration for database refresh stages
+│   ├── stage_0_bulk_refresh/              # Historical bulk download (optional)
+│   ├── stage_1_daily_sync/                # Daily incremental sync (scheduled)
+│   ├── stage_2_processing/                # Transcript consolidation & change detection
+│   ├── stage_3_content_processing/        # XML content extraction & paragraph breakdown
+│   ├── stage_4_llm_classification/        # LLM-based section type classification
+│   ├── stage_5_qa_pairing/                # Q&A conversation boundary detection
+│   ├── stage_6_detailed_classification/   # Detailed financial category classification
+│   └── stage_7_content_enhancement/       # Paragraph-level content enhancement
+├── pm_call_summary/                       # PM Call Summary pipeline
+│   └── config.json                        # Configuration for PM summary stages
 ├── docs/                                  # Documentation & FactSet SDK docs
-├── stage_0_bulk_refresh/                  # Historical bulk download (optional)
-├── stage_1_daily_sync/                    # Daily incremental sync (scheduled)
-├── stage_2_processing/                    # Transcript consolidation & change detection
-├── stage_3_content_processing/            # XML content extraction & paragraph breakdown
-├── stage_4_llm_classification/            # LLM-based section type classification
-├── stage_5_qa_pairing/                    # Q&A conversation boundary detection
-├── stage_6_detailed_classification/       # Detailed financial category classification
-├── stage_7_content_enhancement/           # Paragraph-level content enhancement
 ├── requirements.txt                       # Python dependencies
 └── README.md                              # This file
 ```
@@ -79,31 +82,31 @@ Each stage is a standalone Python script:
 
 ```bash
 # Stage 0: Bulk historical sync (implemented)
-python stage_0_bulk_refresh/0_transcript_bulk_sync.py
+python database_refresh/stage_0_bulk_refresh/0_transcript_bulk_sync.py
 
 # Stage 1: Daily incremental sync (implemented)
-python stage_1_daily_sync/1_transcript_daily_sync.py
+python database_refresh/stage_1_daily_sync/1_transcript_daily_sync.py
 
 # Stage 1: With earnings monitor (runs every 5 minutes with notifications)
-python stage_1_daily_sync/earnings_monitor.py
+python database_refresh/stage_1_daily_sync/earnings_monitor.py
 
 # Stage 2: Transcript consolidation and change detection (implemented)
-python stage_2_processing/2_transcript_consolidation.py
+python database_refresh/stage_2_processing/2_transcript_consolidation.py
 
 # Stage 3: XML content extraction and paragraph-level breakdown (implemented)
-python stage_3_content_processing/3_transcript_content_extraction.py
+python database_refresh/stage_3_content_processing/3_transcript_content_extraction.py
 
 # Stage 4: LLM-based transcript section classification (implemented)
-python stage_4_llm_classification/4_transcript_llm_classification.py
+python database_refresh/stage_4_llm_classification/4_transcript_llm_classification.py
 
 # Stage 5: Q&A conversation boundary detection and pairing (implemented)
-python stage_5_qa_pairing/5_transcript_qa_pairing.py
+python database_refresh/stage_5_qa_pairing/5_transcript_qa_pairing.py
 
 # Stage 6: Detailed financial category classification (implemented)
-python stage_6_detailed_classification/6_transcript_detailed_classification.py
+python database_refresh/stage_6_detailed_classification/6_transcript_detailed_classification.py
 
 # Stage 7: Content enhancement system (implemented)
-python stage_7_content_enhancement/7_transcript_content_enhancement.py
+python database_refresh/stage_7_content_enhancement/7_transcript_content_enhancement.py
 
 # Test Scripts: Analysis and visualization tools
 python test_scripts/stage_4_analysis_visualizer.py
@@ -188,7 +191,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 3. **Execute Full Sync**:
    ```bash
-   python stage_0_bulk_refresh/0_transcript_bulk_sync.py
+   python database_refresh/stage_0_bulk_refresh/0_transcript_bulk_sync.py
    ```
 
 4. **Monitor Progress**:
@@ -214,7 +217,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 2. **Execute Consolidation**:
    ```bash
-   python stage_2_processing/2_transcript_consolidation.py
+   python database_refresh/stage_2_processing/2_transcript_consolidation.py
    ```
 
 3. **Expected Outputs**:
@@ -231,7 +234,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 2. **Execute Content Extraction**:
    ```bash
-   python stage_3_content_processing/3_transcript_content_extraction.py
+   python database_refresh/stage_3_content_processing/3_transcript_content_extraction.py
    ```
 
 3. **Expected Outputs**:
@@ -257,7 +260,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 2. **Execute LLM Classification**:
    ```bash
-   python stage_4_llm_classification/4_transcript_llm_classification.py
+   python database_refresh/stage_4_llm_classification/4_transcript_llm_classification.py
    ```
 
 3. **Expected Outputs**:
@@ -302,7 +305,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 2. **Execute Q&A Pairing**:
    ```bash
-   python stage_5_qa_pairing/5_transcript_qa_pairing.py
+   python database_refresh/stage_5_qa_pairing/5_transcript_qa_pairing.py
    ```
 
 3. **Expected Outputs**:
@@ -356,7 +359,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 2. **Execute Detailed Classification**:
    ```bash
-   python stage_6_detailed_classification/6_transcript_detailed_classification.py
+   python database_refresh/stage_6_detailed_classification/6_transcript_detailed_classification.py
    ```
 
 3. **Expected Outputs**:
@@ -535,8 +538,8 @@ Provides detailed summary including:
   - Same security and version management as Stage 0
   - Optional earnings monitor with real-time macOS notifications
 - **Usage**: 
-  - Manual: `python stage_1_daily_sync/1_transcript_daily_sync.py`
-  - Monitor: `python stage_1_daily_sync/earnings_monitor.py` (runs every 5 minutes with popups)
+  - Manual: `python database_refresh/stage_1_daily_sync/1_transcript_daily_sync.py`
+  - Monitor: `python database_refresh/stage_1_daily_sync/earnings_monitor.py` (runs every 5 minutes with popups)
 
 ### Stage 2: Transcript Consolidation ✅ PRODUCTION READY
 - **Purpose**: Select optimal single transcript per company per fiscal quarter/year and detect changes
@@ -548,7 +551,7 @@ Provides detailed summary including:
   - Read-only comparison with existing master database (if present)
   - Delta detection for changed/new/removed files
   - Processing queues (files_to_process.json, files_to_remove.json)
-- **Usage**: `python stage_2_processing/2_transcript_consolidation.py`
+- **Usage**: `python database_refresh/stage_2_processing/2_transcript_consolidation.py`
 
 ### Stage 3: XML Content Extraction ✅ PRODUCTION READY
 - **Purpose**: Process XML transcripts and extract paragraph-level content with speaker attribution
@@ -563,7 +566,7 @@ Provides detailed summary including:
   - Q&A detection (question/answer flags from XML)
   - Section tracking (Presentation, Q&A Session, etc.)
   - Enhanced error logging with separate JSON files
-- **Usage**: `python stage_3_content_processing/3_transcript_content_extraction.py`
+- **Usage**: `python database_refresh/stage_3_content_processing/3_transcript_content_extraction.py`
 - **Development**: Set `"dev_mode": true` in config.json to process limited files during testing
 
 ### Stage 4: LLM-Based Classification ✅ PRODUCTION READY
@@ -581,7 +584,7 @@ Provides detailed summary including:
   - Comprehensive error handling and recovery mechanisms
   - Progressive API cost optimization (avg 1.5 calls per section)
   - Adds exactly 3 fields: section_type, section_type_confidence, section_type_method
-- **Usage**: `python stage_4_llm_classification/4_transcript_llm_classification.py`
+- **Usage**: `python database_refresh/stage_4_llm_classification/4_transcript_llm_classification.py`
 - **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
 - **Authentication**: Requires LLM_CLIENT_ID and LLM_CLIENT_SECRET environment variables
 
@@ -606,7 +609,7 @@ Provides detailed summary including:
   - **Cost Tracking**: Real-time token usage and final cost summary (no budget limits)
   - **Development Mode**: Process only 2 transcripts for testing
   - **Validation & Retry**: Invalid LLM responses caught and retried with feedback
-- **Usage**: `python stage_5_qa_pairing/5_transcript_qa_pairing.py`
+- **Usage**: `python database_refresh/stage_5_qa_pairing/5_transcript_qa_pairing.py`
 - **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
 - **Authentication**: Uses same LLM credentials as Stage 4 (LLM_CLIENT_ID and LLM_CLIENT_SECRET)
 - **Key Improvements** (2024-07-13):
@@ -637,7 +640,7 @@ Provides detailed summary including:
   - **Cost Tracking**: Real-time token usage and comprehensive cost monitoring with detailed summaries
   - **Development Mode**: Process only 2 transcripts for testing
   - **Enhanced Error Logging**: Separate categories for LLM, authentication, classification, and processing errors
-- **Usage**: `python stage_6_detailed_classification/6_transcript_detailed_classification.py`
+- **Usage**: `python database_refresh/stage_6_detailed_classification/6_transcript_detailed_classification.py`
 - **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
 - **Authentication**: Uses same LLM credentials as Stage 4/5 (LLM_CLIENT_ID and LLM_CLIENT_SECRET)
 - **Classification Categories**:
@@ -690,7 +693,7 @@ The earnings monitor runs Stage 1 automatically every 5 minutes and provides rea
 ### Usage
 ```bash
 # Start the monitor
-python stage_1_daily_sync/earnings_monitor.py
+python database_refresh/stage_1_daily_sync/earnings_monitor.py
 ```
 
 ### Features
