@@ -15,10 +15,12 @@ import json
 import os
 import tempfile
 import logging
+import io
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 from collections import defaultdict, Counter
 from pathlib import Path
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -38,12 +40,26 @@ warnings.filterwarnings('ignore')
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Authentication and connection settings from environment (same as Stage 4)
+API_USERNAME = os.getenv("API_USERNAME")
+API_PASSWORD = os.getenv("API_PASSWORD")
+PROXY_USER = os.getenv("PROXY_USER")
+PROXY_PASSWORD = os.getenv("PROXY_PASSWORD")
+PROXY_URL = os.getenv("PROXY_URL")
+NAS_USERNAME = os.getenv("NAS_USERNAME")
+NAS_PASSWORD = os.getenv("NAS_PASSWORD")
+NAS_SERVER_IP = os.getenv("NAS_SERVER_IP")
+NAS_SERVER_NAME = os.getenv("NAS_SERVER_NAME")
+NAS_SHARE_NAME = os.getenv("NAS_SHARE_NAME")
+NAS_BASE_PATH = os.getenv("NAS_BASE_PATH")
+NAS_PORT = int(os.getenv("NAS_PORT", 445))
+CONFIG_PATH = os.getenv("CONFIG_PATH")
+CLIENT_MACHINE_NAME = os.getenv("CLIENT_MACHINE_NAME")
+PROXY_DOMAIN = os.getenv("PROXY_DOMAIN", "MAPLE")
+
+# Global variables for configuration
+config = {}
+logger = None
 
 @dataclass
 class AnalysisConfig:
@@ -57,176 +73,209 @@ class AnalysisConfig:
     chart_width: int = 1200
     chart_height: int = 800
 
-class EnhancedNASConnection:
-    """Enhanced NAS connection handler with corporate proxy support."""
+def setup_logging() -> logging.Logger:
+    """Set up logging configuration."""
+    temp_log_file = tempfile.NamedTemporaryFile(
+        mode="w+",
+        suffix=".log",
+        prefix=f'stage_4_analysis_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
+        delete=False,
+    )
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.FileHandler(temp_log_file.name), logging.StreamHandler()],
+    )
+
+    logger = logging.getLogger(__name__)
+    logger.temp_log_file = temp_log_file.name
+    return logger
+
+
+def validate_file_path(path: str) -> bool:
+    """Validate file path for security."""
+    if not path or not isinstance(path, str):
+        return False
     
-    def __init__(self):
-        self.nas_conn = None
-        self.ssl_cert_file = None
-        self.proxies = None
-        
-    def connect(self) -> bool:
-        """Establish NAS connection with corporate authentication."""
-        try:
-            nas_username = os.getenv("NAS_USERNAME")
-            nas_password = os.getenv("NAS_PASSWORD")
-            nas_server_ip = os.getenv("NAS_SERVER_IP")
-            nas_server_name = os.getenv("NAS_SERVER_NAME")
-            
-            if not all([nas_username, nas_password, nas_server_ip, nas_server_name]):
-                logger.error("Missing required NAS environment variables")
-                return False
-            
-            self.nas_conn = SMBConnection(
-                nas_username,
-                nas_password,
-                "analysis_client",
-                nas_server_name,
-                use_ntlm_v2=True
-            )
-            
-            if not self.nas_conn.connect(nas_server_ip, 445):
-                logger.error("Failed to connect to NAS server")
-                return False
-            
-            logger.info("NAS connection established successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"NAS connection failed: {e}")
+    # Check for directory traversal attempts
+    if '..' in path or path.startswith('/'):
+        return False
+    
+    # Check for invalid characters
+    invalid_chars = ['<', '>', ':', '"', '|', '?', '*']
+    if any(char in path for char in invalid_chars):
+        return False
+    
+    return True
+
+
+def validate_nas_path(path: str) -> bool:
+    """Validate NAS path structure."""
+    if not path or not isinstance(path, str):
+        return False
+    
+    # Ensure path is relative and safe
+    normalized = path.strip('/')
+    parts = normalized.split('/')
+    
+    for part in parts:
+        if not part or part in ['.', '..']:
+            return False
+        if not validate_file_path(part):
             return False
     
-    def setup_ssl_certificate(self, ssl_cert_path: str) -> Optional[str]:
-        """Download and setup SSL certificate for tiktoken."""
-        try:
-            share_name = os.getenv("NAS_SHARE_NAME")
-            if not share_name:
-                logger.error("NAS_SHARE_NAME environment variable not set")
-                return None
-            
-            # Download certificate from NAS
-            cert_temp_file = tempfile.NamedTemporaryFile(
-                mode="wb", suffix=".cer", prefix="tiktoken_cert_", delete=False
-            )
-            
-            with cert_temp_file as f:
-                self.nas_conn.retrieveFile(share_name, ssl_cert_path, f)
-            
-            # Set SSL environment variables
-            os.environ["SSL_CERT_FILE"] = cert_temp_file.name
-            os.environ["REQUESTS_CA_BUNDLE"] = cert_temp_file.name
-            
-            self.ssl_cert_file = cert_temp_file.name
-            logger.info(f"SSL certificate setup complete: {cert_temp_file.name}")
-            return cert_temp_file.name
-            
-        except Exception as e:
-            logger.error(f"SSL certificate setup failed: {e}")
+    return True
+
+
+def get_nas_connection() -> Optional[SMBConnection]:
+    """Create and return an SMB connection to the NAS."""
+    global logger
+    try:
+        conn = SMBConnection(
+            username=NAS_USERNAME,
+            password=NAS_PASSWORD,
+            my_name=CLIENT_MACHINE_NAME,
+            remote_name=NAS_SERVER_NAME,
+            use_ntlm_v2=True,
+            is_direct_tcp=True,
+        )
+        if conn.connect(NAS_SERVER_IP, NAS_PORT):
+            logger.info("Connected to NAS successfully")
+            return conn
+        else:
+            logger.error("Failed to connect to NAS")
             return None
+    except Exception as e:
+        logger.error(f"Error connecting to NAS: {e}")
+        return None
+
+
+def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes]:
+    """Download a file from NAS and return as bytes."""
+    global logger
     
-    def setup_corporate_proxy(self):
-        """Setup corporate proxy for HTTP requests."""
-        try:
-            proxy_user = os.getenv("PROXY_USER")
-            proxy_password = os.getenv("PROXY_PASSWORD")
-            proxy_url = os.getenv("PROXY_URL")
-            proxy_domain = os.getenv("PROXY_DOMAIN", "MAPLE")
+    # Validate path for security
+    if not validate_nas_path(nas_file_path):
+        logger.error(f"Invalid NAS file path: {nas_file_path}")
+        return None
+    
+    try:
+        file_obj = io.BytesIO()
+        conn.retrieveFile(NAS_SHARE_NAME, nas_file_path, file_obj)
+        file_obj.seek(0)
+        return file_obj.read()
+    except Exception as e:
+        logger.error(f"Failed to download file from NAS {nas_file_path}: {e}")
+        return None
+
+
+def nas_path_join(*parts: str) -> str:
+    """Join path parts for NAS paths using forward slashes."""
+    clean_parts = []
+    for part in parts:
+        if part:
+            clean_part = str(part).strip("/")
+            if clean_part:
+                clean_parts.append(clean_part)
+    return "/".join(clean_parts)
+
+
+def load_stage_config(nas_conn: SMBConnection) -> Dict[str, Any]:
+    """Load and validate shared configuration from NAS."""
+    global logger
+    try:
+        logger.info("Loading shared configuration from NAS...")
+        config_data = nas_download_file(nas_conn, CONFIG_PATH)
+        if config_data:
+            stage_config = json.loads(config_data.decode("utf-8"))
+            logger.info("Successfully loaded shared configuration from NAS")
+            return stage_config
+        else:
+            logger.error("Config file not found on NAS - script cannot proceed")
+            raise FileNotFoundError(f"Configuration file not found at {CONFIG_PATH}")
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in config file: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error loading config from NAS: {e}")
+        raise
+
+
+def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
+    """Download SSL certificate from NAS and set up for use."""
+    global logger, config
+    try:
+        logger.info("Downloading SSL certificate from NAS...")
+        cert_data = nas_download_file(nas_conn, config['ssl_cert_nas_path'])
+        if cert_data:
+            temp_cert = tempfile.NamedTemporaryFile(mode='wb', suffix='.cer', delete=False)
+            temp_cert.write(cert_data)
+            temp_cert.close()
             
-            if not all([proxy_user, proxy_password, proxy_url]):
-                logger.warning("Proxy configuration incomplete - continuing without proxy")
-                return None
+            os.environ["REQUESTS_CA_BUNDLE"] = temp_cert.name
+            os.environ["SSL_CERT_FILE"] = temp_cert.name
             
-            user = proxy_user
-            password = quote(proxy_password)
-            escaped_domain = quote(proxy_domain + '\\' + user)
-            full_proxy_url = f"http://{escaped_domain}:{password}@{proxy_url}"
-            
-            # Set proxy environment variables
-            os.environ["HTTP_PROXY"] = full_proxy_url
-            os.environ["HTTPS_PROXY"] = full_proxy_url
-            
-            self.proxies = {
-                'https': full_proxy_url,
-                'http': full_proxy_url
-            }
-            
-            logger.info("Corporate proxy setup complete")
-            return self.proxies
-            
-        except Exception as e:
-            logger.error(f"Corporate proxy setup failed: {e}")
+            logger.info("SSL certificate downloaded from NAS")
+            return temp_cert.name
+        else:
+            logger.error("Failed to download SSL certificate from NAS")
             return None
-    
-    def download_file(self, file_path: str) -> Optional[bytes]:
-        """Download file from NAS."""
-        try:
-            share_name = os.getenv("NAS_SHARE_NAME")
-            if not share_name:
-                logger.error("NAS_SHARE_NAME environment variable not set")
-                return None
-            
-            temp_file = tempfile.NamedTemporaryFile(delete=False)
-            try:
-                self.nas_conn.retrieveFile(share_name, file_path, temp_file)
-                temp_file.close()
-                
-                with open(temp_file.name, 'rb') as f:
-                    data = f.read()
-                
-                os.unlink(temp_file.name)
-                return data
-                
-            except Exception as e:
-                if os.path.exists(temp_file.name):
-                    os.unlink(temp_file.name)
-                raise e
-                
-        except Exception as e:
-            logger.error(f"File download failed for {file_path}: {e}")
-            return None
-    
-    def close(self):
-        """Clean up connections and temporary files."""
-        if self.nas_conn:
-            self.nas_conn.close()
-        
-        if self.ssl_cert_file and os.path.exists(self.ssl_cert_file):
-            os.unlink(self.ssl_cert_file)
-        
-        logger.info("NAS connection closed and cleanup complete")
+    except Exception as e:
+        logger.error(f"Error downloading SSL certificate from NAS: {e}")
+        return None
 
 class TokenAnalyzer:
     """Enhanced token analysis with tiktoken integration."""
     
-    def __init__(self, config: AnalysisConfig):
-        self.config = config
+    def __init__(self, analysis_config: AnalysisConfig):
+        self.analysis_config = analysis_config
         self.encoding = None
-        self.nas_conn = EnhancedNASConnection()
+        self.ssl_cert_file = None
         
-    def initialize_tiktoken(self) -> bool:
+    def initialize_tiktoken(self, nas_conn: SMBConnection) -> bool:
         """Initialize tiktoken with corporate SSL/proxy setup."""
+        global logger, config
         try:
-            # Connect to NAS
-            if not self.nas_conn.connect():
-                logger.error("Failed to establish NAS connection")
-                return False
-            
             # Setup SSL certificate
-            if not self.nas_conn.setup_ssl_certificate(self.config.ssl_cert_nas_path):
+            self.ssl_cert_file = setup_ssl_certificate(nas_conn)
+            if not self.ssl_cert_file:
                 logger.error("Failed to setup SSL certificate")
                 return False
             
             # Setup corporate proxy
-            self.nas_conn.setup_corporate_proxy()
+            self._setup_corporate_proxy()
             
             # Initialize tiktoken
-            self.encoding = tiktoken.encoding_for_model(self.config.tiktoken_model)
-            logger.info(f"tiktoken initialized successfully with model: {self.config.tiktoken_model}")
+            self.encoding = tiktoken.encoding_for_model(self.analysis_config.tiktoken_model)
+            logger.info(f"tiktoken initialized successfully with model: {self.analysis_config.tiktoken_model}")
             return True
             
         except Exception as e:
             logger.error(f"tiktoken initialization failed: {e}")
             return False
+    
+    def _setup_corporate_proxy(self):
+        """Setup corporate proxy for HTTP requests."""
+        try:
+            if not all([PROXY_USER, PROXY_PASSWORD, PROXY_URL]):
+                logger.warning("Proxy configuration incomplete - continuing without proxy")
+                return None
+            
+            user = PROXY_USER
+            password = quote(PROXY_PASSWORD)
+            escaped_domain = quote(PROXY_DOMAIN + '\\' + user)
+            full_proxy_url = f"http://{escaped_domain}:{password}@{PROXY_URL}"
+            
+            # Set proxy environment variables
+            os.environ["HTTP_PROXY"] = full_proxy_url
+            os.environ["HTTPS_PROXY"] = full_proxy_url
+            
+            logger.info("Corporate proxy setup complete")
+            
+        except Exception as e:
+            logger.error(f"Corporate proxy setup failed: {e}")
+            return None
     
     def count_tokens(self, text: str) -> int:
         """Count tokens in text using tiktoken."""
@@ -247,7 +296,7 @@ class TokenAnalyzer:
             return {"original_tokens": 0, "truncated_tokens": 0, "truncation_ratio": 0.0}
         
         original_tokens = self.count_tokens(text)
-        truncated_text = text[:self.config.max_token_length]
+        truncated_text = text[:self.analysis_config.max_token_length]
         truncated_tokens = self.count_tokens(truncated_text)
         
         truncation_ratio = truncated_tokens / original_tokens if original_tokens > 0 else 1.0
@@ -256,34 +305,46 @@ class TokenAnalyzer:
             "original_tokens": original_tokens,
             "truncated_tokens": truncated_tokens,
             "truncation_ratio": truncation_ratio,
-            "was_truncated": len(text) > self.config.max_token_length
+            "was_truncated": len(text) > self.analysis_config.max_token_length
         }
     
     def cleanup(self):
         """Clean up resources."""
-        if self.nas_conn:
-            self.nas_conn.close()
+        if self.ssl_cert_file and os.path.exists(self.ssl_cert_file):
+            os.unlink(self.ssl_cert_file)
 
 class Stage4Analyzer:
     """Main analyzer for Stage 4 outputs."""
     
-    def __init__(self, config: AnalysisConfig):
-        self.config = config
-        self.token_analyzer = TokenAnalyzer(config)
+    def __init__(self, analysis_config: AnalysisConfig):
+        self.analysis_config = analysis_config
+        self.token_analyzer = TokenAnalyzer(analysis_config)
         self.data = None
         self.df = None
+        self.nas_conn = None
         
     def load_data(self) -> bool:
         """Load Stage 4 output data from NAS."""
+        global logger, config
         try:
-            nas_conn = EnhancedNASConnection()
-            if not nas_conn.connect():
+            # Connect to NAS
+            self.nas_conn = get_nas_connection()
+            if not self.nas_conn:
                 logger.error("Failed to connect to NAS")
                 return False
             
+            # Load config from NAS
+            config = load_stage_config(self.nas_conn)
+            
+            # Construct file path using config
+            file_path = nas_path_join(
+                NAS_BASE_PATH,
+                config["stage_4"]["output_path"],
+                config["stage_4"]["output_file"]
+            )
+            
             # Download Stage 4 output file
-            file_path = f"{self.config.stage_4_output_path}{self.config.stage_4_output_file}"
-            file_data = nas_conn.download_file(file_path)
+            file_data = nas_download_file(self.nas_conn, file_path)
             
             if not file_data:
                 logger.error(f"Failed to download Stage 4 output file: {file_path}")
@@ -296,7 +357,6 @@ class Stage4Analyzer:
             self.df = pd.DataFrame(self.data['records'])
             
             logger.info(f"Loaded {len(self.df)} records from Stage 4 output")
-            nas_conn.close()
             return True
             
         except Exception as e:
@@ -305,7 +365,10 @@ class Stage4Analyzer:
     
     def initialize_token_analysis(self) -> bool:
         """Initialize token analysis with tiktoken."""
-        return self.token_analyzer.initialize_tiktoken()
+        if not self.nas_conn:
+            logger.error("NAS connection not established")
+            return False
+        return self.token_analyzer.initialize_tiktoken(self.nas_conn)
     
     def analyze_token_distributions(self) -> Dict[str, Any]:
         """Analyze token distributions across transcripts."""
@@ -939,15 +1002,21 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
         """Clean up resources."""
         if self.token_analyzer:
             self.token_analyzer.cleanup()
+        if self.nas_conn:
+            self.nas_conn.close()
 
 def main():
     """Main execution function."""
+    global logger
+    
+    # Setup logging
+    logger = setup_logging()
     
     # Configuration
-    config = AnalysisConfig()
+    analysis_config = AnalysisConfig()
     
     # Initialize analyzer
-    analyzer = Stage4Analyzer(config)
+    analyzer = Stage4Analyzer(analysis_config)
     
     try:
         # Load data
@@ -972,7 +1041,7 @@ def main():
         print("FACTSET STAGE 4 ANALYSIS COMPLETE")
         print("="*60)
         print(f"Report Location: {report_file}")
-        print(f"Output Directory: {config.output_directory}")
+        print(f"Output Directory: {analysis_config.output_directory}")
         print("="*60)
         
     except Exception as e:
