@@ -24,7 +24,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.colors import HexColor
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, KeepTogether, Table, TableStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 
 def load_monitored_institutions() -> Dict:
@@ -1181,110 +1181,175 @@ def generate_html(transcript_data: Dict) -> str:
     return html_output
 
 def generate_pdf(transcript_data: Dict, output_path: str) -> None:
-    """Generate a clean PDF version of the transcript."""
+    """Generate a clean, professional PDF version of the transcript following financial document best practices."""
     
-    # Create PDF document
+    # Create PDF document with professional margins
     doc = SimpleDocTemplate(output_path, pagesize=letter,
                           rightMargin=72, leftMargin=72,
-                          topMargin=72, bottomMargin=18)
+                          topMargin=72, bottomMargin=54,
+                          title=transcript_data['title'],
+                          author="FactSet Earnings Transcript Pipeline")
     
-    # Get styles
+    # Get base styles
     styles = getSampleStyleSheet()
     
-    # Define custom styles
+    # Define custom styles following financial document best practices
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontSize=20,
-        spaceAfter=30,
+        fontSize=18,  # Reduced from 20 for better proportion
+        spaceAfter=12,  # Reduced spacing
         alignment=TA_CENTER,
         textColor=HexColor('#003366'),
-        fontName='Helvetica-Bold'
+        fontName='Helvetica-Bold',
+        leading=22
     )
     
-    company_style = ParagraphStyle(
-        'CompanyName',
+    date_style = ParagraphStyle(
+        'DateStyle',
         parent=styles['Normal'],
-        fontSize=14,
-        spaceAfter=20,
+        fontSize=12,  # Smaller, more subtle
+        spaceAfter=36,  # More space before participants
         alignment=TA_CENTER,
-        textColor=HexColor('#495057'),
-        fontName='Helvetica'
+        textColor=HexColor('#6C757D'),  # Muted gray
+        fontName='Helvetica',
+        leading=14
     )
     
     section_style = ParagraphStyle(
         'SectionHeader',
         parent=styles['Heading2'],
-        fontSize=16,
+        fontSize=14,  # Reduced from 16
         spaceAfter=12,
         spaceBefore=24,
         textColor=HexColor('#003366'),
-        fontName='Helvetica-Bold'
+        fontName='Helvetica-Bold',
+        leading=17,
+        keepWithNext=True
+    )
+    
+    participants_header_style = ParagraphStyle(
+        'ParticipantsHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=8,  # Reduced spacing
+        spaceBefore=0,
+        textColor=HexColor('#003366'),
+        fontName='Helvetica-Bold',
+        leading=17
+    )
+    
+    participant_style = ParagraphStyle(
+        'ParticipantStyle',
+        parent=styles['Normal'],
+        fontSize=9,  # Smaller for condensed list
+        spaceAfter=3,  # Much less spacing
+        alignment=TA_LEFT,
+        textColor=HexColor('#212529'),
+        fontName='Helvetica',
+        leading=11,
+        leftIndent=0
     )
     
     speaker_style = ParagraphStyle(
         'SpeakerHeader',
         parent=styles['Normal'],
-        fontSize=12,
-        spaceAfter=6,
-        spaceBefore=12,
+        fontSize=10,  # Reduced from 12
+        spaceAfter=3,  # Reduced spacing
+        spaceBefore=8,
         textColor=HexColor('#003366'),
-        fontName='Helvetica-Bold'
+        fontName='Helvetica-Bold',
+        leading=12,
+        keepWithNext=True,
+        allowWidows=False,
+        allowOrphans=False
     )
     
     speaker_title_style = ParagraphStyle(
         'SpeakerTitle',
         parent=styles['Normal'],
-        fontSize=10,
-        spaceAfter=8,
+        fontSize=9,  # Reduced from 10
+        spaceAfter=6,
         textColor=HexColor('#6C757D'),
-        fontName='Helvetica-Oblique'
+        fontName='Helvetica-Oblique',
+        leading=11,
+        allowWidows=False,
+        allowOrphans=False
     )
     
     content_style = ParagraphStyle(
         'Content',
         parent=styles['Normal'],
-        fontSize=11,
-        spaceAfter=12,
+        fontSize=10,  # Reduced from 11
+        spaceAfter=6,  # Reduced spacing
         alignment=TA_JUSTIFY,
         textColor=HexColor('#212529'),
         fontName='Helvetica',
-        leftIndent=0.25*inch
+        leftIndent=0.25*inch,
+        leading=12,
+        allowWidows=False,
+        allowOrphans=False
     )
     
     # Build PDF content
     story = []
     
-    # Add title
+    # Title page layout - simple and clean (no company field)
     story.append(Paragraph(transcript_data['title'], title_style))
+    story.append(Paragraph(transcript_data['date'], date_style))
     
-    # Add primary company
-    institutions = load_monitored_institutions()
-    primary_company, _ = detect_primary_company(transcript_data, institutions)
-    story.append(Paragraph(primary_company, company_style))
-    
-    # Add date
-    story.append(Paragraph(f"Date: {transcript_data['date']}", company_style))
-    
-    # Add spacer
-    story.append(Spacer(1, 24))
-    
-    # Add participants section
+    # Participants section with condensed formatting
     if transcript_data['participants']:
-        story.append(Paragraph("Participants", section_style))
+        story.append(Paragraph("Participants", participants_header_style))
+        
+        # Separate participants by type for better organization
+        company_participants = []
+        analyst_participants = []
+        other_participants = []
         
         for p_id, p_data in transcript_data['participants'].items():
-            participant_type = "Company" if p_data['type'] == 'C' else "Analyst" if p_data['type'] == 'A' else p_data['type']
-            participant_info = f"<b>{p_data['name']}</b> - {p_data['title']}"
+            participant_type = p_data.get('type', '')
+            participant_info = f"<b>{p_data['name']}</b>"
+            
+            if p_data['title']:
+                participant_info += f" - {p_data['title']}"
             if p_data['affiliation']:
                 participant_info += f", {p_data['affiliation']}"
-            participant_info += f" ({participant_type})"
-            story.append(Paragraph(participant_info, content_style))
+            
+            if participant_type == 'C':
+                company_participants.append(participant_info)
+            elif participant_type == 'A':
+                analyst_participants.append(participant_info)
+            else:
+                other_participants.append(participant_info)
         
+        # Add grouped participants with minimal spacing
+        if company_participants:
+            story.append(Paragraph("<b>Company Representatives:</b>", participant_style))
+            for participant in company_participants:
+                story.append(Paragraph(participant, participant_style))
+            story.append(Spacer(1, 6))
+        
+        if analyst_participants:
+            story.append(Paragraph("<b>Analysts:</b>", participant_style))
+            for participant in analyst_participants:
+                story.append(Paragraph(participant, participant_style))
+            story.append(Spacer(1, 6))
+        
+        if other_participants:
+            story.append(Paragraph("<b>Other Participants:</b>", participant_style))
+            for participant in other_participants:
+                story.append(Paragraph(participant, participant_style))
+        
+        # Page break after participants
         story.append(PageBreak())
     
-    # Add transcript sections
-    for section in transcript_data['sections']:
+    # Add transcript sections with professional formatting
+    for section_index, section in enumerate(transcript_data['sections']):
+        # Start major sections on new page (except first section)
+        if section_index > 0 and section['name'].lower() in ['questions and answers', 'q&a', 'operator instructions']:
+            story.append(PageBreak())
+        
         story.append(Paragraph(section['name'], section_style))
         
         for speaker in section['speakers']:
@@ -1294,8 +1359,11 @@ def generate_pdf(transcript_data: Dict, output_path: str) -> None:
             speaker_title = speaker_data.get('title', '')
             speaker_affiliation = speaker_data.get('affiliation', '')
             
+            # Create speaker block to keep together
+            speaker_elements = []
+            
             # Add speaker header
-            story.append(Paragraph(speaker_name, speaker_style))
+            speaker_elements.append(Paragraph(speaker_name, speaker_style))
             
             # Add speaker title and affiliation
             if speaker_title or speaker_affiliation:
@@ -1309,14 +1377,17 @@ def generate_pdf(transcript_data: Dict, output_path: str) -> None:
                 elif speaker['type'] == 'a':
                     title_text += " [ANSWER]"
                 
-                story.append(Paragraph(title_text, speaker_title_style))
+                speaker_elements.append(Paragraph(title_text, speaker_title_style))
             
-            # Add speaker content
+            # Add speaker content paragraphs
             for paragraph in speaker['paragraphs']:
-                story.append(Paragraph(paragraph, content_style))
+                speaker_elements.append(Paragraph(paragraph, content_style))
             
-            # Add spacer between speakers
-            story.append(Spacer(1, 12))
+            # Add minimal spacer between speakers
+            speaker_elements.append(Spacer(1, 8))
+            
+            # Keep speaker content together to avoid splitting
+            story.append(KeepTogether(speaker_elements))
     
     # Build PDF
     doc.build(story)
