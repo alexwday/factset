@@ -204,7 +204,7 @@ def monitor_output(process, state, history):
         
         # Check for stage completion
         if PATTERNS["stage_complete"].search(line):
-            # Send summary notification
+            # Always send summary notification after each run
             if current_run_results["total_downloaded"] > 0:
                 institutions_with_new = [
                     f"{ticker} ({info['new']})"
@@ -222,8 +222,14 @@ def monitor_output(process, state, history):
                     f"Total: {current_run_results['total_downloaded']} transcripts downloaded"
                 )
             else:
-                # Silent when no new transcripts
-                pass
+                # Send notification even when no new transcripts found
+                session_total = state.get('total_transcripts_session', 0)
+                send_notification(
+                    "Sync Complete - No New Transcripts",
+                    "No new transcripts found this run",
+                    f"Session total: {session_total} transcripts today",
+                    sound=False  # Quieter notification for no-activity runs
+                )
     
     return current_run_results
 
