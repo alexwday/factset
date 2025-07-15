@@ -63,10 +63,7 @@ logger = None
 
 @dataclass
 class AnalysisConfig:
-    """Configuration for Stage 4 analysis visualization."""
-    stage_4_output_path: str = "Outputs/Stage4/"
-    stage_4_output_file: str = "stage_4_classified_transcripts.json"
-    ssl_cert_nas_path: str = "Inputs/certificate/certificate.cer"
+    """Simple configuration for analysis visualization - uses existing Stage 4 config."""
     max_token_length: int = 750  # Character limit from Stage 4
     tiktoken_model: str = "gpt-3.5-turbo"
     output_directory: str = "Outputs/Analysis/"
@@ -292,11 +289,14 @@ class TokenAnalyzer:
     
     def analyze_truncation_impact(self, text: str) -> Dict[str, Any]:
         """Analyze the impact of character truncation on token counts."""
+        global config
         if not text:
             return {"original_tokens": 0, "truncated_tokens": 0, "truncation_ratio": 0.0}
         
         original_tokens = self.count_tokens(text)
-        truncated_text = text[:self.analysis_config.max_token_length]
+        # Use the actual Stage 4 config value for max chars
+        max_chars = config.get("stage_4", {}).get("content_limits", {}).get("max_paragraph_chars", 750)
+        truncated_text = text[:max_chars]
         truncated_tokens = self.count_tokens(truncated_text)
         
         truncation_ratio = truncated_tokens / original_tokens if original_tokens > 0 else 1.0
@@ -305,7 +305,7 @@ class TokenAnalyzer:
             "original_tokens": original_tokens,
             "truncated_tokens": truncated_tokens,
             "truncation_ratio": truncation_ratio,
-            "was_truncated": len(text) > self.analysis_config.max_token_length
+            "was_truncated": len(text) > max_chars
         }
     
     def cleanup(self):
@@ -526,7 +526,7 @@ class Stage4Analyzer:
         logger.info("Generating visualizations...")
         
         # Create output directory
-        output_dir = Path(self.config.output_directory)
+        output_dir = Path(self.analysis_config.output_directory)
         output_dir.mkdir(parents=True, exist_ok=True)
         
         visualization_files = {}
@@ -793,9 +793,10 @@ class Stage4Analyzer:
             row=1, col=1
         )
         
-        # Add vertical line at 750 (truncation limit)
+        # Add vertical line at actual truncation limit from config
+        max_chars = config.get("stage_4", {}).get("content_limits", {}).get("max_paragraph_chars", 750)
         fig.add_vline(
-            x=750, line_dash="dash", line_color="red",
+            x=max_chars, line_dash="dash", line_color="red",
             annotation_text="Truncation Limit",
             row=1, col=1
         )
@@ -992,7 +993,7 @@ Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
         
         # Save report
-        report_file = Path(self.config.output_directory) / "analysis_report.md"
+        report_file = Path(self.analysis_config.output_directory) / "analysis_report.md"
         with open(report_file, 'w') as f:
             f.write(report)
         
