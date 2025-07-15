@@ -104,6 +104,9 @@ python stage_6_detailed_classification/6_transcript_detailed_classification.py
 
 # Stage 7: Content enhancement system (implemented)
 python stage_7_content_enhancement/7_transcript_content_enhancement.py
+
+# Test Scripts: Analysis and visualization tools
+python test_scripts/stage_4_analysis_visualizer.py
 ```
 
 **Current Status**: 
