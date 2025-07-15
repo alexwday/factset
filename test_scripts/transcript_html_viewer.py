@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enhanced FactSet Transcript XML to HTML Viewer
+Enhanced FactSet Transcript XML to HTML and PDF Viewer
 Professional-grade financial document viewer with:
 - WCAG 2.1 AA compliance
 - Modern typography system
@@ -8,6 +8,7 @@ Professional-grade financial document viewer with:
 - Print/export capabilities
 - Enhanced color system
 - Paragraph-level copy functionality
+- Clean PDF generation
 
 Part of the FactSet Earnings Transcript Pipeline test suite.
 """
@@ -19,6 +20,12 @@ import os
 import sys
 import json
 from typing import Dict, List, Tuple, Optional
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.colors import HexColor
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 
 def load_monitored_institutions() -> Dict:
     """Load monitored institutions from config file."""
@@ -120,11 +127,17 @@ def parse_transcript_xml(xml_path: str) -> Dict:
             speaker_id = speaker.get('id')
             speaker_type = speaker.get('type', '')  # 'q' or 'a' for Q&A sections
             
-            # Extract paragraphs from plist
+            # Extract paragraphs from plist or directly from speaker
             paragraphs = []
             plist = speaker.find(ns_tag('plist'))
             if plist is not None:
+                # Standard structure: <speaker><plist><p>content</p></plist></speaker>
                 for p in plist.findall(ns_tag('p')):
+                    if p.text:
+                        paragraphs.append(p.text.strip())
+            else:
+                # Alternative structure (NRT): <speaker><p>content</p></speaker>
+                for p in speaker.findall(ns_tag('p')):
                     if p.text:
                         paragraphs.append(p.text.strip())
             
@@ -1167,8 +1180,149 @@ def generate_html(transcript_data: Dict) -> str:
     
     return html_output
 
+def generate_pdf(transcript_data: Dict, output_path: str) -> None:
+    """Generate a clean PDF version of the transcript."""
+    
+    # Create PDF document
+    doc = SimpleDocTemplate(output_path, pagesize=letter,
+                          rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=18)
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    
+    # Define custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=HexColor('#003366'),
+        fontName='Helvetica-Bold'
+    )
+    
+    company_style = ParagraphStyle(
+        'CompanyName',
+        parent=styles['Normal'],
+        fontSize=14,
+        spaceAfter=20,
+        alignment=TA_CENTER,
+        textColor=HexColor('#495057'),
+        fontName='Helvetica'
+    )
+    
+    section_style = ParagraphStyle(
+        'SectionHeader',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=12,
+        spaceBefore=24,
+        textColor=HexColor('#003366'),
+        fontName='Helvetica-Bold'
+    )
+    
+    speaker_style = ParagraphStyle(
+        'SpeakerHeader',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=6,
+        spaceBefore=12,
+        textColor=HexColor('#003366'),
+        fontName='Helvetica-Bold'
+    )
+    
+    speaker_title_style = ParagraphStyle(
+        'SpeakerTitle',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=8,
+        textColor=HexColor('#6C757D'),
+        fontName='Helvetica-Oblique'
+    )
+    
+    content_style = ParagraphStyle(
+        'Content',
+        parent=styles['Normal'],
+        fontSize=11,
+        spaceAfter=12,
+        alignment=TA_JUSTIFY,
+        textColor=HexColor('#212529'),
+        fontName='Helvetica',
+        leftIndent=0.25*inch
+    )
+    
+    # Build PDF content
+    story = []
+    
+    # Add title
+    story.append(Paragraph(transcript_data['title'], title_style))
+    
+    # Add primary company
+    institutions = load_monitored_institutions()
+    primary_company, _ = detect_primary_company(transcript_data, institutions)
+    story.append(Paragraph(primary_company, company_style))
+    
+    # Add date
+    story.append(Paragraph(f"Date: {transcript_data['date']}", company_style))
+    
+    # Add spacer
+    story.append(Spacer(1, 24))
+    
+    # Add participants section
+    if transcript_data['participants']:
+        story.append(Paragraph("Participants", section_style))
+        
+        for p_id, p_data in transcript_data['participants'].items():
+            participant_type = "Company" if p_data['type'] == 'C' else "Analyst" if p_data['type'] == 'A' else p_data['type']
+            participant_info = f"<b>{p_data['name']}</b> - {p_data['title']}"
+            if p_data['affiliation']:
+                participant_info += f", {p_data['affiliation']}"
+            participant_info += f" ({participant_type})"
+            story.append(Paragraph(participant_info, content_style))
+        
+        story.append(PageBreak())
+    
+    # Add transcript sections
+    for section in transcript_data['sections']:
+        story.append(Paragraph(section['name'], section_style))
+        
+        for speaker in section['speakers']:
+            speaker_id = speaker['id']
+            speaker_data = transcript_data['participants'].get(speaker_id, {})
+            speaker_name = speaker_data.get('name', 'Unknown Speaker')
+            speaker_title = speaker_data.get('title', '')
+            speaker_affiliation = speaker_data.get('affiliation', '')
+            
+            # Add speaker header
+            story.append(Paragraph(speaker_name, speaker_style))
+            
+            # Add speaker title and affiliation
+            if speaker_title or speaker_affiliation:
+                title_text = speaker_title
+                if speaker_affiliation:
+                    title_text += f", {speaker_affiliation}" if title_text else speaker_affiliation
+                
+                # Add interaction type if available
+                if speaker['type'] == 'q':
+                    title_text += " [QUESTION]"
+                elif speaker['type'] == 'a':
+                    title_text += " [ANSWER]"
+                
+                story.append(Paragraph(title_text, speaker_title_style))
+            
+            # Add speaker content
+            for paragraph in speaker['paragraphs']:
+                story.append(Paragraph(paragraph, content_style))
+            
+            # Add spacer between speakers
+            story.append(Spacer(1, 12))
+    
+    # Build PDF
+    doc.build(story)
+
 def main():
-    """Main function to parse XML and generate enhanced HTML."""
+    """Main function to parse XML and generate enhanced HTML and clean PDF."""
     if len(sys.argv) != 2:
         print("Usage: python transcript_html_viewer.py <xml_file_path>")
         sys.exit(1)
@@ -1187,14 +1341,21 @@ def main():
         print("Generating enhanced HTML...")
         html_content = generate_html(transcript_data)
         
-        # Write output file
-        output_path = xml_path.rsplit('.', 1)[0] + '_output.html'
-        with open(output_path, 'w', encoding='utf-8') as f:
+        # Write HTML output file
+        html_output_path = xml_path.rsplit('.', 1)[0] + '_output.html'
+        with open(html_output_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
-        print(f"Success! Enhanced HTML output written to: {output_path}")
+        # Generate PDF
+        print("Generating clean PDF...")
+        pdf_output_path = xml_path.rsplit('.', 1)[0] + '_output.pdf'
+        generate_pdf(transcript_data, pdf_output_path)
+        
+        print(f"Success! Output files generated:")
+        print(f"  HTML: {html_output_path}")
+        print(f"  PDF:  {pdf_output_path}")
         print(f"Features included:")
-        print(f"  ✓ WCAG 2.1 AA compliant design")
+        print(f"  ✓ WCAG 2.1 AA compliant HTML design")
         print(f"  ✓ Modern typography system")
         print(f"  ✓ Full-text search functionality")
         print(f"  ✓ Print and export capabilities")
@@ -1202,7 +1363,9 @@ def main():
         print(f"  ✓ Paragraph-level copy functionality")
         print(f"  ✓ Keyboard navigation support")
         print(f"  ✓ Mobile-responsive design")
-        print(f"Open the file in a web browser to view the enhanced transcript.")
+        print(f"  ✓ Clean PDF generation with professional layout")
+        print(f"Open the HTML file in a web browser to view the enhanced transcript.")
+        print(f"The PDF file provides a clean, print-ready version of the transcript.")
         
     except ET.ParseError as e:
         print(f"Error parsing XML: {e}")
