@@ -1009,14 +1009,16 @@ def get_daily_transcripts_by_date(api_instance: transcripts_api.TranscriptsApi,
     global logger, config
     logger.info(f"Querying transcripts for date: {target_date}")
     
-    try:
-        # Use date-based API endpoint instead of company-based
-        response = api_instance.get_transcripts_dates(
-            start_date=target_date,
-            end_date=target_date,
-            sort=["-storyDateTime"],
-            pagination_limit=1000  # Maximum to get all results
-        )
+    # Implement retry logic using config settings
+    for attempt in range(config['api_settings']['max_retries']):
+        try:
+            # Use date-based API endpoint instead of company-based
+            response = api_instance.get_transcripts_dates(
+                start_date=target_date,
+                end_date=target_date,
+                sort=["-storyDateTime"],
+                pagination_limit=1000  # Maximum to get all results
+            )
         
         if not response or not hasattr(response, 'data') or not response.data:
             logger.info(f"No transcripts found for date: {target_date}")
@@ -1048,11 +1050,27 @@ def get_daily_transcripts_by_date(api_instance: transcripts_api.TranscriptsApi,
         
         logger.info(f"Filtered to {len(filtered_transcripts)} earnings transcripts for monitored institutions")
         
-        return filtered_transcripts
-        
-    except Exception as e:
-        logger.error(f"Error querying transcripts for date {target_date}: {e}")
-        return []
+            return filtered_transcripts
+            
+        except Exception as e:
+            if attempt < config['api_settings']['max_retries'] - 1:
+                # Calculate delay with exponential backoff if enabled
+                if config['api_settings'].get('use_exponential_backoff', False):
+                    base_delay = config['api_settings']['retry_delay']
+                    max_delay = config['api_settings'].get('max_backoff_delay', 120.0)
+                    exponential_delay = base_delay * (2 ** attempt)
+                    actual_delay = min(exponential_delay, max_delay)
+                    logger.warning(f"API query attempt {attempt + 1} failed, retrying in {actual_delay:.1f}s (exponential backoff): {e}")
+                else:
+                    actual_delay = config['api_settings']['retry_delay']
+                    logger.warning(f"API query attempt {attempt + 1} failed, retrying in {actual_delay:.1f}s: {e}")
+                
+                time.sleep(actual_delay)
+            else:
+                logger.error(f"API query failed after {attempt + 1} attempts for date {target_date}: {e}")
+                return []
+    
+    return []
 
 
 def process_bank(ticker: str, institution_info: Dict[str, str], 
