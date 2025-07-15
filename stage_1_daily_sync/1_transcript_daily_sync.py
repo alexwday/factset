@@ -1019,37 +1019,36 @@ def get_daily_transcripts_by_date(api_instance: transcripts_api.TranscriptsApi,
                 sort=["-storyDateTime"],
                 pagination_limit=1000  # Maximum to get all results
             )
-        
-        if not response or not hasattr(response, 'data') or not response.data:
-            logger.info(f"No transcripts found for date: {target_date}")
-            return []
-        
-        # Validate API response structure
-        if not validate_api_response_structure(response):
-            logger.error(f"Invalid API response structure for date: {target_date}")
-            return []
-        
-        all_transcripts = [transcript.to_dict() for transcript in response.data]
-        logger.info(f"Found {len(all_transcripts)} total transcripts for date: {target_date}")
-        
-        # Filter to only transcripts where one of our monitored tickers is the ONLY primary ID
-        filtered_transcripts = []
-        for transcript in all_transcripts:
-            primary_ids = transcript.get('primary_ids', [])
             
-            # Validate that primary_ids is actually a list
-            if not isinstance(primary_ids, list):
-                logger.warning(f"Invalid primary_ids type for transcript: {type(primary_ids)}")
-                continue
+            if not response or not hasattr(response, 'data') or not response.data:
+                logger.info(f"No transcripts found for date: {target_date}")
+                return []
             
-            # Check if exactly one primary ID and it's one of our monitored tickers
-            if len(primary_ids) == 1 and primary_ids[0] in monitored_tickers:
-                # Also filter for earnings transcripts
-                if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', '')):
-                    filtered_transcripts.append((transcript, primary_ids[0]))
-        
-        logger.info(f"Filtered to {len(filtered_transcripts)} earnings transcripts for monitored institutions")
-        
+            # Validate API response structure
+            if not validate_api_response_structure(response):
+                logger.error(f"Invalid API response structure for date: {target_date}")
+                return []
+            
+            all_transcripts = [transcript.to_dict() for transcript in response.data]
+            logger.info(f"Found {len(all_transcripts)} total transcripts for date: {target_date}")
+            
+            # Filter to only transcripts where one of our monitored tickers is the ONLY primary ID
+            filtered_transcripts = []
+            for transcript in all_transcripts:
+                primary_ids = transcript.get('primary_ids', [])
+                
+                # Validate that primary_ids is actually a list
+                if not isinstance(primary_ids, list):
+                    logger.warning(f"Invalid primary_ids type for transcript: {type(primary_ids)}")
+                    continue
+                
+                # Check if exactly one primary ID and it's one of our monitored tickers
+                if len(primary_ids) == 1 and primary_ids[0] in monitored_tickers:
+                    # Also filter for earnings transcripts
+                    if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', '')):
+                        filtered_transcripts.append((transcript, primary_ids[0]))
+            
+            logger.info(f"Filtered to {len(filtered_transcripts)} earnings transcripts for monitored institutions")
             return filtered_transcripts
             
         except Exception as e:
