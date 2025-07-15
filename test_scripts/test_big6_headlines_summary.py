@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-StreetAccountNews Basic Headlines Test Script
+Big 6 Canadian Banks - Headlines Summary
 
-This script retrieves and displays today's financial services headlines using
-basic filtering capabilities of the StreetAccountNews API.
+This script retrieves headlines for the Big 6 Canadian banks and displays:
+- Headlines with bank ticker and date
+- Clean, focused output for quick scanning
 
 Author: Generated with Claude Code
 Date: 2024-07-15
@@ -12,9 +13,8 @@ Date: 2024-07-15
 import os
 import sys
 import json
-import time
 import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 import logging
@@ -31,6 +31,7 @@ from fds.sdk.StreetAccountNews.model.headlines_request import HeadlinesRequest
 from fds.sdk.StreetAccountNews.model.headlines_request_data import HeadlinesRequestData
 from fds.sdk.StreetAccountNews.model.headlines_request_meta import HeadlinesRequestMeta
 from fds.sdk.StreetAccountNews.model.headlines_request_meta_pagination import HeadlinesRequestMetaPagination
+from fds.sdk.StreetAccountNews.model.headlines_request_tickers_object import HeadlinesRequestTickersObject
 
 # Suppress pandas warnings
 pd.options.mode.chained_assignment = None
@@ -40,11 +41,20 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('streetaccount_headlines_basic_test.log')
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Big 6 Canadian Banks
+BIG_6_BANKS = {
+    "RY-CA": "Royal Bank of Canada",
+    "TD-CA": "Toronto-Dominion Bank", 
+    "BNS-CA": "Bank of Nova Scotia",
+    "BMO-CA": "Bank of Montreal",
+    "CM-CA": "Canadian Imperial Bank of Commerce",
+    "NA-CA": "National Bank of Canada"
+}
 
 def load_environment_variables() -> bool:
     """Load and validate environment variables."""
@@ -64,30 +74,6 @@ def load_environment_variables() -> bool:
     
     logger.info("✅ All required environment variables loaded")
     return True
-
-def validate_file_path(path: str) -> bool:
-    """Prevent directory traversal attacks."""
-    if '..' in path or path.startswith('/'):
-        logger.error(f"Invalid file path: {path}")
-        return False
-    return True
-
-def validate_nas_path(path: str) -> bool:
-    """Ensure safe NAS paths only."""
-    if not path.startswith(('Inputs/', 'Outputs/')):
-        logger.error(f"Invalid NAS path: {path}")
-        return False
-    return True
-
-def sanitize_url_for_logging(url: str) -> str:
-    """Remove auth tokens from URLs before logging."""
-    if '@' in url:
-        return url.split('@')[1]
-    return url
-
-def sanitize_headline_for_logging(headline: str) -> str:
-    """Remove sensitive information from headlines before logging."""
-    return headline[:100] + "..." if len(headline) > 100 else headline
 
 def get_nas_connection() -> Optional[SMBConnection]:
     """Create and return NAS connection."""
@@ -109,7 +95,7 @@ def get_nas_connection() -> Optional[SMBConnection]:
         )
         
         if conn.connect(nas_server_ip, nas_port):
-            logger.info(f"✅ Connected to NAS: {sanitize_url_for_logging(nas_server_name)}")
+            logger.info("✅ Connected to NAS")
             return conn
         else:
             logger.error("❌ Failed to connect to NAS")
@@ -122,9 +108,6 @@ def get_nas_connection() -> Optional[SMBConnection]:
 def nas_download_file(conn: SMBConnection, nas_path: str) -> Optional[bytes]:
     """Download file from NAS."""
     try:
-        if not validate_nas_path(nas_path):
-            return None
-            
         share_name = os.getenv('NAS_SHARE_NAME')
         base_path = os.getenv('NAS_BASE_PATH')
         full_path = f"{base_path}/{nas_path}"
@@ -187,11 +170,11 @@ def setup_proxy_authentication() -> str:
     escaped_domain = quote(proxy_domain + '\\\\' + user)
     full_proxy_url = f"http://{escaped_domain}:{password}@{proxy_url}"
     
-    logger.info(f"✅ Proxy configured: {sanitize_url_for_logging(full_proxy_url)}")
+    logger.info("✅ Proxy configured")
     return full_proxy_url
 
-def get_financial_headlines_today() -> Optional[List[Dict[str, Any]]]:
-    """Retrieve today's financial services headlines."""
+def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
+    """Retrieve headlines for Big 6 Canadian banks."""
     nas_conn = None
     temp_cert_path = None
     
@@ -221,21 +204,28 @@ def get_financial_headlines_today() -> Optional[List[Dict[str, Any]]]:
             ssl_ca_cert=temp_cert_path
         )
         
-        # Prepare request for financial headlines
+        # Create ticker objects for Big 6 banks
+        bank_tickers = [
+            HeadlinesRequestTickersObject(value=ticker, type="Ticker")
+            for ticker in BIG_6_BANKS.keys()
+        ]
+        
+        # Prepare request for Big 6 bank headlines
         headlines_request = HeadlinesRequest(
             data=HeadlinesRequestData(
-                sectors=["Financial"],  # Focus on financial sector
-                categories=["Earnings", "Corporate Actions", "Company News"],
-                regions=["North America"],  # Focus on North American companies
-                is_primary=True,  # Only primary company news
-                predefined_range="today"  # Today's headlines only
+                tickers=bank_tickers,
+                categories=["Earnings", "Corporate Actions", "Company News", "Guidance"],
+                sectors=["Financial"],
+                regions=["North America"],
+                is_primary=True,
+                predefined_range="today"
             ),
             meta=HeadlinesRequestMeta(
                 pagination=HeadlinesRequestMetaPagination(
-                    limit=100,  # Get up to 100 headlines
+                    limit=200,
                     offset=0
                 ),
-                attributes=["headlines"]  # Include headline content
+                attributes=["headlines"]
             )
         )
         
@@ -245,28 +235,27 @@ def get_financial_headlines_today() -> Optional[List[Dict[str, Any]]]:
         with streetaccount.ApiClient(configuration) as api_client:
             api_instance = headlines_api.HeadlinesApi(api_client)
             
-            logger.info("📰 Retrieving today's financial services headlines...")
+            logger.info("📰 Retrieving Big 6 Canadian bank headlines...")
             
             try:
                 response = api_instance.get_street_account_headlines(headlines_request)
                 
                 if response and response.data:
                     for headline_item in response.data:
+                        # Extract relevant fields
                         headline_data = {
                             'headline': getattr(headline_item, 'headline', 'No headline'),
                             'publish_time': getattr(headline_item, 'publish_time', None),
                             'tickers': getattr(headline_item, 'tickers', []),
-                            'categories': getattr(headline_item, 'categories', []),
-                            'sectors': getattr(headline_item, 'sectors', []),
-                            'regions': getattr(headline_item, 'regions', []),
                             'story_id': getattr(headline_item, 'story_id', None),
-                            'story_body': getattr(headline_item, 'story_body', '')
+                            'categories': getattr(headline_item, 'categories', []),
+                            'source': getattr(headline_item, 'source', 'StreetAccount')
                         }
                         headlines_data.append(headline_data)
                     
                     logger.info(f"✅ Retrieved {len(headlines_data)} headlines")
                 else:
-                    logger.warning("⚠️  No headlines data received")
+                    logger.warning("⚠️  No headlines found for Big 6 banks today")
                     
             except Exception as e:
                 logger.error(f"❌ Headlines retrieval failed: {e}")
@@ -275,7 +264,7 @@ def get_financial_headlines_today() -> Optional[List[Dict[str, Any]]]:
         return headlines_data
         
     except Exception as e:
-        logger.error(f"❌ Financial headlines retrieval failed: {e}")
+        logger.error(f"❌ Big 6 headlines retrieval failed: {e}")
         return None
         
     finally:
@@ -285,142 +274,100 @@ def get_financial_headlines_today() -> Optional[List[Dict[str, Any]]]:
         if temp_cert_path and os.path.exists(temp_cert_path):
             os.unlink(temp_cert_path)
 
-def analyze_headlines_by_category(headlines: List[Dict[str, Any]]) -> Dict[str, int]:
-    """Analyze headlines by category."""
-    category_counts = {}
+def display_headlines_summary(headlines: List[Dict[str, Any]]) -> None:
+    """Display clean headlines summary for Big 6 banks."""
+    print("\\n" + "="*100)
+    print("🏦 BIG 6 CANADIAN BANKS - HEADLINES SUMMARY")
+    print("="*100)
     
-    for headline in headlines:
-        categories = headline.get('categories', [])
-        for category in categories:
-            category_counts[category] = category_counts.get(category, 0) + 1
+    if not headlines:
+        print("❌ No headlines found for Big 6 banks today")
+        return
     
-    return category_counts
-
-def analyze_headlines_by_sector(headlines: List[Dict[str, Any]]) -> Dict[str, int]:
-    """Analyze headlines by sector."""
-    sector_counts = {}
-    
-    for headline in headlines:
-        sectors = headline.get('sectors', [])
-        for sector in sectors:
-            sector_counts[sector] = sector_counts.get(sector, 0) + 1
-    
-    return sector_counts
-
-def get_top_tickers(headlines: List[Dict[str, Any]], top_n: int = 10) -> List[tuple]:
-    """Get top mentioned tickers."""
-    ticker_counts = {}
-    
+    # Group headlines by bank
+    bank_headlines = {}
     for headline in headlines:
         tickers = headline.get('tickers', [])
         for ticker in tickers:
             ticker_symbol = ticker if isinstance(ticker, str) else ticker.get('symbol', 'Unknown')
-            ticker_counts[ticker_symbol] = ticker_counts.get(ticker_symbol, 0) + 1
+            if ticker_symbol in BIG_6_BANKS:
+                if ticker_symbol not in bank_headlines:
+                    bank_headlines[ticker_symbol] = []
+                bank_headlines[ticker_symbol].append(headline)
     
-    return sorted(ticker_counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
-
-def display_headlines_summary(headlines: List[Dict[str, Any]]) -> None:
-    """Display comprehensive headlines summary."""
-    print("\\n" + "="*70)
-    print("📰 FINANCIAL SERVICES HEADLINES - Today")
-    print("="*70)
-    
-    if not headlines:
-        print("❌ No headlines found for today")
-        return
-    
-    print(f"✅ Total Headlines Found: {len(headlines)}")
-    
-    # Category analysis
-    category_counts = analyze_headlines_by_category(headlines)
-    if category_counts:
-        print("\\n📊 Headlines by Category:")
-        for category, count in sorted(category_counts.items(), key=lambda x: x[1], reverse=True):
-            print(f"   📈 {category}: {count} headlines")
-    
-    # Sector analysis
-    sector_counts = analyze_headlines_by_sector(headlines)
-    if sector_counts:
-        print("\\n🏢 Headlines by Sector:")
-        for sector, count in sorted(sector_counts.items(), key=lambda x: x[1], reverse=True):
-            print(f"   🏦 {sector}: {count} headlines")
-    
-    # Top tickers
-    top_tickers = get_top_tickers(headlines, 10)
-    if top_tickers:
-        print("\\n🔝 Most Mentioned Tickers:")
-        for ticker, count in top_tickers:
-            print(f"   💹 {ticker}: {count} mentions")
-    
-    # Recent headlines sample
-    print("\\n📋 Recent Headlines Sample:")
-    recent_headlines = sorted(headlines, 
-                            key=lambda x: x.get('publish_time', ''), 
-                            reverse=True)[:10]
-    
-    for i, headline in enumerate(recent_headlines, 1):
-        headline_text = headline.get('headline', 'No headline')
-        publish_time = headline.get('publish_time', 'Unknown time')
-        tickers = headline.get('tickers', [])
+    # Display by bank
+    for ticker in BIG_6_BANKS.keys():
+        bank_name = BIG_6_BANKS[ticker]
+        bank_news = bank_headlines.get(ticker, [])
         
-        # Format tickers
-        ticker_str = ', '.join(tickers[:3]) if tickers else 'No tickers'
-        if len(tickers) > 3:
-            ticker_str += f" (+{len(tickers) - 3} more)"
+        print(f"\\n🏦 {bank_name} ({ticker}) - {len(bank_news)} headlines")
+        print("-" * 60)
         
-        print(f"   {i:2d}. {headline_text[:80]}...")
-        print(f"       🏦 {ticker_str} | ⏰ {publish_time}")
-        print()
-
-def export_headlines_analysis(headlines: List[Dict[str, Any]]) -> None:
-    """Export headlines analysis to JSON file."""
-    try:
-        timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
-        filename = f"streetaccount_headlines_basic_{timestamp}.json"
+        if not bank_news:
+            print("   📰 No news found for today")
+            continue
+            
+        # Sort by publish time (newest first)
+        bank_news.sort(key=lambda x: x.get('publish_time', ''), reverse=True)
         
-        # Prepare export data
-        export_data = {
-            'timestamp': timestamp,
-            'analysis_date': datetime.now(timezone.utc).isoformat(),
-            'total_headlines': len(headlines),
-            'category_analysis': analyze_headlines_by_category(headlines),
-            'sector_analysis': analyze_headlines_by_sector(headlines),
-            'top_tickers': get_top_tickers(headlines, 20),
-            'headlines_sample': headlines[:20]  # Export first 20 headlines
-        }
-        
-        with open(filename, 'w') as f:
-            json.dump(export_data, f, indent=2, default=str)
-        
-        print(f"\\n💾 Headlines analysis exported to: {filename}")
-        
-    except Exception as e:
-        logger.error(f"❌ Export failed: {e}")
+        for i, headline in enumerate(bank_news, 1):
+            headline_text = headline.get('headline', 'No headline')
+            publish_time = headline.get('publish_time', 'Unknown time')
+            categories = headline.get('categories', [])
+            
+            # Format publish time
+            if publish_time and publish_time != 'Unknown time':
+                try:
+                    dt = datetime.fromisoformat(publish_time.replace('Z', '+00:00'))
+                    time_str = dt.strftime('%Y-%m-%d %H:%M AST')
+                except:
+                    time_str = publish_time
+            else:
+                time_str = 'Unknown time'
+            
+            # Format categories
+            categories_str = ', '.join(categories) if categories else 'General'
+            
+            print(f"   {i:2d}. {headline_text}")
+            print(f"       ⏰ {time_str} | 📂 {categories_str}")
+            print()
+    
+    # Summary statistics
+    total_headlines = len(headlines)
+    banks_with_news = len(bank_headlines)
+    
+    print("\\n" + "="*60)
+    print("📊 SUMMARY STATISTICS")
+    print("="*60)
+    print(f"Total Headlines: {total_headlines}")
+    print(f"Banks with News: {banks_with_news}/6")
+    print(f"Average Headlines per Bank: {total_headlines/6:.1f}")
+    
+    if bank_headlines:
+        most_active = max(bank_headlines.items(), key=lambda x: len(x[1]))
+        print(f"Most Active: {BIG_6_BANKS[most_active[0]]} ({len(most_active[1])} headlines)")
 
 def main():
     """Main execution function."""
-    print("🚀 Starting StreetAccountNews Basic Headlines Analysis...")
-    print("="*70)
+    print("🚀 Starting Big 6 Canadian Banks Headlines Summary...")
+    print("="*80)
     
     # Load environment
     if not load_environment_variables():
         sys.exit(1)
     
     # Get headlines data
-    headlines = get_financial_headlines_today()
-    if not headlines:
+    headlines = get_big6_headlines()
+    if headlines is None:
         logger.error("❌ Failed to retrieve headlines data")
         sys.exit(1)
     
-    # Display analysis
+    # Display summary
     display_headlines_summary(headlines)
     
-    # Export analysis
-    export_headlines_analysis(headlines)
-    
-    print("\\n" + "="*70)
-    print("✅ StreetAccountNews Basic Headlines Analysis Complete!")
-    print("="*70)
+    print("\\n" + "="*80)
+    print("✅ Big 6 Canadian Banks Headlines Summary Complete!")
+    print("="*80)
 
 if __name__ == "__main__":
     main()
