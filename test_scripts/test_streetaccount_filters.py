@@ -22,7 +22,7 @@ import logging
 # Third-party imports
 import pandas as pd
 from dotenv import load_dotenv
-from pysmb.SMBConnection import SMBConnection
+from smb.SMBConnection import SMBConnection
 
 # FactSet SDK imports
 import fds.sdk.StreetAccountNews as streetaccount
@@ -227,7 +227,7 @@ def get_streetaccount_filters() -> Optional[Dict[str, Any]]:
             
             # Get Categories
             try:
-                categories_response = api_instance.get_street_account_news_categories()
+                categories_response = api_instance.get_street_account_filters_categories()
                 if categories_response and categories_response.data:
                     filters_data['categories'] = [item.name for item in categories_response.data]
                     logger.info(f"✅ Categories retrieved: {len(filters_data['categories'])}")
@@ -240,7 +240,7 @@ def get_streetaccount_filters() -> Optional[Dict[str, Any]]:
             
             # Get Sectors  
             try:
-                sectors_response = api_instance.get_street_account_news_sectors()
+                sectors_response = api_instance.get_street_account_filters_sectors()
                 if sectors_response and sectors_response.data:
                     filters_data['sectors'] = [item.name for item in sectors_response.data]
                     logger.info(f"✅ Sectors retrieved: {len(filters_data['sectors'])}")
@@ -253,7 +253,7 @@ def get_streetaccount_filters() -> Optional[Dict[str, Any]]:
             
             # Get Regions
             try:
-                regions_response = api_instance.get_street_account_news_regions()
+                regions_response = api_instance.get_street_account_filters_regions()
                 if regions_response and regions_response.data:
                     filters_data['regions'] = [item.name for item in regions_response.data]
                     logger.info(f"✅ Regions retrieved: {len(filters_data['regions'])}")
@@ -266,7 +266,7 @@ def get_streetaccount_filters() -> Optional[Dict[str, Any]]:
             
             # Get Topics
             try:
-                topics_response = api_instance.get_street_account_news_topics()
+                topics_response = api_instance.get_street_account_filters_topics()
                 if topics_response and topics_response.data:
                     filters_data['topics'] = [item.name for item in topics_response.data]
                     logger.info(f"✅ Topics retrieved: {len(filters_data['topics'])}")

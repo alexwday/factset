@@ -22,7 +22,7 @@ import logging
 # Third-party imports
 import pandas as pd
 from dotenv import load_dotenv
-from pysmb.SMBConnection import SMBConnection
+from smb.SMBConnection import SMBConnection
 
 # FactSet SDK imports
 import fds.sdk.StreetAccountNews as streetaccount
@@ -248,7 +248,7 @@ def get_financial_headlines_today() -> Optional[List[Dict[str, Any]]]:
             logger.info("📰 Retrieving today's financial services headlines...")
             
             try:
-                response = api_instance.get_street_account_news_headlines(headlines_request)
+                response = api_instance.get_street_account_headlines(headlines_request)
                 
                 if response and response.data:
                     for headline_item in response.data:
