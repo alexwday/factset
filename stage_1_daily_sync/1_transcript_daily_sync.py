@@ -1102,8 +1102,7 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
             logger.info(f"No transcripts found for {ticker}")
             return bank_downloads
         
-        # Create ticker directory structure since we found transcripts
-        create_ticker_directory_structure(nas_conn, ticker, institution_type)
+        # Directory structure will be created during download with enhanced structure
         bank_downloads['found_transcripts'] = True
         
         total_downloaded = 0

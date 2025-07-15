@@ -67,7 +67,8 @@ def load_state():
         try:
             with open(STATE_FILE, 'r') as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, FileNotFoundError, OSError) as e:
+            print(f"Failed to load state: {e}")
             pass
     return {
         "last_run": None,
@@ -95,7 +96,8 @@ def load_history():
         try:
             with open(HISTORY_FILE, 'r') as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, FileNotFoundError, OSError) as e:
+            print(f"Failed to load history: {e}")
             pass
     return {"transcripts": {}, "last_updated": None}
 
