@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Earnings Transcript Monitor
-Runs Stage 1 daily sync every 5 minutes and provides real-time GUI notifications
+Runs Stage 1 daily sync every 5 minutes and provides real-time macOS notifications
 for new earnings transcripts. Perfect for monitoring during earnings season!
 """
 
@@ -16,10 +16,6 @@ from datetime import datetime
 from pathlib import Path
 import re
 from collections import defaultdict
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout
-from PyQt5.QtCore import QTimer, Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont
-import queue
 
 # Configuration
 SCRIPT_PATH = Path(__file__).parent / "1_transcript_daily_sync.py"
@@ -42,71 +38,28 @@ PATTERNS = {
 # Global flag for graceful shutdown
 shutdown_requested = False
 monitor_thread = None
-qt_app = None
-notification_queue = queue.Queue()
-
-class NotificationWindow(QWidget):
-    """PyQt5 notification window that auto-closes."""
-    def __init__(self, title, message, subtitle=None, duration=5000):
-        super().__init__()
-        self.setWindowTitle(title)
-        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)
-        
-        # Set up layout
-        layout = QVBoxLayout()
-        
-        # Title label
-        title_label = QLabel(title)
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        layout.addWidget(title_label)
-        
-        # Subtitle label (if provided)
-        if subtitle:
-            subtitle_label = QLabel(subtitle)
-            subtitle_font = QFont()
-            subtitle_font.setPointSize(11)
-            subtitle_label.setFont(subtitle_font)
-            subtitle_label.setStyleSheet("color: #666;")
-            layout.addWidget(subtitle_label)
-        
-        # Message label
-        message_label = QLabel(message)
-        message_font = QFont()
-        message_font.setPointSize(12)
-        message_label.setFont(message_font)
-        layout.addWidget(message_label)
-        
-        self.setLayout(layout)
-        
-        # Style the window
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f0f0f0;
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                padding: 10px;
-            }
-        """)
-        
-        # Position in top-right corner
-        self.adjustSize()
-        screen = QApplication.desktop().screenGeometry()
-        self.move(screen.width() - self.width() - 20, 40)
-        
-        # Auto-close timer
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.close)
-        self.timer.start(duration)
-        
-        self.show()
 
 def send_notification(title, message, subtitle=None, sound=True):
-    """Queue notification for display in Qt thread."""
-    notification_queue.put((title, message, subtitle))
+    """Send enhanced macOS notification."""
+    try:
+        script_parts = [f'display notification "{message}"']
+        script_parts.append(f'with title "{title}"')
+        
+        if subtitle:
+            script_parts.append(f'subtitle "{subtitle}"')
+        
+        if sound:
+            script_parts.append('sound name "Glass"')
+        
+        script = " ".join(script_parts)
+        
+        subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True
+        )
+    except Exception as e:
+        print(f"Failed to send notification: {e}")
 
 def load_state():
     """Load monitor state."""
@@ -175,34 +128,15 @@ def monitor_output(process, state, history):
         "new_transcripts": [],
         "updated_transcripts": [],
         "institutions": defaultdict(lambda: {"new": 0, "updated": 0, "total": 0}),
-        "total_downloaded": 0,
-        "has_activity": False
+        "total_downloaded": 0
     }
-    
-    # Track if we're in verbose mode (when transcripts are found)
-    verbose_mode = False
     
     for line in iter(process.stdout.readline, ''):
         if not line:
             break
         
         line = line.strip()
-        
-        # Detect if we have transcript activity
-        if any(pattern in line for pattern in [
-            "Found", "Downloaded", "new transcript", "updated", 
-            "Processing:", "Completed"
-        ]) and not "No transcripts found" in line:
-            verbose_mode = True
-            current_run_results["has_activity"] = True
-        
-        # Only print detailed logs if we have activity
-        if verbose_mode or "STAGE 1 DAILY SYNC COMPLETE" in line:
-            print(line)
-        elif "No new transcripts found" in line or "Discovery complete: No new transcripts" in line:
-            # Simple one-liner for no activity
-            timestamp = datetime.now().strftime('%H:%M:%S')
-            print(f"[{timestamp}] No new transcripts found - monitoring continues...")
+        print(line)  # Echo to terminal
         
         # Check for new transcript downloads
         match = PATTERNS["new_download"].search(line)
@@ -293,9 +227,7 @@ def monitor_output(process, state, history):
 
 def run_stage_1_with_monitoring(state, history):
     """Run Stage 1 with real-time monitoring."""
-    # Only print starting message if we had activity in the last run
-    if state.get("last_run_had_activity", False):
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting Stage 1 daily sync...")
+    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting Stage 1 daily sync...")
     
     try:
         # Start the process
@@ -352,34 +284,9 @@ def format_status_notification(state):
             sound=False
         )
 
-class NotificationHandler(QThread):
-    """Handles notifications in Qt thread."""
-    def __init__(self):
-        super().__init__()
-        self.active = True
-        
-    def run(self):
-        """Process notification queue."""
-        while self.active:
-            try:
-                # Check for notifications with timeout
-                title, message, subtitle = notification_queue.get(timeout=0.1)
-                
-                # Create and show notification
-                notification = NotificationWindow(title, message, subtitle)
-                
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"Notification handler error: {e}")
-                
-    def stop(self):
-        """Stop the notification handler."""
-        self.active = False
-
 def main():
     """Main monitor loop."""
-    global shutdown_requested, qt_app
+    global shutdown_requested
     
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
@@ -389,24 +296,16 @@ def main():
     print("=" * 60)
     print(f"\nChecking for new transcripts every {RUN_FREQUENCY // 60} minutes")
     print("\nFeatures:")
-    print("  ✓ Real-time GUI popup notifications for each new transcript")
+    print("  ✓ Real-time popup notifications for each new transcript")
     print("  ✓ Summary notifications after each run")
     print("  ✓ Tracks all banks with activity")
     print("  ✓ Automatic version management")
-    print("  ✓ Streamlined logging (minimal when no activity)")
     print("\nRequirements:")
     print("  • config.json on NAS must have stage_1 settings")
     print("  • .env file with all credentials")
-    print("  • PyQt5 installed (pip install PyQt5)")
+    print("  • macOS notification permissions enabled")
     print("\nPress Ctrl+C to stop")
     print("-" * 60)
-    
-    # Initialize Qt application
-    qt_app = QApplication(sys.argv)
-    
-    # Start notification handler thread
-    notification_handler = NotificationHandler()
-    notification_handler.start()
     
     # Send startup notification
     send_notification(
@@ -441,7 +340,6 @@ def main():
                 # Update state
                 state["last_run"] = datetime.now().isoformat()
                 state["total_transcripts_session"] += results["total_downloaded"]
-                state["last_run_had_activity"] = results.get("has_activity", False)
                 save_state(state)
                 
                 # Update history
@@ -462,9 +360,7 @@ def main():
             
             # Wait for next run
             if not shutdown_requested:
-                # Only print "next run" message if we had activity
-                if results and results.get("has_activity", False):
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Next run in {RUN_FREQUENCY // 60} minutes...")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Next run in {RUN_FREQUENCY // 60} minutes...")
                 for _ in range(RUN_FREQUENCY):
                     if shutdown_requested:
                         break
@@ -500,13 +396,6 @@ def main():
             "No new transcripts were found during this session",
             f"Ran {runs} times"
         )
-    
-    # Stop notification handler
-    notification_handler.stop()
-    notification_handler.wait()
-    
-    # Clean up Qt application
-    qt_app.quit()
 
 if __name__ == "__main__":
     main()

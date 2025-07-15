@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Earnings Transcript Monitor with PyQt5 Notifications
-Runs Stage 1 daily sync every 5 minutes and provides real-time GUI notifications
+Earnings Transcript Monitor
+Runs Stage 1 daily sync every 5 minutes and provides real-time macOS notifications
 for new earnings transcripts. Perfect for monitoring during earnings season!
 """
 
@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import signal
+import threading
 from datetime import datetime
 from pathlib import Path
 import re
@@ -25,94 +26,40 @@ HISTORY_FILE = Path(__file__).parent / ".transcript_history.json"
 # Enhanced regex patterns for parsing
 PATTERNS = {
     "processing": re.compile(r"Processing: (.+?) \((.+?)\) - (\d+) transcripts"),
-    "new_download": re.compile(r"Successfully saved (.+?) to .+ \([\d,]+ bytes\)"),
+    "new_download": re.compile(r"Downloaded and uploaded (.+?) \([\d,]+ bytes\)"),
     "updated_version": re.compile(r"Downloaded updated version: (.+)"),
     "completed": re.compile(r"Completed (.+?): Downloaded (\d+) new transcripts total"),
     "found_new": re.compile(r"Found (\d+) new and (\d+) updated (.+?) transcripts to download"),
-    "stage_complete": re.compile(r"STAGE 1 DAILY SYNC .+ COMPLETE"),
+    "stage_complete": re.compile(r"STAGE 1 DAILY SYNC COMPLETE"),
     "total_downloaded": re.compile(r"Total new transcripts downloaded: (\d+)"),
-    "no_transcripts": re.compile(r"No transcripts found for (.+)"),
-    "no_new_transcripts": re.compile(r"No new transcripts found")
+    "no_transcripts": re.compile(r"No transcripts found for (.+)")
 }
 
 # Global flag for graceful shutdown
 shutdown_requested = False
+monitor_thread = None
 
-def show_pyqt5_notification(title, message, subtitle=None):
-    """Display a PyQt5 notification window."""
+def send_notification(title, message, subtitle=None, sound=True):
+    """Send enhanced macOS notification."""
     try:
-        # Create a small Python script to show the notification
-        script_content = f'''
-import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout
-from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtGui import QFont
-
-app = QApplication(sys.argv)
-
-window = QWidget()
-window.setWindowTitle("{title}")
-window.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
-window.setAttribute(Qt.WA_ShowWithoutActivating)
-
-layout = QVBoxLayout()
-
-# Title
-title_label = QLabel("{title}")
-title_font = QFont()
-title_font.setPointSize(14)
-title_font.setBold(True)
-title_label.setFont(title_font)
-layout.addWidget(title_label)
-
-# Subtitle
-if "{subtitle}":
-    subtitle_label = QLabel("{subtitle}")
-    subtitle_font = QFont()
-    subtitle_font.setPointSize(11)
-    subtitle_label.setFont(subtitle_font)
-    subtitle_label.setStyleSheet("color: #666;")
-    layout.addWidget(subtitle_label)
-
-# Message
-message_label = QLabel("{message}")
-message_font = QFont()
-message_font.setPointSize(12)
-message_label.setFont(message_font)
-layout.addWidget(message_label)
-
-window.setLayout(layout)
-window.setStyleSheet("""
-    QWidget {{
-        background-color: #f0f0f0;
-        border: 1px solid #ccc;
-        border-radius: 5px;
-        padding: 15px;
-        margin: 10px;
-    }}
-""")
-
-# Position and show
-window.adjustSize()
-screen = app.desktop().screenGeometry()
-window.move(screen.width() - window.width() - 20, 40)
-window.show()
-
-# Auto-close after 5 seconds
-QTimer.singleShot(5000, app.quit)
-
-app.exec_()
-'''
+        script_parts = [f'display notification "{message}"']
+        script_parts.append(f'with title "{title}"')
         
-        # Execute the script in a subprocess
-        subprocess.Popen(
-            [sys.executable, "-c", script_content],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+        if subtitle:
+            script_parts.append(f'subtitle "{subtitle}"')
+        
+        if sound:
+            script_parts.append('sound name "Glass"')
+        
+        script = " ".join(script_parts)
+        
+        subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True
         )
-        
     except Exception as e:
-        print(f"Failed to show notification: {e}")
+        print(f"Failed to send notification: {e}")
 
 def load_state():
     """Load monitor state."""
@@ -126,8 +73,7 @@ def load_state():
         "last_run": None,
         "runs_since_start": 0,
         "total_transcripts_session": 0,
-        "institutions_with_activity": set(),
-        "last_run_had_activity": False
+        "institutions_with_activity": set()
     }
 
 def save_state(state):
@@ -177,44 +123,20 @@ def parse_transcript_filename(filename):
     return None
 
 def monitor_output(process, state, history):
-    """Monitor process output in real-time with streamlined logging."""
+    """Monitor process output in real-time."""
     current_run_results = {
         "new_transcripts": [],
         "updated_transcripts": [],
         "institutions": defaultdict(lambda: {"new": 0, "updated": 0, "total": 0}),
-        "total_downloaded": 0,
-        "has_activity": False
+        "total_downloaded": 0
     }
-    
-    # Track logging state
-    verbose_mode = False
-    last_simple_log_time = None
     
     for line in iter(process.stdout.readline, ''):
         if not line:
             break
         
         line = line.strip()
-        
-        # Detect if we have transcript activity
-        if any(pattern in line for pattern in [
-            "Found", "Downloaded", "new transcript", "updated", 
-            "Successfully saved", "Completed"
-        ]) and not "No transcripts found" in line and not "No new transcripts found" in line:
-            verbose_mode = True
-            current_run_results["has_activity"] = True
-        
-        # Handle logging based on activity
-        if verbose_mode or "STAGE 1 DAILY SYNC" in line:
-            print(line)  # Full logging when there's activity
-        elif PATTERNS["no_new_transcripts"].search(line) or "Discovery complete: No new transcripts" in line:
-            # Simple one-liner for no activity
-            current_time = datetime.now()
-            # Only print simple log once per minute to avoid spam
-            if last_simple_log_time is None or (current_time - last_simple_log_time).seconds >= 60:
-                timestamp = current_time.strftime('%H:%M:%S')
-                print(f"[{timestamp}] No new transcripts found - monitoring continues...")
-                last_simple_log_time = current_time
+        print(line)  # Echo to terminal
         
         # Check for new transcript downloads
         match = PATTERNS["new_download"].search(line)
@@ -229,7 +151,7 @@ def monitor_output(process, state, history):
                 current_run_results["institutions"][ticker]["new"] += 1
                 
                 # Send immediate notification for new transcript
-                show_pyqt5_notification(
+                send_notification(
                     f"New Transcript: {ticker}",
                     f"{info['transcript_type']} transcript for {info['date']}",
                     f"Event: {info['event_type']}"
@@ -245,13 +167,27 @@ def monitor_output(process, state, history):
             if info:
                 ticker = info["ticker"]
                 current_run_results["institutions"][ticker]["updated"] += 1
-                
-                # Send notification for updated transcript
-                show_pyqt5_notification(
-                    f"Updated Transcript: {ticker}",
-                    f"{info['transcript_type']} transcript updated",
-                    f"Date: {info['date']}"
-                )
+        
+        # Check for summary information
+        match = PATTERNS["found_new"].search(line)
+        if match:
+            new_count = int(match.group(1))
+            updated_count = int(match.group(2))
+            transcript_type = match.group(3)
+            
+            if new_count > 0 or updated_count > 0:
+                # Extract ticker from previous lines (this is a bit fragile but works)
+                for prev_line in line.split('\n')[-5:]:
+                    if "Processing:" in prev_line:
+                        ticker_match = PATTERNS["processing"].search(prev_line)
+                        if ticker_match:
+                            ticker = ticker_match.group(2)
+                            send_notification(
+                                f"Found Transcripts: {ticker}",
+                                f"{new_count} new, {updated_count} updated",
+                                f"{transcript_type} transcripts"
+                            )
+                            break
         
         # Check for completion
         match = PATTERNS["completed"].search(line)
@@ -266,7 +202,7 @@ def monitor_output(process, state, history):
         
         # Check for stage completion
         if PATTERNS["stage_complete"].search(line):
-            # Send summary notification only if there was activity
+            # Send summary notification
             if current_run_results["total_downloaded"] > 0:
                 institutions_with_new = [
                     f"{ticker} ({info['new']})"
@@ -274,23 +210,24 @@ def monitor_output(process, state, history):
                     if info["new"] > 0
                 ]
                 
-                message = "Banks: " + ", ".join(institutions_with_new[:3])
+                message = "Banks with new transcripts: " + ", ".join(institutions_with_new[:3])
                 if len(institutions_with_new) > 3:
                     message += f" and {len(institutions_with_new) - 3} more"
                 
-                show_pyqt5_notification(
-                    "Sync Complete",
+                send_notification(
+                    "Sync Complete - New Transcripts!",
                     message,
-                    f"Total: {current_run_results['total_downloaded']} new transcripts"
+                    f"Total: {current_run_results['total_downloaded']} transcripts downloaded"
                 )
+            else:
+                # Silent when no new transcripts
+                pass
     
     return current_run_results
 
 def run_stage_1_with_monitoring(state, history):
     """Run Stage 1 with real-time monitoring."""
-    # Only print verbose start message if we had activity in the last run
-    if state.get("last_run_had_activity", False):
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting Stage 1 daily sync...")
+    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting Stage 1 daily sync...")
     
     try:
         # Start the process
@@ -309,7 +246,7 @@ def run_stage_1_with_monitoring(state, history):
         return_code = process.wait()
         
         if return_code != 0:
-            show_pyqt5_notification(
+            send_notification(
                 "Stage 1 Sync Failed",
                 f"Script failed with return code {return_code}",
                 "Check terminal for details"
@@ -320,7 +257,7 @@ def run_stage_1_with_monitoring(state, history):
         
     except Exception as e:
         print(f"Error running Stage 1: {e}")
-        show_pyqt5_notification(
+        send_notification(
             "Stage 1 Sync Error",
             str(e),
             "Check terminal for details"
@@ -340,10 +277,11 @@ def format_status_notification(state):
     active_institutions = len(state.get("institutions_with_activity", []))
     
     if runs > 0 and runs % 12 == 0:  # Every hour (12 * 5 minutes)
-        show_pyqt5_notification(
-            "Monitor Status",
+        send_notification(
+            "Stage 1 Monitor Status",
             f"Running for {runs * 5} minutes",
-            f"{total} transcripts from {active_institutions} institutions"
+            f"{total} transcripts from {active_institutions} institutions today",
+            sound=False
         )
 
 def main():
@@ -358,46 +296,23 @@ def main():
     print("=" * 60)
     print(f"\nChecking for new transcripts every {RUN_FREQUENCY // 60} minutes")
     print("\nFeatures:")
-    print("  ✓ Real-time GUI popup notifications for each new transcript")
-    print("  ✓ Summary notifications after each run") 
-    print("  ✓ Streamlined logging (minimal when no activity)")
+    print("  ✓ Real-time popup notifications for each new transcript")
+    print("  ✓ Summary notifications after each run")
+    print("  ✓ Tracks all banks with activity")
     print("  ✓ Automatic version management")
     print("\nRequirements:")
     print("  • config.json on NAS must have stage_1 settings")
     print("  • .env file with all credentials")
-    print("  • PyQt5 installed (pip install PyQt5)")
+    print("  • macOS notification permissions enabled")
     print("\nPress Ctrl+C to stop")
     print("-" * 60)
     
     # Send startup notification
-    show_pyqt5_notification(
-        "Earnings Monitor Started",
-        "Monitoring for new transcripts",
+    send_notification(
+        "Earnings Transcript Monitor Started",
+        "You'll be notified immediately when new transcripts are detected",
         f"Checking every {RUN_FREQUENCY // 60} minutes"
     )
-    
-    # Test notification system
-    print("\nTesting notification system...")
-    time.sleep(2)  # Give first notification time to show
-    
-    # Show example notifications
-    show_pyqt5_notification(
-        "Test: New Transcript",
-        "RY-CA_2024-02-01_Earnings_Corrected.xml",
-        "Example of new transcript notification"
-    )
-    time.sleep(3)
-    
-    show_pyqt5_notification(
-        "Test: Summary",
-        "Downloaded 3 transcripts from 2 banks",
-        "Example of summary notification"
-    )
-    
-    print("✓ Test notifications displayed (check top-right of screen)")
-    print("✓ Notifications will auto-close after 5 seconds")
-    print("\nStarting normal monitoring...")
-    time.sleep(3)
     
     # Load state and history
     state = load_state()
@@ -425,7 +340,6 @@ def main():
                 # Update state
                 state["last_run"] = datetime.now().isoformat()
                 state["total_transcripts_session"] += results["total_downloaded"]
-                state["last_run_had_activity"] = results.get("has_activity", False)
                 save_state(state)
                 
                 # Update history
@@ -446,10 +360,7 @@ def main():
             
             # Wait for next run
             if not shutdown_requested:
-                # Only print verbose "next run" message if we had activity
-                if results and results.get("has_activity", False):
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Next run in {RUN_FREQUENCY // 60} minutes...")
-                
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Next run in {RUN_FREQUENCY // 60} minutes...")
                 for _ in range(RUN_FREQUENCY):
                     if shutdown_requested:
                         break
@@ -457,10 +368,10 @@ def main():
                 
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Monitor error: {e}")
-            show_pyqt5_notification(
+            send_notification(
                 "Monitor Error",
                 str(e),
-                "Monitor will continue"
+                "Monitor will continue running"
             )
             if not shutdown_requested:
                 time.sleep(RUN_FREQUENCY)
@@ -474,16 +385,16 @@ def main():
     institutions = len(state.get("institutions_with_activity", []))
     
     if total > 0:
-        show_pyqt5_notification(
-            "Monitor Stopped",
+        send_notification(
+            "Monitor Session Complete",
             f"Downloaded {total} transcripts from {institutions} institutions",
-            f"Session duration: {runs * 5} minutes"
+            f"Ran {runs} times over {runs * 5} minutes"
         )
     else:
-        show_pyqt5_notification(
-            "Monitor Stopped", 
-            "No new transcripts found",
-            f"Session duration: {runs * 5} minutes"
+        send_notification(
+            "Monitor Stopped",
+            "No new transcripts were found during this session",
+            f"Ran {runs} times"
         )
 
 if __name__ == "__main__":
