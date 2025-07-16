@@ -290,7 +290,7 @@ def demonstrate_advanced_filtering(configuration) -> None:
             multi_category_request = HeadlinesRequest(
                 data=HeadlinesRequestData(
                     sectors=["Financial"],
-                    categories=["Earnings", "Corporate Actions", "Guidance", "M&A"],
+                    categories=["Earnings", "Corporate Actions"],
                     regions=["North America"],
                     predefined_range="today"
                 ),

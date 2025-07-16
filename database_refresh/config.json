@@ -833,7 +833,7 @@
     "default_filters": {
       "sectors": ["Financial"],
       "regions": ["North America"],
-      "categories": ["Earnings", "Corporate Actions", "Guidance", "Company News"],
+      "categories": ["Earnings", "Corporate Actions"],
       "topics": ["Market Summaries", "Company News", "Analyst Reports"]
     },
     "monitored_financial_sectors": {

@@ -216,7 +216,7 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
         headlines_request = HeadlinesRequest(
             data=HeadlinesRequestData(
                 tickers=bank_tickers,
-                categories=["Earnings", "Corporate Actions", "Company News", "Guidance"],
+                categories=["Earnings", "Corporate Actions"],
                 sectors=["Financial"],
                 regions=["North America"],
                 is_primary=True,
