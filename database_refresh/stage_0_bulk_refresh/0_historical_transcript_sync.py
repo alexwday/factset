@@ -521,6 +521,7 @@ def main() -> None:
                 
                 # Download new/updated transcripts
                 for transcript in to_download:
+                    log_console(f"Attempting download for {ticker} event_id={transcript.get('event_id', 'N/A')}")
                     result = download_transcript_with_title_filtering(
                         nas_conn, transcript, ticker, institution_info, api_configuration
                     )
@@ -529,6 +530,7 @@ def main() -> None:
                         log_console(f"Downloaded: {result['filename']}")
                     else:
                         skipped_count += 1
+                        log_console(f"Skipped transcript for {ticker} event_id={transcript.get('event_id', 'N/A')} - check logs for reason", "WARNING")
                     
                     # Rate limit between downloads
                     time.sleep(config['api_settings']['request_delay'])
@@ -928,7 +930,12 @@ def parse_quarter_and_year_from_xml(xml_content: bytes) -> Tuple[Optional[str], 
             year = match.group(2)
             return quarter, year
         
-        # Title doesn't match required format
+        # Title doesn't match required format - log for debugging
+        log_execution(f"Title format mismatch", {
+            'title': title,
+            'required_format': 'Qx 20xx Earnings Call',
+            'reason': 'Does not match exact pattern'
+        })
         return None, None
         
     except Exception as e:
