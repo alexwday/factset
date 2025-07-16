@@ -2,7 +2,7 @@
 # Essential settings for historical transcript sync
 
 # SSL Certificate Configuration
-ssl_cert_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/certificate/certificate.cer"
+ssl_cert_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Certificate/rbc-ca-bundle.cer"
 
 # NAS Configuration (loaded from environment)
 # nas_share_name comes from NAS_SHARE_NAME environment variable
