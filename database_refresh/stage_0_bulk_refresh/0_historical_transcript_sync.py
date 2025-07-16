@@ -1144,7 +1144,7 @@ def create_api_transcript_list(api_transcripts: List[Dict[str, Any]], ticker: st
                     'event_id': str(transcript.get('event_id', '')),
                     'version_id': str(transcript.get('version_id', '')),
                     'event_date': transcript.get('event_date', ''),
-                    'transcript_link': transcript.get('transcripts_link', '')
+                    'transcripts_link': transcript.get('transcripts_link', '')
                 }
                 api_list.append(api_record)
     
