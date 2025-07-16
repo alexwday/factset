@@ -7,6 +7,7 @@ Handles authentication, configuration, directory management, and API integration
 import os
 import tempfile
 import logging
+import json
 from datetime import datetime
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List
@@ -24,19 +25,100 @@ load_dotenv()
 # Global variables
 config = {}
 logger = None
+execution_log = []  # Detailed execution log entries
+error_log = []      # Error log entries (only if errors occur)
 
 def setup_logging() -> logging.Logger:
-    """Set up basic logging configuration."""
+    """Set up minimal console logging configuration."""
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+        format='%(levelname)s - %(message)s',
         handlers=[logging.StreamHandler()]
     )
     return logging.getLogger(__name__)
 
+def log_console(message: str, level: str = "INFO"):
+    """Log minimal message to console."""
+    global logger
+    if level == "ERROR":
+        logger.error(message)
+    elif level == "WARNING":
+        logger.warning(message)
+    else:
+        logger.info(message)
+
+def log_execution(message: str, details: Dict[str, Any] = None):
+    """Log detailed execution information for main log file."""
+    global execution_log
+    log_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'message': message,
+        'details': details or {}
+    }
+    execution_log.append(log_entry)
+
+def log_error(message: str, error_type: str, details: Dict[str, Any] = None):
+    """Log error information for error log file."""
+    global error_log
+    error_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'error_type': error_type,
+        'message': message,
+        'details': details or {}
+    }
+    error_log.append(error_entry)
+
+def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
+    """Save execution and error logs to NAS at completion."""
+    global execution_log, error_log
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    base_path = os.getenv('NAS_BASE_PATH')
+    logs_path = nas_path_join(base_path, "Outputs", "Logs")
+    
+    # Create logs directory
+    nas_create_directory(nas_conn, logs_path)
+    
+    # Save main execution log
+    main_log_content = {
+        'stage': 'stage_0_historical_transcript_sync',
+        'execution_start': execution_log[0]['timestamp'] if execution_log else datetime.now().isoformat(),
+        'execution_end': datetime.now().isoformat(),
+        'summary': stage_summary,
+        'execution_log': execution_log
+    }
+    
+    main_log_filename = f"stage_0_historical_transcript_sync_{timestamp}.json"
+    main_log_path = nas_path_join(logs_path, main_log_filename)
+    main_log_json = json.dumps(main_log_content, indent=2)
+    main_log_obj = io.BytesIO(main_log_json.encode('utf-8'))
+    
+    if nas_upload_file(nas_conn, main_log_obj, main_log_path):
+        log_console(f"Execution log saved: {main_log_filename}")
+    
+    # Save error log only if errors exist
+    if error_log:
+        errors_path = nas_path_join(logs_path, "Errors")
+        nas_create_directory(nas_conn, errors_path)
+        
+        error_log_content = {
+            'stage': 'stage_0_historical_transcript_sync',
+            'execution_time': datetime.now().isoformat(),
+            'total_errors': len(error_log),
+            'error_summary': stage_summary.get('errors', {}),
+            'errors': error_log
+        }
+        
+        error_log_filename = f"stage_0_historical_transcript_sync_errors_{timestamp}.json"
+        error_log_path = nas_path_join(errors_path, error_log_filename)
+        error_log_json = json.dumps(error_log_content, indent=2)
+        error_log_obj = io.BytesIO(error_log_json.encode('utf-8'))
+        
+        if nas_upload_file(nas_conn, error_log_obj, error_log_path):
+            log_console(f"Error log saved: {error_log_filename}", "WARNING")
+
 def validate_environment_variables() -> None:
     """Validate all required environment variables are present."""
-    global logger
     
     required_env_vars = [
         'API_USERNAME', 'API_PASSWORD', 
@@ -48,14 +130,19 @@ def validate_environment_variables() -> None:
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     if missing_vars:
         error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
-        logger.error(error_msg)
+        log_error(error_msg, "environment_validation", {
+            'missing_variables': missing_vars,
+            'total_required': len(required_env_vars)
+        })
         raise ValueError(error_msg)
     
-    logger.info(f"All {len(required_env_vars)} required environment variables validated")
+    log_execution("Environment variables validated successfully", {
+        'total_variables': len(required_env_vars),
+        'variables_checked': required_env_vars
+    })
 
 def get_nas_connection() -> Optional[SMBConnection]:
     """Create and return an SMB connection to the NAS."""
-    global logger
     
     try:
         conn = SMBConnection(
@@ -69,14 +156,24 @@ def get_nas_connection() -> Optional[SMBConnection]:
         
         nas_port = int(os.getenv('NAS_PORT', 445))
         if conn.connect(os.getenv('NAS_SERVER_IP'), nas_port):
-            logger.info("Successfully connected to NAS")
+            log_execution("NAS connection established successfully", {
+                'server_name': os.getenv('NAS_SERVER_NAME'),
+                'port': nas_port,
+                'share_name': os.getenv('NAS_SHARE_NAME')
+            })
             return conn
         else:
-            logger.error("Failed to connect to NAS")
+            log_error("Failed to connect to NAS", "nas_connection", {
+                'server_name': os.getenv('NAS_SERVER_NAME'),
+                'port': nas_port
+            })
             return None
             
     except Exception as e:
-        logger.error(f"Error connecting to NAS: {e}")
+        log_error(f"Error connecting to NAS: {e}", "nas_connection", {
+            'server_name': os.getenv('NAS_SERVER_NAME'),
+            'error_details': str(e)
+        })
         return None
 
 def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes]:
@@ -271,79 +368,112 @@ def main() -> None:
     
     # Initialize logging
     logger = setup_logging()
-    logger.info("=== STAGE 0: HISTORICAL TRANSCRIPT SYNC ===")
+    start_time = datetime.now()
+    
+    log_console("=== STAGE 0: HISTORICAL TRANSCRIPT SYNC ===")
+    log_execution("Stage 0 execution started", {
+        'start_time': start_time.isoformat(),
+        'stage': 'stage_0_historical_transcript_sync'
+    })
     
     nas_conn = None
     ssl_cert_path = None
+    stage_summary = {
+        'status': 'unknown',
+        'total_institutions': 0,
+        'transcript_files_found': 0,
+        'unparseable_files': 0,
+        'execution_time_seconds': 0,
+        'errors': {}
+    }
     
     try:
         # Step 1: Validate environment variables
-        logger.info("Step 1: Validating environment variables...")
+        log_console("Validating environment variables...")
         validate_environment_variables()
         
         # Step 2: Connect to NAS
-        logger.info("Step 2: Connecting to NAS...")
+        log_console("Connecting to NAS...")
         nas_conn = get_nas_connection()
         if not nas_conn:
             raise RuntimeError("Failed to establish NAS connection")
         
         # Step 3: Load configuration from NAS
-        logger.info("Step 3: Loading configuration from NAS...")
+        log_console("Loading configuration...")
         config = load_config_from_nas(nas_conn)
+        stage_summary['total_institutions'] = len(config['monitored_institutions'])
         
         # Step 4: Set up SSL certificate
-        logger.info("Step 4: Setting up SSL certificate...")
+        log_console("Setting up SSL certificate...")
         ssl_cert_path = setup_ssl_certificate(nas_conn)
         if not ssl_cert_path:
             raise RuntimeError("Failed to set up SSL certificate")
         
         # Step 5: Configure proxy
-        logger.info("Step 5: Configuring proxy authentication...")
+        log_console("Configuring proxy authentication...")
         proxy_url = setup_proxy_configuration()
         
         # Step 6: Set up FactSet API client
-        logger.info("Step 6: Setting up FactSet API client...")
+        log_console("Setting up FactSet API client...")
         api_configuration = setup_factset_api_client(proxy_url, ssl_cert_path)
         
-        logger.info("=== SETUP COMPLETE - Ready for API calls ===")
-        logger.info(f"Monitoring {len(config['monitored_institutions'])} institutions")
-        logger.info(f"Transcript types: {config['api_settings']['transcript_types']}")
+        log_console("Setup complete - ready for API calls")
+        log_execution("Authentication and API setup completed", {
+            'monitored_institutions': len(config['monitored_institutions']),
+            'transcript_types': config['api_settings']['transcript_types'],
+            'sync_start_date': config['sync_start_date']
+        })
         
         # Step 7: Create/validate Data directory structure
-        logger.info("Step 7: Creating Data directory structure...")
+        log_console("Creating Data directory structure...")
         if not create_data_directory_structure(nas_conn):
             raise RuntimeError("Failed to create Data directory structure")
         
         # Step 8: Scan existing transcript files
-        logger.info("Step 8: Scanning existing transcript inventory...")
+        log_console("Scanning existing transcript inventory...")
         transcript_inventory = scan_existing_transcripts(nas_conn)
+        stage_summary['transcript_files_found'] = len(transcript_inventory)
         
-        logger.info("=== TRANSCRIPT INVENTORY COMPLETE ===")
-        logger.info(f"Found {len(transcript_inventory)} existing transcript files")
+        # Extract unparseable files count from error log
+        unparseable_count = sum(1 for entry in error_log if entry['error_type'] == 'unparseable_filename')
+        stage_summary['unparseable_files'] = unparseable_count
         
-        # Show sample of inventory if any files found
-        if transcript_inventory:
-            logger.info("Sample inventory entries:")
-            for i, entry in enumerate(transcript_inventory[:3]):  # Show first 3 entries
-                logger.info(f"  {i+1}. {entry['ticker']} - {entry['file_year']} {entry['file_quarter']} - {entry['transcript_type']} - {entry['filename']}")
-            if len(transcript_inventory) > 3:
-                logger.info(f"  ... and {len(transcript_inventory) - 3} more entries")
-        else:
-            logger.info("No existing transcript files found - starting with empty inventory")
+        log_console(f"Inventory complete: {len(transcript_inventory)} files found")
+        if unparseable_count > 0:
+            log_console(f"Warning: {unparseable_count} files have non-conforming names", "WARNING")
         
         # TODO: Add transcript download logic here using transcript_inventory
         
+        stage_summary['status'] = 'completed'
+        stage_summary['execution_time_seconds'] = (datetime.now() - start_time).total_seconds()
+        
     except Exception as e:
-        logger.error(f"Setup failed: {e}")
+        stage_summary['status'] = 'failed'
+        stage_summary['execution_time_seconds'] = (datetime.now() - start_time).total_seconds()
+        stage_summary['errors']['main_execution'] = str(e)
+        
+        log_console(f"Stage 0 failed: {e}", "ERROR")
+        log_error(f"Stage 0 execution failed: {e}", "main_execution", {
+            'error_details': str(e),
+            'execution_time_seconds': stage_summary['execution_time_seconds']
+        })
         raise
         
     finally:
+        # Save logs to NAS
+        if nas_conn:
+            try:
+                save_logs_to_nas(nas_conn, stage_summary)
+            except Exception as e:
+                log_console(f"Warning: Failed to save logs to NAS: {e}", "WARNING")
+        
         # Cleanup
         if nas_conn:
             nas_conn.close()
-            logger.info("NAS connection closed")
+            log_console("NAS connection closed")
         
         cleanup_temporary_files(ssl_cert_path)
+        log_console("=== STAGE 0 COMPLETE ===")
 
 def nas_path_join(*parts: str) -> str:
     """Join path parts for NAS paths using forward slashes."""
@@ -416,6 +546,7 @@ def parse_filename(filename: str) -> Optional[Dict[str, str]]:
     global logger
     
     if not filename.endswith('.xml'):
+        logger.debug(f"Filename {filename} is not an XML file")
         return None
     
     # Remove .xml extension
@@ -424,11 +555,11 @@ def parse_filename(filename: str) -> Optional[Dict[str, str]]:
     # Split by underscores - expect 6 parts
     parts = basename.split('_')
     if len(parts) != 6:
-        logger.debug(f"Filename {filename} does not match expected format (6 parts)")
+        logger.debug(f"Filename {filename} has {len(parts)} parts, expected 6 parts (ticker_quarter_year_transcripttype_eventid_versionid)")
         return None
     
     try:
-        return {
+        parsed = {
             'ticker': parts[0],
             'quarter': parts[1],
             'year': parts[2],
@@ -436,6 +567,13 @@ def parse_filename(filename: str) -> Optional[Dict[str, str]]:
             'event_id': parts[4],
             'version_id': parts[5]
         }
+        
+        # Basic validation
+        if not parsed['ticker'] or not parsed['quarter'] or not parsed['year']:
+            logger.debug(f"Filename {filename} has empty required fields")
+            return None
+        
+        return parsed
     except Exception as e:
         logger.debug(f"Error parsing filename {filename}: {e}")
         return None
@@ -464,6 +602,7 @@ def scan_existing_transcripts(nas_conn: SMBConnection) -> List[Dict[str, str]]:
     data_path = nas_path_join(base_path, "Outputs", "Data")
     
     transcript_inventory = []
+    unparseable_files = []
     
     # Check if Data directory exists
     if not nas_file_exists(nas_conn, data_path):
@@ -524,9 +663,35 @@ def scan_existing_transcripts(nas_conn: SMBConnection) -> List[Dict[str, str]]:
                             }
                             transcript_inventory.append(transcript_record)
                         else:
-                            logger.warning(f"Could not parse filename: {xml_file}")
+                            unparseable_files.append({
+                                'filename': xml_file,
+                                'full_path': nas_path_join(company_path, xml_file),
+                                'location': f"{fiscal_year}/{quarter}/{company_type}/{company}",
+                                'expected_format': 'ticker_quarter_year_transcripttype_eventid_versionid.xml'
+                            })
+                            # Log as error for tracking
+                            log_error(f"Unparseable filename: {xml_file}", "unparseable_filename", {
+                                'filename': xml_file,
+                                'location': f"{fiscal_year}/{quarter}/{company_type}/{company}",
+                                'expected_format': 'ticker_quarter_year_transcripttype_eventid_versionid.xml'
+                            })
     
-    logger.info(f"Transcript inventory complete: {len(transcript_inventory)} files found")
+    # Log inventory completion
+    log_execution("Transcript inventory scan completed", {
+        'total_files_found': len(transcript_inventory),
+        'unparseable_files': len(unparseable_files),
+        'fiscal_years_scanned': fiscal_years,
+        'sample_files': [entry['filename'] for entry in transcript_inventory[:5]]
+    })
+    
+    # Report unparseable files in execution log
+    if unparseable_files:
+        log_execution("Found files with non-conforming filenames", {
+            'total_unparseable': len(unparseable_files),
+            'sample_unparseable': unparseable_files[:5],
+            'expected_format': 'ticker_quarter_year_transcripttype_eventid_versionid.xml'
+        })
+    
     return transcript_inventory
 
 if __name__ == "__main__":
