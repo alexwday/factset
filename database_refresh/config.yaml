@@ -4,6 +4,9 @@
 # SSL Certificate Configuration
 ssl_cert_path: "Inputs/certificate/certificate.cer"
 
+# NAS Configuration (loaded from environment)
+# nas_share_name comes from NAS_SHARE_NAME environment variable
+
 # API Settings
 api_settings:
   # Core API parameters

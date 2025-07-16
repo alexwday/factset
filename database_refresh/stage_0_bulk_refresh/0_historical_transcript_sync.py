@@ -14,6 +14,8 @@ from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
 import io
 import re
+import xml.etree.ElementTree as ET
+import requests
 
 import yaml
 import fds.sdk.EventsandTranscripts
@@ -288,6 +290,9 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
         # Validate configuration structure
         validate_config_structure(config)
         
+        # Add NAS share name from environment
+        config['nas_share_name'] = os.getenv('NAS_SHARE_NAME')
+        
         logger.info(f"Successfully loaded YAML configuration with {len(config['monitored_institutions'])} institutions")
         return config
         
@@ -509,11 +514,36 @@ def main() -> None:
                     'to_remove': len(to_remove)
                 })
                 
+                # Process downloads for this institution
+                downloaded_count = 0
+                removed_count = 0
+                skipped_count = 0
+                
+                # Download new/updated transcripts
+                for transcript in to_download:
+                    result = download_transcript_with_title_filtering(
+                        nas_conn, transcript, ticker, institution_info, api_configuration
+                    )
+                    if result:
+                        downloaded_count += 1
+                        log_console(f"Downloaded: {result['filename']}")
+                    else:
+                        skipped_count += 1
+                    
+                    # Rate limit between downloads
+                    time.sleep(config['api_settings']['request_delay'])
+                
+                # Remove out-of-scope transcripts
+                for transcript in to_remove:
+                    if remove_nas_file(nas_conn, transcript['file_path']):
+                        removed_count += 1
+                        log_console(f"Removed: {transcript['file_path']}")
+                
+                log_console(f"Completed {ticker}: {downloaded_count} downloaded, {removed_count} removed, {skipped_count} skipped")
+                
                 # Add rate limiting between institutions (except for the last one)
                 if i < len(config['monitored_institutions']):
                     time.sleep(config['api_settings']['request_delay'])
-                
-                # TODO: Add actual download and remove logic here
         
         log_console(f"Transcript comparison complete: {total_to_download} to download, {total_to_remove} to remove")
         
@@ -870,6 +900,215 @@ def get_api_transcripts_for_company(api_instance, ticker: str, institution_info:
         'max_retries': config['api_settings']['max_retries']
     })
     return []
+
+def parse_quarter_and_year_from_xml(xml_content: bytes) -> Tuple[Optional[str], Optional[str]]:
+    """Parse quarter and fiscal year from transcript XML title."""
+    try:
+        # Parse only until we find the title
+        root = ET.parse(io.BytesIO(xml_content)).getroot()
+        namespace = ""
+        if root.tag.startswith('{'):
+            namespace = root.tag.split('}')[0] + '}'
+        
+        meta = root.find(f"{namespace}meta" if namespace else "meta")
+        if meta is None:
+            return None, None
+            
+        title_elem = meta.find(f"{namespace}title" if namespace else "title")
+        if title_elem is None or not title_elem.text:
+            return None, None
+            
+        title = title_elem.text.strip()
+        
+        # Only accept exact format: "Qx 20xx Earnings Call"
+        pattern = r"^Q([1-4])\s+(20\d{2})\s+Earnings\s+Call$"
+        match = re.search(pattern, title, re.IGNORECASE)
+        if match:
+            quarter = f"Q{match.group(1)}"
+            year = match.group(2)
+            return quarter, year
+        
+        # Title doesn't match required format
+        return None, None
+        
+    except Exception as e:
+        log_error(f"Error parsing XML title: {e}", "xml_parsing", {
+            'error_details': str(e)
+        })
+        return None, None
+
+def sanitize_url_for_logging(url: str) -> str:
+    """Remove auth tokens from URLs before logging."""
+    if not url:
+        return url
+    
+    # Remove authorization tokens and credentials from URL
+    sanitized = re.sub(r'(password|token|auth)=[^&]*', r'\1=***', url, flags=re.IGNORECASE)
+    sanitized = re.sub(r'://[^@]*@', '://***:***@', sanitized)
+    return sanitized
+
+def download_transcript_with_title_filtering(nas_conn: SMBConnection, transcript: Dict[str, Any],
+                                           ticker: str, institution_info: Dict[str, str],
+                                           api_configuration) -> Optional[Dict[str, str]]:
+    """Download transcript and validate title format."""
+    transcript_link = transcript.get('transcripts_link')
+    if not transcript_link:
+        log_error(f"No download link for transcript", "download", {
+            'ticker': ticker,
+            'event_id': transcript.get('event_id')
+        })
+        return None
+    
+    for attempt in range(config['api_settings']['max_retries']):
+        try:
+            log_execution(f"Downloading transcript for {ticker} (attempt {attempt + 1})", {
+                'ticker': ticker,
+                'event_id': transcript.get('event_id'),
+                'transcript_type': transcript.get('transcript_type'),
+                'attempt': attempt + 1
+            })
+            
+            headers = {
+                'Accept': 'application/xml,*/*',
+                'Authorization': api_configuration.get_basic_auth_token(),
+            }
+            
+            proxy_user = os.getenv('PROXY_USER')
+            proxy_password = os.getenv('PROXY_PASSWORD')
+            proxy_domain = os.getenv('PROXY_DOMAIN', 'MAPLE')
+            
+            escaped_domain = quote(proxy_domain + '\\' + proxy_user)
+            proxy_url = f"http://{escaped_domain}:{quote(proxy_password)}@{os.getenv('PROXY_URL')}"
+            proxies = {
+                'https': proxy_url,
+                'http': proxy_url
+            }
+            
+            response = requests.get(
+                transcript_link,
+                headers=headers,
+                proxies=proxies,
+                verify=api_configuration.ssl_ca_cert,
+                timeout=30
+            )
+            
+            response.raise_for_status()
+            
+            # Parse XML to extract and validate title
+            quarter, year = parse_quarter_and_year_from_xml(response.content)
+            
+            if not quarter or not year:
+                # Extract title for logging
+                try:
+                    root = ET.parse(io.BytesIO(response.content)).getroot()
+                    namespace = ""
+                    if root.tag.startswith('{'):
+                        namespace = root.tag.split('}')[0] + '}'
+                    meta = root.find(f"{namespace}meta" if namespace else "meta")
+                    title_elem = meta.find(f"{namespace}title" if namespace else "title") if meta else None
+                    title = title_elem.text if title_elem and title_elem.text else "No title found"
+                except:
+                    title = "Failed to extract title"
+                
+                log_execution(f"Skipping transcript with invalid title for {ticker}", {
+                    'ticker': ticker,
+                    'event_id': transcript.get('event_id'),
+                    'title': title,
+                    'reason': 'Title does not match "Qx 20xx Earnings Call" format'
+                })
+                return None
+            
+            # Create filename
+            filename = f"{ticker}_{quarter}_{year}_{transcript.get('transcript_type')}_{transcript.get('event_id')}_{transcript.get('version_id')}.xml"
+            
+            # Create directory path
+            company_name = institution_info['name'].replace(' ', '_').replace('.', '').replace(',', '')
+            nas_dir_path = f"Outputs/Data/{year}/{quarter}/{institution_info['type']}/{ticker}_{company_name}"
+            
+            # Create directory if it doesn't exist
+            try:
+                nas_conn.createDirectory(config['nas_share_name'], nas_dir_path)
+            except:
+                pass  # Directory might already exist
+            
+            # Upload file to NAS
+            file_path = f"{nas_dir_path}/{filename}"
+            file_obj = io.BytesIO(response.content)
+            nas_conn.storeFile(config['nas_share_name'], file_path, file_obj)
+            
+            log_execution(f"Successfully downloaded and stored {filename}", {
+                'ticker': ticker,
+                'filename': filename,
+                'nas_path': file_path,
+                'quarter': quarter,
+                'year': year,
+                'event_id': transcript.get('event_id'),
+                'version_id': transcript.get('version_id')
+            })
+            
+            return {
+                'ticker': ticker,
+                'quarter': quarter,
+                'year': year,
+                'transcript_type': transcript.get('transcript_type'),
+                'event_id': transcript.get('event_id'),
+                'version_id': transcript.get('version_id'),
+                'filename': filename,
+                'nas_path': file_path
+            }
+            
+        except requests.exceptions.RequestException as e:
+            if attempt < config['api_settings']['max_retries'] - 1:
+                # Calculate delay with exponential backoff if enabled
+                if config['api_settings'].get('use_exponential_backoff', False):
+                    base_delay = config['api_settings']['retry_delay']
+                    max_delay = config['api_settings'].get('max_backoff_delay', 120.0)
+                    exponential_delay = base_delay * (2 ** attempt)
+                    actual_delay = min(exponential_delay, max_delay)
+                    log_console(f"Download attempt {attempt + 1} failed for {ticker}, retrying in {actual_delay:.1f}s (exponential backoff): {e}", "WARNING")
+                else:
+                    actual_delay = config['api_settings']['retry_delay']
+                    log_console(f"Download attempt {attempt + 1} failed for {ticker}, retrying in {actual_delay:.1f}s: {e}", "WARNING")
+                
+                time.sleep(actual_delay)
+            else:
+                log_error(f"Failed to download transcript for {ticker} after {attempt + 1} attempts: {e}", "download", {
+                    'ticker': ticker,
+                    'event_id': transcript.get('event_id'),
+                    'error_details': str(e),
+                    'attempts': attempt + 1
+                })
+                return None
+        except Exception as e:
+            log_error(f"Unexpected error downloading transcript for {ticker}: {e}", "download", {
+                'ticker': ticker,
+                'event_id': transcript.get('event_id'),
+                'error_details': str(e)
+            })
+            return None
+    
+    # If we get here, all retries failed
+    log_error(f"All download attempts failed for {ticker}", "download", {
+        'ticker': ticker,
+        'event_id': transcript.get('event_id'),
+        'max_retries': config['api_settings']['max_retries']
+    })
+    return None
+
+def remove_nas_file(nas_conn: SMBConnection, file_path: str) -> bool:
+    """Remove file from NAS."""
+    try:
+        nas_conn.deleteFiles(config['nas_share_name'], file_path)
+        log_execution(f"Successfully removed file from NAS", {
+            'file_path': file_path
+        })
+        return True
+    except Exception as e:
+        log_error(f"Failed to remove file from NAS: {e}", "nas_removal", {
+            'file_path': file_path,
+            'error_details': str(e)
+        })
+        return False
 
 def create_api_transcript_list(api_transcripts: List[Dict[str, Any]], ticker: str, 
                               institution_info: Dict[str, str]) -> List[Dict[str, str]]:
