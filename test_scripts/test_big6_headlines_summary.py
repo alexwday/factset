@@ -14,7 +14,7 @@ import os
 import sys
 import json
 import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 import logging
@@ -213,11 +213,8 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
             for ticker in BIG_6_BANKS.keys()
         ]
         
-        # Calculate 60-day date range
-        end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(days=60)
-        
-        # Prepare request for Big 6 bank headlines (last 60 days)
+        # Use predefined range instead of custom dates (better for proxy)
+        # Prepare request for Big 6 bank headlines (last month)
         headlines_request = HeadlinesRequest(
             data=HeadlinesRequestData(
                 tickers=bank_tickers,
@@ -225,10 +222,7 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
                 sectors=["Financial"],
                 regions=["North America"],
                 is_primary=True,
-                search_time=HeadlinesRequestDataSearchTime(
-                    start=start_time,
-                    end=end_time
-                )
+                predefined_range="oneMonth"
             ),
             meta=HeadlinesRequestMeta(
                 pagination=HeadlinesRequestMetaPagination(
@@ -245,21 +239,22 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
         with streetaccount.ApiClient(configuration) as api_client:
             api_instance = headlines_api.HeadlinesApi(api_client)
             
-            logger.info("📰 Retrieving Big 6 Canadian bank headlines (last 60 days)...")
+            logger.info("📰 Retrieving Big 6 Canadian bank headlines (last month)...")
             
             try:
                 response = api_instance.get_street_account_headlines(headlines_request=headlines_request)
                 
                 if response and response.data:
                     for headline_item in response.data:
-                        # Extract relevant fields
+                        # Extract relevant fields using correct API field names
                         headline_data = {
-                            'headline': getattr(headline_item, 'headline', 'No headline'),
-                            'publish_time': getattr(headline_item, 'publish_time', None),
-                            'tickers': getattr(headline_item, 'tickers', []),
-                            'story_id': getattr(headline_item, 'story_id', None),
-                            'categories': getattr(headline_item, 'categories', []),
-                            'source': getattr(headline_item, 'source', 'StreetAccount')
+                            'headline': getattr(headline_item, 'headlines', 'No headline'),
+                            'publish_time': getattr(headline_item, 'story_time', None),
+                            'tickers': getattr(headline_item, 'symbols', []),
+                            'primary_tickers': getattr(headline_item, 'primary_symbols', []),
+                            'story_id': getattr(headline_item, 'id', None),
+                            'categories': getattr(headline_item, 'subjects', []),
+                            'story_body': getattr(headline_item, 'story_body', None)
                         }
                         headlines_data.append(headline_data)
                     
@@ -287,19 +282,28 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
 def display_headlines_summary(headlines: List[Dict[str, Any]]) -> None:
     """Display clean headlines summary for Big 6 banks."""
     print("\\n" + "="*100)
-    print("🏦 BIG 6 CANADIAN BANKS - HEADLINES SUMMARY (LAST 60 DAYS)")
+    print("🏦 BIG 6 CANADIAN BANKS - HEADLINES SUMMARY (LAST MONTH)")
     print("="*100)
     
     if not headlines:
-        print("❌ No headlines found for Big 6 banks in the last 60 days")
+        print("❌ No headlines found for Big 6 banks in the last month")
         return
     
     # Group headlines by bank
     bank_headlines = {}
     for headline in headlines:
-        tickers = headline.get('tickers', [])
-        for ticker in tickers:
-            ticker_symbol = ticker if isinstance(ticker, str) else ticker.get('symbol', 'Unknown')
+        # Check both symbols and primary_symbols for Big 6 bank tickers
+        all_tickers = []
+        symbols = headline.get('tickers', [])
+        primary_symbols = headline.get('primary_tickers', [])
+        
+        if isinstance(symbols, list):
+            all_tickers.extend(symbols)
+        if isinstance(primary_symbols, list):
+            all_tickers.extend(primary_symbols)
+            
+        for ticker in all_tickers:
+            ticker_symbol = ticker if isinstance(ticker, str) else str(ticker)
             if ticker_symbol in BIG_6_BANKS:
                 if ticker_symbol not in bank_headlines:
                     bank_headlines[ticker_symbol] = []
@@ -314,7 +318,7 @@ def display_headlines_summary(headlines: List[Dict[str, Any]]) -> None:
         print("-" * 60)
         
         if not bank_news:
-            print("   📰 No news found in the last 60 days")
+            print("   📰 No news found in the last month")
             continue
             
         # Sort by publish time (newest first)
@@ -359,7 +363,7 @@ def display_headlines_summary(headlines: List[Dict[str, Any]]) -> None:
 
 def main():
     """Main execution function."""
-    print("🚀 Starting Big 6 Canadian Banks Headlines Summary (Last 60 Days)...")
+    print("🚀 Starting Big 6 Canadian Banks Headlines Summary (Last Month)...")
     print("="*80)
     
     # Load environment

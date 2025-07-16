@@ -253,22 +253,17 @@ def get_big6_full_content() -> Optional[List[Dict[str, Any]]]:
                 
                 if response and response.data:
                     for article_item in response.data:
-                        # Extract ALL available fields to see what's available
+                        # Extract ALL available fields using correct API field names
                         article_data = {
-                            'headline': getattr(article_item, 'headline', 'No headline'),
+                            'headline': getattr(article_item, 'headlines', 'No headline'),
                             'story_body': getattr(article_item, 'story_body', 'No story body'),
-                            'publish_time': getattr(article_item, 'publish_time', None),
-                            'story_id': getattr(article_item, 'story_id', None),
-                            'tickers': getattr(article_item, 'tickers', []),
-                            'categories': getattr(article_item, 'categories', []),
-                            'sectors': getattr(article_item, 'sectors', []),
-                            'regions': getattr(article_item, 'regions', []),
-                            'source': getattr(article_item, 'source', None),
-                            'author': getattr(article_item, 'author', None),
-                            'summary': getattr(article_item, 'summary', None),
-                            'sentiment': getattr(article_item, 'sentiment', None),
-                            'relevance_score': getattr(article_item, 'relevance_score', None),
-                            'word_count': getattr(article_item, 'word_count', None),
+                            'publish_time': getattr(article_item, 'story_time', None),
+                            'story_id': getattr(article_item, 'id', None),
+                            'tickers': getattr(article_item, 'symbols', []),
+                            'primary_tickers': getattr(article_item, 'primary_symbols', []),
+                            'categories': getattr(article_item, 'subjects', []),
+                            'reference_uris': getattr(article_item, 'reference_uris', None),
+                            'url': getattr(article_item, 'url', None),
                             'all_attributes': dir(article_item)  # Get all available attributes
                         }
                         articles_data.append(article_data)
