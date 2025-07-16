@@ -10,8 +10,9 @@ import tempfile
 import logging
 from datetime import datetime
 from urllib.parse import quote
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import io
+import re
 
 import fds.sdk.EventsandTranscripts
 from smb.SMBConnection import SMBConnection
@@ -295,7 +296,29 @@ def main() -> None:
         logger.info(f"Monitoring {len(config['monitored_institutions'])} institutions")
         logger.info(f"Transcript types: {config['api_settings']['transcript_types']}")
         
-        # TODO: Add transcript download logic here
+        # Step 7: Create/validate Data directory structure
+        logger.info("Step 7: Creating Data directory structure...")
+        if not create_data_directory_structure(nas_conn):
+            raise RuntimeError("Failed to create Data directory structure")
+        
+        # Step 8: Scan existing transcript files
+        logger.info("Step 8: Scanning existing transcript inventory...")
+        transcript_inventory = scan_existing_transcripts(nas_conn)
+        
+        logger.info("=== TRANSCRIPT INVENTORY COMPLETE ===")
+        logger.info(f"Found {len(transcript_inventory)} existing transcript files")
+        
+        # Show sample of inventory if any files found
+        if transcript_inventory:
+            logger.info("Sample inventory entries:")
+            for i, entry in enumerate(transcript_inventory[:3]):  # Show first 3 entries
+                logger.info(f"  {i+1}. {entry['ticker']} - {entry['file_year']} {entry['file_quarter']} - {entry['transcript_type']} - {entry['filename']}")
+            if len(transcript_inventory) > 3:
+                logger.info(f"  ... and {len(transcript_inventory) - 3} more entries")
+        else:
+            logger.info("No existing transcript files found - starting with empty inventory")
+        
+        # TODO: Add transcript download logic here using transcript_inventory
         
     except Exception as e:
         logger.error(f"Setup failed: {e}")
@@ -308,6 +331,190 @@ def main() -> None:
             logger.info("NAS connection closed")
         
         cleanup_temporary_files(ssl_cert_path)
+
+def nas_path_join(*parts: str) -> str:
+    """Join path parts for NAS paths using forward slashes."""
+    return '/'.join(str(part) for part in parts if part)
+
+def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
+    """Check if a file or directory exists on the NAS."""
+    global logger
+    try:
+        conn.getAttributes(os.getenv('NAS_SHARE_NAME'), file_path)
+        return True
+    except Exception:
+        return False
+
+def nas_create_directory(conn: SMBConnection, dir_path: str) -> bool:
+    """Create directory on NAS with safe iterative parent creation."""
+    global logger
+    
+    normalized_path = dir_path.strip('/').rstrip('/')
+    if not normalized_path:
+        logger.error("Cannot create directory with empty path")
+        return False
+    
+    path_parts = [part for part in normalized_path.split('/') if part]
+    if not path_parts:
+        logger.error("Cannot create directory with invalid path")
+        return False
+    
+    current_path = ""
+    for part in path_parts:
+        current_path = f"{current_path}/{part}" if current_path else part
+        
+        if nas_file_exists(conn, current_path):
+            continue
+        
+        try:
+            conn.createDirectory(os.getenv('NAS_SHARE_NAME'), current_path)
+            logger.debug(f"Created directory: {current_path}")
+        except Exception as e:
+            if not nas_file_exists(conn, current_path):
+                logger.error(f"Failed to create directory {current_path}: {e}")
+                return False
+    
+    return True
+
+def nas_list_directories(conn: SMBConnection, directory_path: str) -> List[str]:
+    """List subdirectories in a NAS directory."""
+    global logger
+    try:
+        files = conn.listPath(os.getenv('NAS_SHARE_NAME'), directory_path)
+        return [file_info.filename for file_info in files 
+                if file_info.isDirectory and file_info.filename not in ['.', '..']]
+    except Exception as e:
+        logger.debug(f"Failed to list directories in {directory_path}: {e}")
+        return []
+
+def nas_list_files(conn: SMBConnection, directory_path: str) -> List[str]:
+    """List XML files in a NAS directory."""
+    global logger
+    try:
+        files = conn.listPath(os.getenv('NAS_SHARE_NAME'), directory_path)
+        return [file_info.filename for file_info in files 
+                if not file_info.isDirectory and file_info.filename.endswith('.xml')]
+    except Exception as e:
+        logger.debug(f"Failed to list files in {directory_path}: {e}")
+        return []
+
+def parse_filename(filename: str) -> Optional[Dict[str, str]]:
+    """Parse filename format: ticker_quarter_year_transcripttype_eventid_versionid.xml"""
+    global logger
+    
+    if not filename.endswith('.xml'):
+        return None
+    
+    # Remove .xml extension
+    basename = filename[:-4]
+    
+    # Split by underscores - expect 6 parts
+    parts = basename.split('_')
+    if len(parts) != 6:
+        logger.debug(f"Filename {filename} does not match expected format (6 parts)")
+        return None
+    
+    try:
+        return {
+            'ticker': parts[0],
+            'quarter': parts[1],
+            'year': parts[2],
+            'transcript_type': parts[3],
+            'event_id': parts[4],
+            'version_id': parts[5]
+        }
+    except Exception as e:
+        logger.debug(f"Error parsing filename {filename}: {e}")
+        return None
+
+def create_data_directory_structure(nas_conn: SMBConnection) -> bool:
+    """Create base Data directory structure on NAS."""
+    global logger
+    
+    base_path = os.getenv('NAS_BASE_PATH')
+    data_path = nas_path_join(base_path, "Outputs", "Data")
+    
+    logger.info(f"Creating Data directory structure: {data_path}")
+    
+    if nas_create_directory(nas_conn, data_path):
+        logger.info("Data directory structure created successfully")
+        return True
+    else:
+        logger.error("Failed to create Data directory structure")
+        return False
+
+def scan_existing_transcripts(nas_conn: SMBConnection) -> List[Dict[str, str]]:
+    """Scan existing transcript files and create inventory list."""
+    global logger, config
+    
+    base_path = os.getenv('NAS_BASE_PATH')
+    data_path = nas_path_join(base_path, "Outputs", "Data")
+    
+    transcript_inventory = []
+    
+    # Check if Data directory exists
+    if not nas_file_exists(nas_conn, data_path):
+        logger.info("Data directory does not exist - will create empty structure")
+        return transcript_inventory
+    
+    logger.info("Scanning existing transcript files...")
+    
+    # Scan fiscal years
+    fiscal_years = nas_list_directories(nas_conn, data_path)
+    logger.info(f"Found {len(fiscal_years)} fiscal years: {fiscal_years}")
+    
+    for fiscal_year in fiscal_years:
+        year_path = nas_path_join(data_path, fiscal_year)
+        
+        # Scan quarters within each year
+        quarters = nas_list_directories(nas_conn, year_path)
+        logger.debug(f"Year {fiscal_year} has quarters: {quarters}")
+        
+        for quarter in quarters:
+            quarter_path = nas_path_join(year_path, quarter)
+            
+            # Scan company types within each quarter
+            company_types = nas_list_directories(nas_conn, quarter_path)
+            logger.debug(f"Year {fiscal_year} Quarter {quarter} has company types: {company_types}")
+            
+            for company_type in company_types:
+                company_type_path = nas_path_join(quarter_path, company_type)
+                
+                # Scan companies within each type
+                companies = nas_list_directories(nas_conn, company_type_path)
+                logger.debug(f"Company type {company_type} has {len(companies)} companies")
+                
+                for company in companies:
+                    company_path = nas_path_join(company_type_path, company)
+                    
+                    # Scan XML files in company directory
+                    xml_files = nas_list_files(nas_conn, company_path)
+                    logger.debug(f"Company {company} has {len(xml_files)} XML files")
+                    
+                    for xml_file in xml_files:
+                        # Parse filename
+                        parsed = parse_filename(xml_file)
+                        if parsed:
+                            transcript_record = {
+                                'fiscal_year': fiscal_year,
+                                'quarter': quarter,
+                                'company_type': company_type,
+                                'company': company,
+                                'ticker': parsed['ticker'],
+                                'file_quarter': parsed['quarter'],
+                                'file_year': parsed['year'],
+                                'transcript_type': parsed['transcript_type'],
+                                'event_id': parsed['event_id'],
+                                'version_id': parsed['version_id'],
+                                'filename': xml_file,
+                                'full_path': nas_path_join(company_path, xml_file)
+                            }
+                            transcript_inventory.append(transcript_record)
+                        else:
+                            logger.warning(f"Could not parse filename: {xml_file}")
+    
+    logger.info(f"Transcript inventory complete: {len(transcript_inventory)} files found")
+    return transcript_inventory
 
 if __name__ == "__main__":
     main()
