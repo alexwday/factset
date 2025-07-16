@@ -221,23 +221,27 @@ def test_royal_bank_news() -> None:
                 if response and response.data:
                     print(f"✅ Found {len(response.data)} headlines with minimal filtering")
                     for i, item in enumerate(response.data[:5], 1):
-                        headline = getattr(item, 'headline', 'No headline')
+                        headline = getattr(item, 'headlines', 'No headline')
+                        story_time = getattr(item, 'story_time', 'No time')
+                        symbols = getattr(item, 'symbols', [])
+                        primary_symbols = getattr(item, 'primary_symbols', [])
                         print(f"   {i}. {headline[:80]}...")
+                        print(f"      Time: {story_time} | Symbols: {symbols} | Primary: {primary_symbols}")
                 else:
                     print("❌ No headlines found with minimal filtering")
                     
             except Exception as e:
                 print(f"❌ Minimal filtering failed: {e}")
             
-            # Test 2: Add time range (last month)
-            print("\n📰 TEST 2: Ticker + last month time range")
+            # Test 2: Add time range (last 3 months to get 90 days)
+            print("\n📰 TEST 2: RY-CA + last 3 months (90 days)")
             print("-" * 60)
             
             try:
                 time_request = HeadlinesRequest(
                     data=HeadlinesRequestData(
                         tickers=[HeadlinesRequestTickersObject(value="RY-CA", type="Equity")],
-                        predefined_range="oneMonth"
+                        predefined_range="threeMonths"
                     ),
                     meta=HeadlinesRequestMeta(
                         pagination=HeadlinesRequestMetaPagination(limit=50)
@@ -247,11 +251,17 @@ def test_royal_bank_news() -> None:
                 response = api_instance.get_street_account_headlines(headlines_request=time_request)
                 
                 if response and response.data:
-                    print(f"✅ Found {len(response.data)} headlines with time filtering")
-                    for i, item in enumerate(response.data[:5], 1):
-                        headline = getattr(item, 'headline', 'No headline')
-                        publish_time = getattr(item, 'publish_time', 'No time')
-                        print(f"   {i}. {headline[:60]}... | {publish_time}")
+                    print(f"✅ Found {len(response.data)} headlines with 3-month filtering")
+                    for i, item in enumerate(response.data[:10], 1):
+                        headline = getattr(item, 'headlines', 'No headline')
+                        story_time = getattr(item, 'story_time', 'No time')
+                        symbols = getattr(item, 'symbols', [])
+                        primary_symbols = getattr(item, 'primary_symbols', [])
+                        print(f"   {i:2d}. {headline[:60]}...")
+                        print(f"       Time: {story_time}")
+                        print(f"       Symbols: {symbols}")
+                        print(f"       Primary: {primary_symbols}")
+                        print()
                 else:
                     print("❌ No headlines found with time filtering")
                     
