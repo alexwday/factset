@@ -5,7 +5,6 @@ Focuses on core authentication, configuration, and API setup.
 """
 
 import os
-import json
 import tempfile
 import logging
 from datetime import datetime
@@ -14,6 +13,7 @@ from typing import Dict, Any, Optional, List
 import io
 import re
 
+import yaml
 import fds.sdk.EventsandTranscripts
 from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
@@ -99,7 +99,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     global logger
     
     # Required top-level sections
-    required_sections = ['api_settings', 'monitored_institutions', 'ssl_cert_nas_path']
+    required_sections = ['api_settings', 'monitored_institutions', 'ssl_cert_path', 'sync_start_date']
     
     for section in required_sections:
         if section not in config:
@@ -108,7 +108,11 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             raise ValueError(error_msg)
     
     # Validate api_settings structure
-    required_api_settings = ['request_delay', 'max_retries', 'retry_delay', 'transcript_types']
+    required_api_settings = [
+        'industry_categories', 'transcript_types', 'sort_order', 'pagination_limit',
+        'pagination_offset', 'request_delay', 'max_retries', 'retry_delay',
+        'use_exponential_backoff', 'max_backoff_delay'
+    ]
     for setting in required_api_settings:
         if setting not in config['api_settings']:
             error_msg = f"Missing required API setting: {setting}"
@@ -121,21 +125,30 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
         logger.error(error_msg)
         raise ValueError(error_msg)
     
-    # Validate ssl_cert_nas_path is not empty
-    if not config['ssl_cert_nas_path'] or not config['ssl_cert_nas_path'].strip():
-        error_msg = "ssl_cert_nas_path cannot be empty"
+    # Validate ssl_cert_path is not empty
+    if not config['ssl_cert_path'] or not config['ssl_cert_path'].strip():
+        error_msg = "ssl_cert_path cannot be empty"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Validate sync_start_date format
+    try:
+        from datetime import datetime
+        datetime.strptime(config['sync_start_date'], "%Y-%m-%d")
+    except ValueError as e:
+        error_msg = f"Invalid sync_start_date format: {e}"
         logger.error(error_msg)
         raise ValueError(error_msg)
     
     logger.info("Configuration structure validation passed")
 
 def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
-    """Load and validate configuration from NAS."""
+    """Load and validate YAML configuration from NAS."""
     global logger
     
     try:
         config_path = os.getenv('CONFIG_PATH')
-        logger.info(f"Loading configuration from NAS: {config_path}")
+        logger.info(f"Loading YAML configuration from NAS: {config_path}")
         
         config_data = nas_download_file(nas_conn, config_path)
         if not config_data:
@@ -143,18 +156,18 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
             logger.error(error_msg)
             raise FileNotFoundError(error_msg)
         
-        # Parse JSON configuration
+        # Parse YAML configuration
         try:
-            config = json.loads(config_data.decode('utf-8'))
-        except json.JSONDecodeError as e:
-            error_msg = f"Invalid JSON in configuration file: {e}"
+            config = yaml.safe_load(config_data.decode('utf-8'))
+        except yaml.YAMLError as e:
+            error_msg = f"Invalid YAML in configuration file: {e}"
             logger.error(error_msg)
             raise ValueError(error_msg)
         
         # Validate configuration structure
         validate_config_structure(config)
         
-        logger.info(f"Successfully loaded configuration with {len(config['monitored_institutions'])} institutions")
+        logger.info(f"Successfully loaded YAML configuration with {len(config['monitored_institutions'])} institutions")
         return config
         
     except Exception as e:
@@ -166,7 +179,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     global logger, config
     
     try:
-        cert_path = config['ssl_cert_nas_path']
+        cert_path = config['ssl_cert_path']
         logger.info(f"Downloading SSL certificate from NAS: {cert_path}")
         
         cert_data = nas_download_file(nas_conn, cert_path)

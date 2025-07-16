@@ -1,0 +1,163 @@
+# Minimal Stage 0 Configuration
+# Simplified config with essential settings for transcript sync
+
+# SSL Certificate Configuration
+ssl_cert_path: "Inputs/certificate/certificate.cer"
+
+# API Settings
+api_settings:
+  # Core API parameters
+  industry_categories:
+    - "IN:BANKS"
+    - "IN:FNLSVC"
+    - "IN:INS"
+    - "IN:SECS"
+  
+  transcript_types:
+    - "Corrected"
+    - "Raw"
+  
+  # API request configuration
+  sort_order:
+    - "-storyDateTime"
+  pagination_limit: 1000
+  pagination_offset: 0
+  
+  # Rate limiting and retry settings
+  request_delay: 3.0
+  max_retries: 8
+  retry_delay: 10.0
+  use_exponential_backoff: true
+  max_backoff_delay: 120.0
+
+# Date range for bulk sync
+sync_start_date: "2023-01-01"
+
+# Stage 0 specific settings
+stage_0:
+  description: "Bulk historical download from sync_start_date to present"
+  use_rolling_window: false
+  rolling_window_years: 2
+
+# Monitored Financial Institutions
+# Format: ticker: {name, type}
+monitored_institutions:
+  # Canadian Banks
+  RY-CA: {name: "Royal Bank of Canada", type: "Canadian"}
+  TD-CA: {name: "Toronto-Dominion Bank", type: "Canadian"}
+  BNS-CA: {name: "Bank of Nova Scotia", type: "Canadian"}
+  BMO-CA: {name: "Bank of Montreal", type: "Canadian"}
+  CM-CA: {name: "Canadian Imperial Bank of Commerce", type: "Canadian"}
+  NA-CA: {name: "National Bank of Canada", type: "Canadian"}
+  LB-CA: {name: "Laurentian Bank of Canada", type: "Canadian"}
+  CWB-CA: {name: "Canadian Western Bank", type: "Canadian"}
+  
+  # US Major Banks
+  JPM-US: {name: "JPMorgan Chase & Co.", type: "US"}
+  BAC-US: {name: "Bank of America Corporation", type: "US"}
+  WFC-US: {name: "Wells Fargo & Company", type: "US"}
+  C-US: {name: "Citigroup Inc.", type: "US"}
+  GS-US: {name: "Goldman Sachs Group Inc.", type: "US"}
+  MS-US: {name: "Morgan Stanley", type: "US"}
+  USB-US: {name: "U.S. Bancorp", type: "US"}
+  PNC-US: {name: "PNC Financial Services Group", type: "US"}
+  TFC-US: {name: "Truist Financial Corporation", type: "US"}
+  COF-US: {name: "Capital One Financial Corporation", type: "US"}
+  SCHW-US: {name: "Charles Schwab Corporation", type: "US"}
+  
+  # US Regional Banks
+  RF-US: {name: "Regions Financial Corporation", type: "US_Regional"}
+  FITB-US: {name: "Fifth Third Bancorp", type: "US_Regional"}
+  MTB-US: {name: "M&T Bank Corporation", type: "US_Regional"}
+  HBAN-US: {name: "Huntington Bancshares Incorporated", type: "US_Regional"}
+  KEY-US: {name: "KeyCorp", type: "US_Regional"}
+  WAL-US: {name: "Western Alliance Bancorporation", type: "US_Regional"}
+  ALLY-US: {name: "Ally Financial Inc", type: "US_Regional"}
+  CMA-US: {name: "Comerica Incorporated", type: "US_Regional"}
+  CFG-US: {name: "Citizens Financial Group Inc", type: "US_Regional"}
+  SNV-US: {name: "Synovus Financial Corp", type: "US_Regional"}
+  
+  # European Banks
+  BCS-GB: {name: "Barclays PLC", type: "European"}
+  LLOY-GB: {name: "Lloyds Banking Group plc", type: "European"}
+  RBS-GB: {name: "NatWest Group plc", type: "European"}
+  HSBA-GB: {name: "HSBC Holdings plc", type: "European"}
+  STAN-GB: {name: "Standard Chartered PLC", type: "European"}
+  DBK-DE: {name: "Deutsche Bank AG", type: "European"}
+  CBK-DE: {name: "Commerzbank AG", type: "European"}
+  BNP-FR: {name: "BNP Paribas", type: "European"}
+  ACA-FR: {name: "Credit Agricole S.A.", type: "European"}
+  GLE-FR: {name: "Societe Generale", type: "European"}
+  SAN-ES: {name: "Banco Santander S.A.", type: "European"}
+  BBVA-ES: {name: "Banco Bilbao Vizcaya Argentaria S.A.", type: "European"}
+  ISP-IT: {name: "Intesa Sanpaolo", type: "European"}
+  UCG-IT: {name: "UniCredit S.p.A.", type: "European"}
+  ING-NL: {name: "ING Groep N.V.", type: "European"}
+  UBS-CH: {name: "UBS Group AG", type: "European"}
+  CSGN-CH: {name: "Credit Suisse Group AG", type: "European"}
+  
+  # Nordic Banks
+  DANSKE-DK: {name: "Danske Bank A/S", type: "Nordic"}
+  NDA-FI: {name: "Nordea Bank Abp", type: "Nordic"}
+  SWED-SE: {name: "Swedbank AB", type: "Nordic"}
+  SEBA-SE: {name: "Skandinaviska Enskilda Banken AB", type: "Nordic"}
+  
+  # Australian Banks
+  CBA-AU: {name: "Commonwealth Bank of Australia", type: "Australian"}
+  WBC-AU: {name: "Westpac Banking Corporation", type: "Australian"}
+  ANZ-AU: {name: "Australia and New Zealand Banking Group", type: "Australian"}
+  NAB-AU: {name: "National Australia Bank", type: "Australian"}
+  BOQ-AU: {name: "Bank of Queensland", type: "Australian"}
+  
+  # US Asset Managers
+  BLK-US: {name: "BlackRock Inc", type: "US_Asset_Manager"}
+  BEN-US: {name: "Franklin Resources Inc", type: "US_Asset_Manager"}
+  IVZ-US: {name: "Invesco Ltd", type: "US_Asset_Manager"}
+  AMG-US: {name: "Affiliated Managers Group Inc", type: "US_Asset_Manager"}
+  AMP-US: {name: "Ameriprise Financial Inc", type: "US_Asset_Manager"}
+  AB-US: {name: "AllianceBernstein Holding LP", type: "US_Asset_Manager"}
+  TROW-US: {name: "T. Rowe Price Group Inc", type: "US_Asset_Manager"}
+  
+  # Canadian Asset Managers
+  CCO-CA: {name: "Canaccord Genuity Group Inc", type: "Canadian_Asset_Manager"}
+  CIX-CA: {name: "CI Financial Corp", type: "Canadian_Asset_Manager"}
+  AGF-CA: {name: "AGF Management Limited", type: "Canadian_Asset_Manager"}
+  IGM-CA: {name: "IGM Financial Inc", type: "Canadian_Asset_Manager"}
+  FCA-CA: {name: "Fiera Capital Corporation", type: "Canadian_Asset_Manager"}
+  
+  # UK Asset Managers
+  RAT-GB: {name: "Rathbones Group Plc", type: "UK_Asset_Manager"}
+  STJ-GB: {name: "St. James's Place plc", type: "UK_Asset_Manager"}
+  QLT-GB: {name: "Quilter plc", type: "UK_Asset_Manager"}
+  
+  # Insurance Companies
+  MFC-CA: {name: "Manulife Financial Corporation", type: "Insurance"}
+  SLF-CA: {name: "Sun Life Financial Inc.", type: "Insurance"}
+  GWO-CA: {name: "Great-West Lifeco Inc.", type: "Insurance"}
+  IFC-CA: {name: "Intact Financial Corporation", type: "Insurance"}
+  FFH-CA: {name: "Fairfax Financial Holdings Limited", type: "Insurance"}
+  UNH-US: {name: "UnitedHealth Group Incorporated", type: "Insurance"}
+  BRK.A-US: {name: "Berkshire Hathaway Inc.", type: "Insurance"}
+  AIG-US: {name: "American International Group Inc.", type: "Insurance"}
+  TRV-US: {name: "The Travelers Companies Inc.", type: "Insurance"}
+  PGR-US: {name: "Progressive Corporation", type: "Insurance"}
+  
+  # Canadian Monoline
+  EQB-CA: {name: "Equitable Group Inc", type: "Canadian_Monoline"}
+  FN-CA: {name: "First National Financial Corporation", type: "Canadian_Monoline"}
+  MKP-CA: {name: "MCAN Mortgage Corporation", type: "Canadian_Monoline"}
+  GSY-CA: {name: "goeasy Ltd", type: "Canadian_Monoline"}
+  
+  # US Trust Banks
+  BK-US: {name: "The Bank of New York Mellon Corporation", type: "US_Trust"}
+  STT-US: {name: "State Street Corporation", type: "US_Trust"}
+  NTRS-US: {name: "Northern Trust Corporation", type: "US_Trust"}
+  
+  # US Boutique Investment Banks
+  LAZ-US: {name: "Lazard Ltd", type: "US_Boutique"}
+  EVR-US: {name: "Evercore Inc", type: "US_Boutique"}
+  HLI-US: {name: "Houlihan Lokey Inc", type: "US_Boutique"}
+  MC-US: {name: "Moelis & Company", type: "US_Boutique"}
+  PJT-US: {name: "PJT Partners Inc", type: "US_Boutique"}
+  SF-US: {name: "Stifel Financial Corp", type: "US_Boutique"}
+  RJF-US: {name: "Raymond James Financial Inc", type: "US_Boutique"}
