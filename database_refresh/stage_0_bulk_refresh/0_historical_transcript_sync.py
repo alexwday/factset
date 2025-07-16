@@ -457,7 +457,7 @@ def main() -> None:
         log_execution("Authentication and API setup completed", {
             'monitored_institutions': len(config['monitored_institutions']),
             'transcript_types': config['api_settings']['transcript_types'],
-            'sync_start_date': config['sync_start_date']
+            'approach': '3-year rolling window'
         })
         
         # Step 7: Create/validate Data directory structure
