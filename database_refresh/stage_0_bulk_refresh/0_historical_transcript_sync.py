@@ -81,7 +81,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
     logs_path = nas_path_join(base_path, "Outputs", "Logs")
     
     # Create logs directory
-    nas_create_directory(nas_conn, logs_path)
+    nas_create_directory_recursive(nas_conn, logs_path)
     
     # Save main execution log
     main_log_content = {
@@ -103,7 +103,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
     # Save error log only if errors exist
     if error_log:
         errors_path = nas_path_join(logs_path, "Errors")
-        nas_create_directory(nas_conn, errors_path)
+        nas_create_directory_recursive(nas_conn, errors_path)
         
         error_log_content = {
             'stage': 'stage_0_historical_transcript_sync',
@@ -290,8 +290,9 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
         # Validate configuration structure
         validate_config_structure(config)
         
-        # Add NAS share name from environment
+        # Add NAS configuration from environment
         config['nas_share_name'] = os.getenv('NAS_SHARE_NAME')
+        config['nas_base_path'] = os.getenv('NAS_BASE_PATH')
         
         logger.info(f"Successfully loaded YAML configuration with {len(config['monitored_institutions'])} institutions")
         return config
@@ -305,7 +306,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     global logger, config
     
     try:
-        cert_path = config['ssl_cert_path']
+        cert_path = nas_path_join(config['nas_base_path'], config['ssl_cert_path'])
         logger.info(f"Downloading SSL certificate from NAS: {cert_path}")
         
         cert_data = nas_download_file(nas_conn, cert_path)
@@ -1041,7 +1042,7 @@ def download_transcript_with_title_filtering(nas_conn: SMBConnection, transcript
             
             # Create directory path
             company_name = institution_info['name'].replace(' ', '_').replace('.', '').replace(',', '')
-            nas_dir_path = f"Outputs/Data/{year}/{quarter}/{institution_info['type']}/{ticker}_{company_name}"
+            nas_dir_path = nas_path_join(config['nas_base_path'], "Outputs", "Data", year, quarter, institution_info['type'], f"{ticker}_{company_name}")
             
             # Create directory recursively if it doesn't exist
             if not nas_create_directory_recursive(nas_conn, nas_dir_path):
@@ -1114,6 +1115,10 @@ def download_transcript_with_title_filtering(nas_conn: SMBConnection, transcript
         'max_retries': config['api_settings']['max_retries']
     })
     return None
+
+def nas_path_join(*args) -> str:
+    """Join NAS path components with forward slashes."""
+    return '/'.join(str(arg).strip('/') for arg in args if arg)
 
 def nas_create_directory_recursive(nas_conn: SMBConnection, dir_path: str) -> bool:
     """Create directory on NAS with recursive parent creation."""
