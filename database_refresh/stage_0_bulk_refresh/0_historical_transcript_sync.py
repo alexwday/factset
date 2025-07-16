@@ -178,18 +178,46 @@ def get_nas_connection() -> Optional[SMBConnection]:
 
 def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes]:
     """Download a file from NAS and return as bytes."""
-    global logger
-    
     try:
         file_obj = io.BytesIO()
         conn.retrieveFile(os.getenv('NAS_SHARE_NAME'), nas_file_path, file_obj)
         file_obj.seek(0)
         content = file_obj.read()
-        logger.info(f"Successfully downloaded file from NAS: {nas_file_path}")
+        log_execution(f"Successfully downloaded file from NAS: {nas_file_path}", {
+            'file_path': nas_file_path,
+            'file_size': len(content)
+        })
         return content
     except Exception as e:
-        logger.error(f"Failed to download file from NAS {nas_file_path}: {e}")
+        log_error(f"Failed to download file from NAS {nas_file_path}: {e}", "nas_download", {
+            'file_path': nas_file_path,
+            'error_details': str(e)
+        })
         return None
+
+def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_path: str) -> bool:
+    """Upload a file object to NAS."""
+    try:
+        # Create parent directory if needed
+        parent_dir = '/'.join(nas_file_path.split('/')[:-1])
+        if parent_dir:
+            nas_create_directory(conn, parent_dir)
+        
+        # Upload file
+        local_file_obj.seek(0)  # Reset file pointer
+        conn.storeFile(os.getenv('NAS_SHARE_NAME'), nas_file_path, local_file_obj)
+        
+        log_execution(f"Successfully uploaded file to NAS: {nas_file_path}", {
+            'file_path': nas_file_path,
+            'file_size': len(local_file_obj.getvalue())
+        })
+        return True
+    except Exception as e:
+        log_error(f"Failed to upload file to NAS {nas_file_path}: {e}", "nas_upload", {
+            'file_path': nas_file_path,
+            'error_details': str(e)
+        })
+        return False
 
 def validate_config_structure(config: Dict[str, Any]) -> None:
     """Validate that configuration contains required sections and fields."""
