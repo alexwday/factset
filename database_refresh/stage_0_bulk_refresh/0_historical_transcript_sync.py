@@ -10,7 +10,7 @@ import logging
 import json
 from datetime import datetime
 from urllib.parse import quote
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import io
 import re
 
@@ -221,15 +221,14 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
 
 def validate_config_structure(config: Dict[str, Any]) -> None:
     """Validate that configuration contains required sections and fields."""
-    global logger
     
     # Required top-level sections
-    required_sections = ['api_settings', 'monitored_institutions', 'ssl_cert_path', 'sync_start_date']
+    required_sections = ['api_settings', 'monitored_institutions', 'ssl_cert_path', 'stage_0']
     
     for section in required_sections:
         if section not in config:
             error_msg = f"Missing required configuration section: {section}"
-            logger.error(error_msg)
+            log_error(error_msg, "config_validation", {'missing_section': section})
             raise ValueError(error_msg)
     
     # Validate api_settings structure
@@ -241,31 +240,26 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     for setting in required_api_settings:
         if setting not in config['api_settings']:
             error_msg = f"Missing required API setting: {setting}"
-            logger.error(error_msg)
+            log_error(error_msg, "config_validation", {'missing_setting': setting})
             raise ValueError(error_msg)
     
     # Validate monitored_institutions is not empty
     if not config['monitored_institutions']:
         error_msg = "monitored_institutions cannot be empty"
-        logger.error(error_msg)
+        log_error(error_msg, "config_validation", {})
         raise ValueError(error_msg)
     
     # Validate ssl_cert_path is not empty
     if not config['ssl_cert_path'] or not config['ssl_cert_path'].strip():
         error_msg = "ssl_cert_path cannot be empty"
-        logger.error(error_msg)
+        log_error(error_msg, "config_validation", {})
         raise ValueError(error_msg)
     
-    # Validate sync_start_date format
-    try:
-        from datetime import datetime
-        datetime.strptime(config['sync_start_date'], "%Y-%m-%d")
-    except ValueError as e:
-        error_msg = f"Invalid sync_start_date format: {e}"
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-    
-    logger.info("Configuration structure validation passed")
+    log_execution("Configuration structure validation passed", {
+        'sections_validated': required_sections,
+        'api_settings_validated': required_api_settings,
+        'total_institutions': len(config['monitored_institutions'])
+    })
 
 def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
     """Load and validate YAML configuration from NAS."""
@@ -721,6 +715,159 @@ def scan_existing_transcripts(nas_conn: SMBConnection) -> List[Dict[str, str]]:
         })
     
     return transcript_inventory
+
+def calculate_rolling_window() -> Tuple[datetime.date, datetime.date]:
+    """Calculate 3-year rolling window from current date."""
+    end_date = datetime.now().date()
+    start_date = datetime(end_date.year - 3, end_date.month, end_date.day).date()
+    
+    log_execution("Calculated 3-year rolling window", {
+        'start_date': start_date.isoformat(),
+        'end_date': end_date.isoformat(),
+        'window_years': 3
+    })
+    
+    return start_date, end_date
+
+def get_api_transcripts_for_company(api_instance, ticker: str, institution_info: Dict[str, str], 
+                                   start_date: datetime.date, end_date: datetime.date, 
+                                   configuration) -> List[Dict[str, Any]]:
+    """Get all transcripts for a company from the API within date range."""
+    global config
+    
+    try:
+        log_execution(f"Querying API for {ticker} transcripts", {
+            'ticker': ticker,
+            'institution': institution_info['name'],
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat()
+        })
+        
+        api_params = {
+            'ids': [ticker],
+            'start_date': start_date,
+            'end_date': end_date,
+            'categories': config['api_settings']['industry_categories'],
+            'sort': config['api_settings']['sort_order'],
+            'pagination_limit': config['api_settings']['pagination_limit'],
+            'pagination_offset': config['api_settings']['pagination_offset']
+        }
+        
+        response = api_instance.get_transcripts_ids(**api_params)
+        
+        if not response or not hasattr(response, 'data') or not response.data:
+            log_execution(f"No transcripts found for {ticker}", {'ticker': ticker})
+            return []
+        
+        all_transcripts = [transcript.to_dict() for transcript in response.data]
+        
+        # Filter to only transcripts where our ticker is the SOLE primary ID (anti-contamination)
+        filtered_transcripts = []
+        for transcript in all_transcripts:
+            primary_ids = transcript.get('primary_ids', [])
+            if isinstance(primary_ids, list) and primary_ids == [ticker]:
+                filtered_transcripts.append(transcript)
+        
+        # Filter for earnings transcripts only
+        earnings_transcripts = [
+            transcript for transcript in filtered_transcripts
+            if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', ''))
+        ]
+        
+        log_execution(f"API query completed for {ticker}", {
+            'ticker': ticker,
+            'total_transcripts': len(all_transcripts),
+            'filtered_transcripts': len(filtered_transcripts),
+            'earnings_transcripts': len(earnings_transcripts)
+        })
+        
+        return earnings_transcripts
+        
+    except Exception as e:
+        log_error(f"Error querying API for {ticker}: {e}", "api_query", {
+            'ticker': ticker,
+            'error_details': str(e)
+        })
+        return []
+
+def create_api_transcript_list(api_transcripts: List[Dict[str, Any]], ticker: str, 
+                              institution_info: Dict[str, str]) -> List[Dict[str, str]]:
+    """Convert API transcripts to standardized format for comparison."""
+    api_list = []
+    
+    for transcript in api_transcripts:
+        for transcript_type in config['api_settings']['transcript_types']:
+            if transcript.get('transcript_type') == transcript_type:
+                api_record = {
+                    'company_type': institution_info['type'],
+                    'company': ticker,
+                    'ticker': ticker,
+                    'transcript_type': transcript_type,
+                    'event_id': str(transcript.get('event_id', '')),
+                    'version_id': str(transcript.get('version_id', '')),
+                    'event_date': transcript.get('event_date', ''),
+                    'transcript_link': transcript.get('transcripts_link', '')
+                }
+                api_list.append(api_record)
+    
+    return api_list
+
+def compare_transcripts(api_transcripts: List[Dict[str, str]], 
+                       nas_transcripts: List[Dict[str, str]]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+    """Compare API vs NAS transcripts and determine what to download/remove."""
+    
+    # Create lookup dictionaries by event_id
+    api_by_event_id = {}
+    for transcript in api_transcripts:
+        event_id = transcript['event_id']
+        if event_id not in api_by_event_id:
+            api_by_event_id[event_id] = []
+        api_by_event_id[event_id].append(transcript)
+    
+    nas_by_event_id = {}
+    for transcript in nas_transcripts:
+        event_id = transcript['event_id']
+        if event_id not in nas_by_event_id:
+            nas_by_event_id[event_id] = []
+        nas_by_event_id[event_id].append(transcript)
+    
+    to_download = []
+    to_remove = []
+    
+    # Process each event_id in API
+    for event_id, api_versions in api_by_event_id.items():
+        if event_id in nas_by_event_id:
+            # Event exists in both API and NAS - compare versions
+            nas_versions = nas_by_event_id[event_id]
+            
+            for api_transcript in api_versions:
+                # Find matching NAS transcript by transcript_type
+                matching_nas = None
+                for nas_transcript in nas_versions:
+                    if (nas_transcript['transcript_type'] == api_transcript['transcript_type'] and
+                        nas_transcript['ticker'] == api_transcript['ticker']):
+                        matching_nas = nas_transcript
+                        break
+                
+                if matching_nas:
+                    # Compare versions - API version is always considered latest
+                    if api_transcript['version_id'] != matching_nas['version_id']:
+                        to_download.append(api_transcript)
+                        to_remove.append(matching_nas)
+                    # If versions are same, no action needed
+                else:
+                    # New transcript type for this event_id
+                    to_download.append(api_transcript)
+        else:
+            # New event_id - download all versions
+            to_download.extend(api_versions)
+    
+    # Process each event_id in NAS that's not in API (outside 3-year window)
+    for event_id, nas_versions in nas_by_event_id.items():
+        if event_id not in api_by_event_id:
+            to_remove.extend(nas_versions)
+    
+    return to_download, to_remove
 
 if __name__ == "__main__":
     main()

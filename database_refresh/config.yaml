@@ -30,14 +30,9 @@ api_settings:
   use_exponential_backoff: true
   max_backoff_delay: 120.0
 
-# Date range for bulk sync
-sync_start_date: "2023-01-01"
-
 # Stage 0 specific settings
 stage_0:
-  description: "Bulk historical download from sync_start_date to present"
-  use_rolling_window: false
-  rolling_window_years: 2
+  description: "Historical download using 3-year rolling window"
 
 # Monitored Financial Institutions
 # Format: ticker: {name, type}
