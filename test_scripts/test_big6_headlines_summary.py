@@ -14,7 +14,7 @@ import os
 import sys
 import json
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 import logging
@@ -32,6 +32,7 @@ from fds.sdk.StreetAccountNews.model.headlines_request_data import HeadlinesRequ
 from fds.sdk.StreetAccountNews.model.headlines_request_meta import HeadlinesRequestMeta
 from fds.sdk.StreetAccountNews.model.headlines_request_meta_pagination import HeadlinesRequestMetaPagination
 from fds.sdk.StreetAccountNews.model.headlines_request_tickers_object import HeadlinesRequestTickersObject
+from fds.sdk.StreetAccountNews.model.headlines_request_data_search_time import HeadlinesRequestDataSearchTime
 
 # Suppress pandas warnings
 pd.options.mode.chained_assignment = None
@@ -212,7 +213,11 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
             for ticker in BIG_6_BANKS.keys()
         ]
         
-        # Prepare request for Big 6 bank headlines
+        # Calculate 60-day date range
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=60)
+        
+        # Prepare request for Big 6 bank headlines (last 60 days)
         headlines_request = HeadlinesRequest(
             data=HeadlinesRequestData(
                 tickers=bank_tickers,
@@ -220,7 +225,10 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
                 sectors=["Financial"],
                 regions=["North America"],
                 is_primary=True,
-                predefined_range="today"
+                search_time=HeadlinesRequestDataSearchTime(
+                    start=start_time,
+                    end=end_time
+                )
             ),
             meta=HeadlinesRequestMeta(
                 pagination=HeadlinesRequestMetaPagination(
@@ -237,7 +245,7 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
         with streetaccount.ApiClient(configuration) as api_client:
             api_instance = headlines_api.HeadlinesApi(api_client)
             
-            logger.info("📰 Retrieving Big 6 Canadian bank headlines...")
+            logger.info("📰 Retrieving Big 6 Canadian bank headlines (last 60 days)...")
             
             try:
                 response = api_instance.get_street_account_headlines(headlines_request=headlines_request)
@@ -279,11 +287,11 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
 def display_headlines_summary(headlines: List[Dict[str, Any]]) -> None:
     """Display clean headlines summary for Big 6 banks."""
     print("\\n" + "="*100)
-    print("🏦 BIG 6 CANADIAN BANKS - HEADLINES SUMMARY")
+    print("🏦 BIG 6 CANADIAN BANKS - HEADLINES SUMMARY (LAST 60 DAYS)")
     print("="*100)
     
     if not headlines:
-        print("❌ No headlines found for Big 6 banks today")
+        print("❌ No headlines found for Big 6 banks in the last 60 days")
         return
     
     # Group headlines by bank
@@ -306,7 +314,7 @@ def display_headlines_summary(headlines: List[Dict[str, Any]]) -> None:
         print("-" * 60)
         
         if not bank_news:
-            print("   📰 No news found for today")
+            print("   📰 No news found in the last 60 days")
             continue
             
         # Sort by publish time (newest first)
@@ -351,7 +359,7 @@ def display_headlines_summary(headlines: List[Dict[str, Any]]) -> None:
 
 def main():
     """Main execution function."""
-    print("🚀 Starting Big 6 Canadian Banks Headlines Summary...")
+    print("🚀 Starting Big 6 Canadian Banks Headlines Summary (Last 60 Days)...")
     print("="*80)
     
     # Load environment

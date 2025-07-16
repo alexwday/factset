@@ -15,7 +15,7 @@ import os
 import sys
 import json
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 import logging
@@ -33,6 +33,7 @@ from fds.sdk.StreetAccountNews.model.headlines_request_data import HeadlinesRequ
 from fds.sdk.StreetAccountNews.model.headlines_request_meta import HeadlinesRequestMeta
 from fds.sdk.StreetAccountNews.model.headlines_request_meta_pagination import HeadlinesRequestMetaPagination
 from fds.sdk.StreetAccountNews.model.headlines_request_tickers_object import HeadlinesRequestTickersObject
+from fds.sdk.StreetAccountNews.model.headlines_request_data_search_time import HeadlinesRequestDataSearchTime
 
 # Suppress pandas warnings
 pd.options.mode.chained_assignment = None
@@ -213,7 +214,11 @@ def get_big6_full_content() -> Optional[List[Dict[str, Any]]]:
             for ticker in BIG_6_BANKS.keys()
         ]
         
-        # Prepare request for Big 6 bank full content
+        # Calculate 60-day date range
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=60)
+        
+        # Prepare request for Big 6 bank full content (last 60 days)
         headlines_request = HeadlinesRequest(
             data=HeadlinesRequestData(
                 tickers=bank_tickers,
@@ -221,7 +226,10 @@ def get_big6_full_content() -> Optional[List[Dict[str, Any]]]:
                 sectors=["Financial"],
                 regions=["North America"],
                 is_primary=True,
-                predefined_range="today"
+                search_time=HeadlinesRequestDataSearchTime(
+                    start=start_time,
+                    end=end_time
+                )
             ),
             meta=HeadlinesRequestMeta(
                 pagination=HeadlinesRequestMetaPagination(
