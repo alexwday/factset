@@ -209,7 +209,7 @@ def get_big6_full_content() -> Optional[List[Dict[str, Any]]]:
         
         # Create ticker objects for Big 6 banks
         bank_tickers = [
-            HeadlinesRequestTickersObject(value=ticker, type="Ticker")
+            HeadlinesRequestTickersObject(value=ticker, type="Equity")
             for ticker in BIG_6_BANKS.keys()
         ]
         
