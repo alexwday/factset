@@ -526,6 +526,10 @@ def main() -> None:
                 removed_count = 0
                 skipped_count = 0
                 
+                # Check if this institution has any transcripts after API filtering
+                if len(api_transcript_list) == 0:
+                    log_console(f"No earnings transcripts found for {ticker} after API filtering", "WARNING")
+                
                 # Download new/updated transcripts
                 for transcript in to_download:
                     log_console(f"Attempting download for {ticker} event_id={transcript.get('event_id', 'N/A')}")
@@ -558,6 +562,9 @@ def main() -> None:
                     if remove_nas_file(nas_conn, transcript['file_path']):
                         removed_count += 1
                         log_console(f"Removed: {transcript['file_path']}")
+                
+                # Update totals to reflect actual downloads vs skipped
+                total_to_download = total_to_download - len(to_download) + downloaded_count
                 
                 log_console(f"Completed {ticker}: {downloaded_count} downloaded, {removed_count} removed, {skipped_count} skipped")
                 
@@ -1030,8 +1037,8 @@ def download_transcript_with_title_filtering(nas_conn: SMBConnection, transcript
                     if root.tag.startswith('{'):
                         namespace = root.tag.split('}')[0] + '}'
                     meta = root.find(f"{namespace}meta" if namespace else "meta")
-                    title_elem = meta.find(f"{namespace}title" if namespace else "title") if meta is not None else None
-                    title = title_elem.text if title_elem is not None and title_elem.text else "No title found"
+                    title_elem = meta.find(f"{namespace}title" if namespace else "title") if meta else None
+                    title = title_elem.text if title_elem and title_elem.text else "No title found"
                 except:
                     title = "Failed to extract title"
                 
