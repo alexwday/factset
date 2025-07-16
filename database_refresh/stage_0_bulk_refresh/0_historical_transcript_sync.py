@@ -8,6 +8,7 @@ import os
 import tempfile
 import logging
 import json
+import time
 from datetime import datetime
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
@@ -508,6 +509,10 @@ def main() -> None:
                     'to_remove': len(to_remove)
                 })
                 
+                # Add rate limiting between institutions (except for the last one)
+                if i < len(config['monitored_institutions']):
+                    time.sleep(config['api_settings']['request_delay'])
+                
                 # TODO: Add actual download and remove logic here
         
         log_console(f"Transcript comparison complete: {total_to_download} to download, {total_to_remove} to remove")
@@ -784,63 +789,87 @@ def calculate_rolling_window() -> Tuple[datetime.date, datetime.date]:
 def get_api_transcripts_for_company(api_instance, ticker: str, institution_info: Dict[str, str], 
                                    start_date: datetime.date, end_date: datetime.date, 
                                    configuration) -> List[Dict[str, Any]]:
-    """Get all transcripts for a company from the API within date range."""
+    """Get all transcripts for a company from the API within date range with retry logic."""
     global config
     
-    try:
-        log_execution(f"Querying API for {ticker} transcripts", {
-            'ticker': ticker,
-            'institution': institution_info['name'],
-            'start_date': start_date.isoformat(),
-            'end_date': end_date.isoformat()
-        })
-        
-        api_params = {
-            'ids': [ticker],
-            'start_date': start_date,
-            'end_date': end_date,
-            'categories': config['api_settings']['industry_categories'],
-            'sort': config['api_settings']['sort_order'],
-            'pagination_limit': config['api_settings']['pagination_limit'],
-            'pagination_offset': config['api_settings']['pagination_offset']
-        }
-        
-        response = api_instance.get_transcripts_ids(**api_params)
-        
-        if not response or not hasattr(response, 'data') or not response.data:
-            log_execution(f"No transcripts found for {ticker}", {'ticker': ticker})
-            return []
-        
-        all_transcripts = [transcript.to_dict() for transcript in response.data]
-        
-        # Filter to only transcripts where our ticker is the SOLE primary ID (anti-contamination)
-        filtered_transcripts = []
-        for transcript in all_transcripts:
-            primary_ids = transcript.get('primary_ids', [])
-            if isinstance(primary_ids, list) and primary_ids == [ticker]:
-                filtered_transcripts.append(transcript)
-        
-        # Filter for earnings transcripts only
-        earnings_transcripts = [
-            transcript for transcript in filtered_transcripts
-            if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', ''))
-        ]
-        
-        log_execution(f"API query completed for {ticker}", {
-            'ticker': ticker,
-            'total_transcripts': len(all_transcripts),
-            'filtered_transcripts': len(filtered_transcripts),
-            'earnings_transcripts': len(earnings_transcripts)
-        })
-        
-        return earnings_transcripts
-        
-    except Exception as e:
-        log_error(f"Error querying API for {ticker}: {e}", "api_query", {
-            'ticker': ticker,
-            'error_details': str(e)
-        })
-        return []
+    for attempt in range(config['api_settings']['max_retries']):
+        try:
+            log_execution(f"Querying API for {ticker} transcripts (attempt {attempt + 1})", {
+                'ticker': ticker,
+                'institution': institution_info['name'],
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'attempt': attempt + 1
+            })
+            
+            api_params = {
+                'ids': [ticker],
+                'start_date': start_date,
+                'end_date': end_date,
+                'categories': config['api_settings']['industry_categories'],
+                'sort': config['api_settings']['sort_order'],
+                'pagination_limit': config['api_settings']['pagination_limit'],
+                'pagination_offset': config['api_settings']['pagination_offset']
+            }
+            
+            response = api_instance.get_transcripts_ids(**api_params)
+            
+            if not response or not hasattr(response, 'data') or not response.data:
+                log_execution(f"No transcripts found for {ticker}", {'ticker': ticker})
+                return []
+            
+            all_transcripts = [transcript.to_dict() for transcript in response.data]
+            
+            # Filter to only transcripts where our ticker is the SOLE primary ID (anti-contamination)
+            filtered_transcripts = []
+            for transcript in all_transcripts:
+                primary_ids = transcript.get('primary_ids', [])
+                if isinstance(primary_ids, list) and primary_ids == [ticker]:
+                    filtered_transcripts.append(transcript)
+            
+            # Filter for earnings transcripts only
+            earnings_transcripts = [
+                transcript for transcript in filtered_transcripts
+                if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', ''))
+            ]
+            
+            log_execution(f"API query completed for {ticker}", {
+                'ticker': ticker,
+                'total_transcripts': len(all_transcripts),
+                'filtered_transcripts': len(filtered_transcripts),
+                'earnings_transcripts': len(earnings_transcripts)
+            })
+            
+            return earnings_transcripts
+            
+        except Exception as e:
+            if attempt < config['api_settings']['max_retries'] - 1:
+                # Calculate delay with exponential backoff if enabled
+                if config['api_settings'].get('use_exponential_backoff', False):
+                    base_delay = config['api_settings']['retry_delay']
+                    max_delay = config['api_settings'].get('max_backoff_delay', 120.0)
+                    exponential_delay = base_delay * (2 ** attempt)
+                    actual_delay = min(exponential_delay, max_delay)
+                    log_console(f"API query attempt {attempt + 1} failed for {ticker}, retrying in {actual_delay:.1f}s (exponential backoff): {e}", "WARNING")
+                else:
+                    actual_delay = config['api_settings']['retry_delay']
+                    log_console(f"API query attempt {attempt + 1} failed for {ticker}, retrying in {actual_delay:.1f}s: {e}", "WARNING")
+                
+                time.sleep(actual_delay)
+            else:
+                log_error(f"Failed to query API for {ticker} after {attempt + 1} attempts: {e}", "api_query", {
+                    'ticker': ticker,
+                    'error_details': str(e),
+                    'attempts': attempt + 1
+                })
+                return []
+    
+    # If we get here, all retries failed
+    log_error(f"All API query attempts failed for {ticker}", "api_query", {
+        'ticker': ticker,
+        'max_retries': config['api_settings']['max_retries']
+    })
+    return []
 
 def create_api_transcript_list(api_transcripts: List[Dict[str, Any]], ticker: str, 
                               institution_info: Dict[str, str]) -> List[Dict[str, str]]:
