@@ -522,6 +522,17 @@ def main() -> None:
                 # Download new/updated transcripts
                 for transcript in to_download:
                     log_console(f"Attempting download for {ticker} event_id={transcript.get('event_id', 'N/A')}")
+                    
+                    # Debug: Show what's in the transcript object
+                    log_execution(f"Transcript to download details", {
+                        'ticker': ticker,
+                        'event_id': transcript.get('event_id', 'N/A'),
+                        'version_id': transcript.get('version_id', 'N/A'),
+                        'transcript_type': transcript.get('transcript_type', 'N/A'),
+                        'transcripts_link': 'present' if transcript.get('transcripts_link') else 'missing',
+                        'all_keys': list(transcript.keys())
+                    })
+                    
                     result = download_transcript_with_title_filtering(
                         nas_conn, transcript, ticker, institution_info, api_configuration
                     )
