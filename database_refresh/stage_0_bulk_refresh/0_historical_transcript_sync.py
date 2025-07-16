@@ -16,6 +16,7 @@ import re
 
 import yaml
 import fds.sdk.EventsandTranscripts
+from fds.sdk.EventsandTranscripts.api import transcripts_api
 from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 
@@ -464,7 +465,58 @@ def main() -> None:
         if unparseable_count > 0:
             log_console(f"Warning: {unparseable_count} files have non-conforming names", "WARNING")
         
-        # TODO: Add transcript download logic here using transcript_inventory
+        # Step 9: Calculate rolling window
+        log_console("Calculating 3-year rolling window...")
+        start_date, end_date = calculate_rolling_window()
+        
+        # Step 10: Process each institution
+        log_console("Processing institutions for transcript comparison...")
+        total_to_download = 0
+        total_to_remove = 0
+        
+        with fds.sdk.EventsandTranscripts.ApiClient(api_configuration) as api_client:
+            api_instance = transcripts_api.TranscriptsApi(api_client)
+            
+            for i, (ticker, institution_info) in enumerate(config['monitored_institutions'].items(), 1):
+                log_console(f"Processing {ticker} ({i}/{len(config['monitored_institutions'])})")
+                
+                # Get API transcripts for this company
+                api_transcripts = get_api_transcripts_for_company(
+                    api_instance, ticker, institution_info, start_date, end_date, api_configuration
+                )
+                
+                # Convert to standardized format
+                api_transcript_list = create_api_transcript_list(api_transcripts, ticker, institution_info)
+                
+                # Filter NAS inventory for this company
+                company_nas_transcripts = [
+                    t for t in transcript_inventory 
+                    if t['ticker'] == ticker and t['company_type'] == institution_info['type']
+                ]
+                
+                # Compare and determine actions
+                to_download, to_remove = compare_transcripts(api_transcript_list, company_nas_transcripts)
+                
+                total_to_download += len(to_download)
+                total_to_remove += len(to_remove)
+                
+                log_execution(f"Completed transcript comparison for {ticker}", {
+                    'ticker': ticker,
+                    'api_transcripts': len(api_transcript_list),
+                    'nas_transcripts': len(company_nas_transcripts),
+                    'to_download': len(to_download),
+                    'to_remove': len(to_remove)
+                })
+                
+                # TODO: Add actual download and remove logic here
+        
+        log_console(f"Transcript comparison complete: {total_to_download} to download, {total_to_remove} to remove")
+        
+        # Update stage summary
+        stage_summary['total_to_download'] = total_to_download
+        stage_summary['total_to_remove'] = total_to_remove
+        stage_summary['rolling_window_start'] = start_date.isoformat()
+        stage_summary['rolling_window_end'] = end_date.isoformat()
         
         stage_summary['status'] = 'completed'
         stage_summary['execution_time_seconds'] = (datetime.now() - start_time).total_seconds()
