@@ -122,10 +122,15 @@ def nas_download_file(conn: SMBConnection, nas_path: str) -> Optional[bytes]:
         logger.error(f"❌ Failed to download {nas_path}: {e}")
         return None
 
-def setup_ssl_certificate(nas_conn: SMBConnection, ssl_cert_path: str) -> Optional[str]:
+def setup_ssl_certificate(nas_conn: SMBConnection, config: Dict[str, Any]) -> Optional[str]:
     """Download and setup SSL certificate."""
     try:
-        cert_data = nas_download_file(nas_conn, ssl_cert_path)
+        ssl_cert_nas_path = config.get('ssl_cert_nas_path')
+        if not ssl_cert_nas_path:
+            logger.error("❌ SSL certificate path not found in config")
+            return None
+            
+        cert_data = nas_download_file(nas_conn, ssl_cert_nas_path)
         if not cert_data:
             return None
             
@@ -190,8 +195,7 @@ def get_big6_full_content() -> Optional[List[Dict[str, Any]]]:
             return None
             
         # Setup SSL
-        ssl_cert_path = config.get('ssl_cert_nas_path')
-        temp_cert_path = setup_ssl_certificate(nas_conn, ssl_cert_path)
+        temp_cert_path = setup_ssl_certificate(nas_conn, config)
         if not temp_cert_path:
             return None
             
