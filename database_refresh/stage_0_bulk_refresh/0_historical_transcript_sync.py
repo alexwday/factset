@@ -32,7 +32,7 @@ def setup_logging() -> logging.Logger:
     """Set up minimal console logging configuration."""
     logging.basicConfig(
         level=logging.INFO,
-        format='%(levelname)s - %(message)s',
+        format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[logging.StreamHandler()]
     )
     return logging.getLogger(__name__)
