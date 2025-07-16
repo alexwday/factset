@@ -109,11 +109,9 @@ def nas_download_file(conn: SMBConnection, nas_path: str) -> Optional[bytes]:
     """Download file from NAS."""
     try:
         share_name = os.getenv('NAS_SHARE_NAME')
-        base_path = os.getenv('NAS_BASE_PATH')
-        full_path = f"{base_path}/{nas_path}"
         
         with tempfile.NamedTemporaryFile() as temp_file:
-            conn.retrieveFile(share_name, full_path, temp_file)
+            conn.retrieveFile(share_name, nas_path, temp_file)
             temp_file.seek(0)
             return temp_file.read()
             
