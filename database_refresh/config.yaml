@@ -1,5 +1,5 @@
-# Minimal Stage 0 Configuration
-# Simplified config with essential settings for transcript sync
+# Stage 0 Configuration
+# Essential settings for historical transcript sync
 
 # SSL Certificate Configuration
 ssl_cert_path: "Inputs/certificate/certificate.cer"

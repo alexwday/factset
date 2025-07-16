@@ -1,7 +1,7 @@
 """
-Minimal Stage 0: Transcript Sync - Foundation Setup
-Downloads earnings transcripts from FactSet API with minimal required functionality.
-Focuses on core authentication, configuration, and API setup.
+Stage 0: Historical Transcript Sync
+Downloads earnings transcripts from FactSet API with comprehensive functionality.
+Handles authentication, configuration, directory management, and API integration.
 """
 
 import os
@@ -271,7 +271,7 @@ def main() -> None:
     
     # Initialize logging
     logger = setup_logging()
-    logger.info("=== MINIMAL STAGE 0: TRANSCRIPT SYNC SETUP ===")
+    logger.info("=== STAGE 0: HISTORICAL TRANSCRIPT SYNC ===")
     
     nas_conn = None
     ssl_cert_path = None

@@ -604,7 +604,7 @@
   },
   "api_settings": {
     "industry_categories": ["IN:BANKS", "IN:FNLSVC", "IN:INS", "IN:SECS"],
-    "transcript_types": ["Corrected", "Raw", "NearRealTime"],
+    "transcript_types": ["Corrected", "Raw"],
     "sort_order": ["-storyDateTime"],
     "pagination_limit": 1000,
     "pagination_offset": 0,
@@ -615,8 +615,9 @@
     "max_backoff_delay": 120.0
   },
   "stage_0": {
-    "sync_start_date": "2023-01-01",
-    "description": "Bulk historical download from 2023-present"
+    "use_rolling_window": true,
+    "rolling_window_years": 3,
+    "description": "Bulk historical download using 3-year rolling window"
   },
   "stage_1": {
     "sync_date_range": 1,
@@ -625,7 +626,7 @@
   "stage_2": {
     "master_database_path": "Outputs/Database/master_database.json",
     "refresh_output_path": "Outputs/Refresh",
-    "transcript_type_priority": ["Corrected", "Raw", "NearRealTime"],
+    "transcript_type_priority": ["Corrected", "Raw"],
     "include_xml_content": false,
     "description": "Transcript consolidation and database management"
   },

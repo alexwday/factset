@@ -248,7 +248,7 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
     if not config['api_settings']['transcript_types']:
         raise ValueError("transcript_types cannot be empty")
     
-    valid_transcript_types = ['Raw', 'Corrected', 'NearRealTime']
+    valid_transcript_types = ['Raw', 'Corrected']
     for transcript_type in config['api_settings']['transcript_types']:
         if transcript_type not in valid_transcript_types:
             raise ValueError(f"Invalid transcript type: {transcript_type}. Must be one of: {valid_transcript_types}")
