@@ -1043,11 +1043,13 @@ def download_transcript_with_title_filtering(nas_conn: SMBConnection, transcript
             company_name = institution_info['name'].replace(' ', '_').replace('.', '').replace(',', '')
             nas_dir_path = f"Outputs/Data/{year}/{quarter}/{institution_info['type']}/{ticker}_{company_name}"
             
-            # Create directory if it doesn't exist
-            try:
-                nas_conn.createDirectory(config['nas_share_name'], nas_dir_path)
-            except:
-                pass  # Directory might already exist
+            # Create directory recursively if it doesn't exist
+            if not nas_create_directory_recursive(nas_conn, nas_dir_path):
+                log_error(f"Failed to create directory structure for {ticker}", "directory_creation", {
+                    'ticker': ticker,
+                    'directory_path': nas_dir_path
+                })
+                return None
             
             # Upload file to NAS
             file_path = f"{nas_dir_path}/{filename}"
@@ -1112,6 +1114,51 @@ def download_transcript_with_title_filtering(nas_conn: SMBConnection, transcript
         'max_retries': config['api_settings']['max_retries']
     })
     return None
+
+def nas_create_directory_recursive(nas_conn: SMBConnection, dir_path: str) -> bool:
+    """Create directory on NAS with recursive parent creation."""
+    # Normalize and validate path
+    normalized_path = dir_path.strip('/').rstrip('/')
+    if not normalized_path:
+        log_error("Cannot create directory with empty path", "directory_creation", {})
+        return False
+    
+    # Split path into components
+    path_parts = [part for part in normalized_path.split('/') if part]
+    if not path_parts:
+        log_error("Cannot create directory with invalid path", "directory_creation", {})
+        return False
+    
+    # Build path incrementally from root
+    current_path = ""
+    for part in path_parts:
+        current_path = f"{current_path}/{part}" if current_path else part
+        
+        # Check if directory already exists
+        try:
+            # Try to list directory contents to check if it exists
+            nas_conn.listPath(config['nas_share_name'], current_path)
+            continue  # Directory exists, move to next part
+        except:
+            # Directory doesn't exist, try to create it
+            try:
+                nas_conn.createDirectory(config['nas_share_name'], current_path)
+                log_execution(f"Created directory: {current_path}", {
+                    'directory_path': current_path
+                })
+            except Exception as e:
+                # If creation fails, check if it exists now (race condition)
+                try:
+                    nas_conn.listPath(config['nas_share_name'], current_path)
+                    continue  # Directory exists now
+                except:
+                    log_error(f"Failed to create directory {current_path}: {e}", "directory_creation", {
+                        'directory_path': current_path,
+                        'error_details': str(e)
+                    })
+                    return False
+    
+    return True
 
 def remove_nas_file(nas_conn: SMBConnection, file_path: str) -> bool:
     """Remove file from NAS."""
