@@ -270,7 +270,7 @@ def demonstrate_advanced_filtering(configuration) -> None:
                 )
             )
             
-            response = api_instance.get_street_account_headlines(time_filter_request)
+            response = api_instance.get_street_account_headlines(headlines_request=time_filter_request)
             if response and response.data:
                 print(f"✅ Found {len(response.data)} earnings stories from last 3 days")
                 for story in response.data[:3]:
@@ -299,7 +299,7 @@ def demonstrate_advanced_filtering(configuration) -> None:
                 )
             )
             
-            response = api_instance.get_street_account_headlines(multi_category_request)
+            response = api_instance.get_street_account_headlines(headlines_request=multi_category_request)
             if response and response.data:
                 print(f"✅ Found {len(response.data)} stories across multiple categories")
                 category_counts = {}
@@ -336,7 +336,7 @@ def demonstrate_advanced_filtering(configuration) -> None:
                 )
             )
             
-            response = api_instance.get_street_account_headlines(index_request)
+            response = api_instance.get_street_account_headlines(headlines_request=index_request)
             if response and response.data:
                 print(f"✅ Found {len(response.data)} stories for major indices")
                 for story in response.data[:3]:
@@ -405,7 +405,7 @@ def demonstrate_pagination_and_performance(configuration) -> None:
                 )
             )
             
-            response = api_instance.get_street_account_headlines(pagination_request)
+            response = api_instance.get_street_account_headlines(headlines_request=pagination_request)
             if response and response.data:
                 total_results = len(response.data)
                 print(f"✅ Page 1: Retrieved {total_results} results")
@@ -429,7 +429,7 @@ def demonstrate_pagination_and_performance(configuration) -> None:
                         )
                     )
                     
-                    test_response = api_instance.get_street_account_headlines(test_request)
+                    test_response = api_instance.get_street_account_headlines(headlines_request=test_request)
                     if test_response and test_response.data:
                         print(f"   📄 Page size {page_size}: {len(test_response.data)} results")
             else:
@@ -463,7 +463,7 @@ def showcase_real_time_features(configuration) -> None:
                 )
             )
             
-            response = api_instance.get_street_account_headlines(realtime_request)
+            response = api_instance.get_street_account_headlines(headlines_request=realtime_request)
             if response and response.data:
                 print(f"✅ Real-time earnings stories: {len(response.data)} found")
                 

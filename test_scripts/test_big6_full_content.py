@@ -241,7 +241,7 @@ def get_big6_full_content() -> Optional[List[Dict[str, Any]]]:
             logger.info("📰 Retrieving Big 6 Canadian bank full article content...")
             
             try:
-                response = api_instance.get_street_account_headlines(headlines_request)
+                response = api_instance.get_street_account_headlines(headlines_request=headlines_request)
                 
                 if response and response.data:
                     for article_item in response.data:

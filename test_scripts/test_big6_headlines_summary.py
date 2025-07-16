@@ -240,7 +240,7 @@ def get_big6_headlines() -> Optional[List[Dict[str, Any]]]:
             logger.info("📰 Retrieving Big 6 Canadian bank headlines...")
             
             try:
-                response = api_instance.get_street_account_headlines(headlines_request)
+                response = api_instance.get_street_account_headlines(headlines_request=headlines_request)
                 
                 if response and response.data:
                     for headline_item in response.data:
