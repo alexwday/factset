@@ -77,8 +77,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
     global execution_log, error_log
     
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    base_path = os.getenv('NAS_BASE_PATH')
-    logs_path = nas_path_join(base_path, "Outputs", "Logs")
+    logs_path = config['stage_0']['output_logs_path']
     
     # Create logs directory
     nas_create_directory_recursive(nas_conn, logs_path)
@@ -128,7 +127,7 @@ def validate_environment_variables() -> None:
         'API_USERNAME', 'API_PASSWORD', 
         'PROXY_USER', 'PROXY_PASSWORD', 'PROXY_URL',
         'NAS_USERNAME', 'NAS_PASSWORD', 'NAS_SERVER_IP', 'NAS_SERVER_NAME',
-        'NAS_SHARE_NAME', 'NAS_BASE_PATH', 'CONFIG_PATH', 'CLIENT_MACHINE_NAME'
+        'NAS_SHARE_NAME', 'CONFIG_PATH', 'CLIENT_MACHINE_NAME'
     ]
     
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
@@ -253,6 +252,14 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
         log_error(error_msg, "config_validation", {})
         raise ValueError(error_msg)
     
+    # Validate stage_0 section
+    required_stage_0_settings = ['output_data_path', 'output_logs_path']
+    for setting in required_stage_0_settings:
+        if setting not in config['stage_0']:
+            error_msg = f"Missing required stage_0 setting: {setting}"
+            log_error(error_msg, "config_validation", {'missing_setting': setting})
+            raise ValueError(error_msg)
+    
     # Validate ssl_cert_path is not empty
     if not config['ssl_cert_path'] or not config['ssl_cert_path'].strip():
         error_msg = "ssl_cert_path cannot be empty"
@@ -292,7 +299,6 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
         
         # Add NAS configuration from environment
         config['nas_share_name'] = os.getenv('NAS_SHARE_NAME')
-        config['nas_base_path'] = os.getenv('NAS_BASE_PATH')
         
         logger.info(f"Successfully loaded YAML configuration with {len(config['monitored_institutions'])} institutions")
         return config
@@ -306,7 +312,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
     global logger, config
     
     try:
-        cert_path = nas_path_join(config['nas_base_path'], config['ssl_cert_path'])
+        cert_path = config['ssl_cert_path']
         logger.info(f"Downloading SSL certificate from NAS: {cert_path}")
         
         cert_data = nas_download_file(nas_conn, cert_path)
@@ -1042,7 +1048,7 @@ def download_transcript_with_title_filtering(nas_conn: SMBConnection, transcript
             
             # Create directory path
             company_name = institution_info['name'].replace(' ', '_').replace('.', '').replace(',', '')
-            nas_dir_path = nas_path_join(config['nas_base_path'], "Outputs", "Data", year, quarter, institution_info['type'], f"{ticker}_{company_name}")
+            nas_dir_path = nas_path_join(config['stage_0']['output_data_path'], year, quarter, institution_info['type'], f"{ticker}_{company_name}")
             
             # Create directory recursively if it doesn't exist
             if not nas_create_directory_recursive(nas_conn, nas_dir_path):
