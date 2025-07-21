@@ -872,6 +872,16 @@ def calculate_rolling_window() -> Tuple[datetime.date, datetime.date]:
     total_days = (end_date - start_date).days
     quarters_covered = total_days / 91.25  # Approximate days per quarter
 
+    # Enhanced logging with simple explanation
+    log_console(
+        f"3-Year Rolling Window: {start_date.isoformat()} to {end_date.isoformat()} "
+        f"({total_days} days, ~{round(quarters_covered, 1)} quarters)"
+    )
+    log_console(
+        "API will return only transcripts within this date range. "
+        "NAS files outside this range will be marked for removal."
+    )
+
     log_execution(
         "Calculated 3-year rolling window for transcript sync",
         {
@@ -884,6 +894,7 @@ def calculate_rolling_window() -> Tuple[datetime.date, datetime.date]:
             "approximate_quarters_covered": round(quarters_covered, 1),
             "calculation_method": "Current date minus exactly 3 years",
             "purpose": "API query date range for transcript filtering",
+            "explanation": "API queries limited to this range, NAS files outside range will be removed",
         },
     )
 
@@ -1444,10 +1455,6 @@ def main() -> None:
             for i, (ticker, institution_info) in enumerate(
                 config["monitored_institutions"].items(), 1
             ):
-                log_console(
-                    f"Processing {ticker} ({i}/{len(config['monitored_institutions'])})"
-                )
-
                 # Get API transcripts for this company
                 api_transcripts = get_api_transcripts_for_company(
                     api_instance,
@@ -1479,52 +1486,14 @@ def main() -> None:
                 total_to_download += len(to_download)
                 total_to_remove += len(to_remove)
 
-                log_execution(
-                    f"Completed transcript comparison for {ticker}",
-                    {
-                        "ticker": ticker,
-                        "api_transcripts": len(api_transcript_list),
-                        "nas_transcripts": len(company_nas_transcripts),
-                        "to_download": len(to_download),
-                        "to_remove": len(to_remove),
-                    },
-                )
-
                 # Process downloads for this institution
                 downloaded_count = 0
                 removed_count = 0
                 skipped_count = 0
-
-                # Check if this institution has any transcripts after API filtering
-                if len(api_transcript_list) == 0:
-                    log_console(
-                        f"No earnings transcripts found for {ticker} after API filtering",
-                        "WARNING",
-                    )
+                title_filtered_count = 0
 
                 # Download new/updated transcripts
                 for transcript in to_download:
-                    log_console(
-                        f"Attempting download for {ticker} event_id={transcript.get('event_id', 'N/A')}"
-                    )
-
-                    # Debug: Show what's in the transcript object
-                    log_execution(
-                        f"Transcript to download details",
-                        {
-                            "ticker": ticker,
-                            "event_id": transcript.get("event_id", "N/A"),
-                            "version_id": transcript.get("version_id", "N/A"),
-                            "transcript_type": transcript.get("transcript_type", "N/A"),
-                            "transcripts_link": (
-                                "present"
-                                if transcript.get("transcripts_link")
-                                else "missing"
-                            ),
-                            "all_keys": list(transcript.keys()),
-                        },
-                    )
-
                     result = download_transcript_with_title_filtering(
                         nas_conn,
                         transcript,
@@ -1534,13 +1503,11 @@ def main() -> None:
                     )
                     if result:
                         downloaded_count += 1
-                        log_console(f"Downloaded: {result['filename']}")
+                        log_console(f"Downloaded XML: {result['filename']}")
                     else:
-                        skipped_count += 1
-                        log_console(
-                            f"Skipped transcript for {ticker} event_id={transcript.get('event_id', 'N/A')} - check logs for reason",
-                            "WARNING",
-                        )
+                        # All failures from download_transcript_with_title_filtering are title filtering
+                        # (other errors would raise exceptions and not return None)
+                        title_filtered_count += 1
 
                     # Rate limit between downloads
                     time.sleep(config["api_settings"]["request_delay"])
@@ -1549,15 +1516,41 @@ def main() -> None:
                 for transcript in to_remove:
                     if remove_nas_file(nas_conn, transcript["full_path"]):
                         removed_count += 1
-                        log_console(f"Removed: {transcript['full_path']}")
+                        log_console(
+                            f"Removed NAS XML (outside window): {transcript['full_path']}"
+                        )
 
                 # Update totals to reflect actual downloads vs skipped
                 total_to_download = (
                     total_to_download - len(to_download) + downloaded_count
                 )
 
+                # One-line summary per bank with all stats
                 log_console(
-                    f"Completed {ticker}: {downloaded_count} downloaded, {removed_count} removed, {skipped_count} skipped"
+                    f"{ticker} ({i}/{len(config['monitored_institutions'])}): "
+                    f"{len(api_transcript_list)} API transcripts, "
+                    f"{downloaded_count} downloaded, "
+                    f"{removed_count} removed (outside window), "
+                    f"{skipped_count} skipped (errors), "
+                    f"{title_filtered_count} filtered (invalid title)"
+                )
+
+                # Detailed execution log for audit trail
+                log_execution(
+                    f"Completed transcript processing for {ticker}",
+                    {
+                        "ticker": ticker,
+                        "institution_position": f"{i}/{len(config['monitored_institutions'])}",
+                        "api_transcripts_found": len(api_transcript_list),
+                        "nas_transcripts_existing": len(company_nas_transcripts),
+                        "downloads_attempted": len(to_download),
+                        "downloads_successful": downloaded_count,
+                        "downloads_skipped_errors": skipped_count,
+                        "downloads_filtered_title": title_filtered_count,
+                        "removals_attempted": len(to_remove),
+                        "removals_successful": removed_count,
+                        "explanation": "API transcripts within 3-year rolling window, NAS files outside window removed",
+                    },
                 )
 
                 # Add rate limiting between institutions (except for the last one)
