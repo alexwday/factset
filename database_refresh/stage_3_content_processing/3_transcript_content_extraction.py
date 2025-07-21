@@ -527,7 +527,8 @@ def extract_metadata_from_file_path(file_path: str) -> Dict[str, Any]:
         # Extract filename
         filename = path_parts[-1] if path_parts else ""
         
-        # Parse filename: RY-CA_2024-01-25_Earnings_Corrected_12345_67890_1.xml
+        # Parse filename format: ticker_quarter_year_type_eventid_versionid.xml
+        # Example: RY-CA_Q1_2024_Corrected_12345_1.xml
         filename_parts = filename.replace(".xml", "").split("_")
         
         ticker = None
@@ -537,18 +538,11 @@ def extract_metadata_from_file_path(file_path: str) -> Dict[str, Any]:
         
         if len(filename_parts) >= 6:
             ticker = filename_parts[0]
-            # transcript_type is at position based on filename structure
-            # Handle underscore in ticker names
-            if len(filename_parts) == 7:
-                # Standard format: RY-CA_date_event_type_event_id_report_id_version
-                transcript_type = filename_parts[3]
-                event_id = filename_parts[4]
-                version_id = filename_parts[6]
-            elif len(filename_parts) == 8:
-                # Underscore ticker: RY_CA_date_event_type_event_id_report_id_version
-                transcript_type = filename_parts[4] 
-                event_id = filename_parts[5]
-                version_id = filename_parts[7]
+            # quarter = filename_parts[1]  # Already extracted from path
+            # year = filename_parts[2]     # Already extracted from path  
+            transcript_type = filename_parts[3]
+            event_id = filename_parts[4]
+            version_id = filename_parts[5]
         
         # Lookup company name from config
         company_name = None
@@ -635,29 +629,21 @@ def parse_transcript_xml(xml_content: bytes) -> Optional[Dict[str, Any]]:
         title_elem = find_element(meta, "title")
         title = title_elem.text if title_elem is not None else ""
         
-        # Extract participants and create mapping
+        # Extract participants and create mapping (using original logic)
         participants = {}
         participants_elem = find_element(meta, "participants")
         if participants_elem is not None:
             for participant in find_all_elements(participants_elem, "participant"):
-                pid = participant.get("pid", "")
-                ptype = participant.get("ptype", "")
-                affiliation = participant.get("affiliation", "")
-                
-                # Extract name (could be in nested tags)
-                name_elem = find_element(participant, "name")
-                name = name_elem.text if name_elem is not None else ""
-                
-                # Extract title (could be in nested tags)
-                title_elem = find_element(participant, "title")
-                ptitle = title_elem.text if title_elem is not None else ""
-                
-                participants[pid] = {
-                    "name": name,
-                    "title": ptitle,
-                    "affiliation": affiliation,
-                    "type": ptype
-                }
+                p_id = participant.get("id")  # Use 'id' not 'pid' like original
+                if p_id:
+                    participants[p_id] = {
+                        "type": participant.get("type", ""),
+                        "affiliation": participant.get("affiliation", ""),
+                        "affiliation_entity": participant.get("affiliation_entity", ""),
+                        "title": participant.get("title", ""),
+                        "entity": participant.get("entity", ""),
+                        "name": participant.text.strip() if participant.text else "Unknown Speaker"
+                    }
         
         # Extract body content
         body = find_element(root, "body")
@@ -711,22 +697,28 @@ def parse_transcript_xml(xml_content: bytes) -> Optional[Dict[str, Any]]:
 
 
 def format_speaker_string(participant_data: Dict[str, Any]) -> str:
-    """Format speaker information into clean readable string."""
+    """Format speaker information into clean readable string (using original logic)."""
     
     name = participant_data.get("name", "").strip()
-    title = participant_data.get("title", "").strip()
+    title = participant_data.get("title", "").strip() 
     affiliation = participant_data.get("affiliation", "").strip()
     
-    # Build speaker string components
-    parts = []
-    if name:
-        parts.append(name)
-    if title:
+    # Use original logic - prioritize name, then add title and affiliation
+    if not name or name == "Unknown Speaker":
+        return "Unknown Speaker"
+    
+    # Build speaker string starting with name
+    parts = [name]
+    
+    # Add title if available and different from name
+    if title and title != name:
         parts.append(title)
-    if affiliation:
+        
+    # Add affiliation if available and different from previous parts
+    if affiliation and affiliation not in parts:
         parts.append(affiliation)
     
-    return ", ".join(parts) if parts else "Unknown Speaker"
+    return ", ".join(parts)
 
 
 def determine_qa_flag(speaker_type: str) -> Optional[str]:
