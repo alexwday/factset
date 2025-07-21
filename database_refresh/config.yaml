@@ -54,6 +54,15 @@ stage_2:
   master_database_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Database/master_database.json"
   refresh_output_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
 
+# Stage 3 specific settings
+stage_3:
+  description: "XML content extraction and paragraph-level breakdown"
+  input_queue_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/files_to_process.json"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  dev_mode: true
+  dev_max_files: 2
+
 # Monitored Financial Institutions
 # Format: ticker: {name, type}
 monitored_institutions:

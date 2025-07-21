@@ -4,282 +4,364 @@ Processes XML transcripts from Stage 2's processing queue and extracts paragraph
 Self-contained standalone script that loads config from NAS at runtime.
 """
 
-import pandas as pd
 import os
-from datetime import datetime, timedelta
-import json
 import tempfile
-import io
-import xml.etree.ElementTree as ET
-from smb.SMBConnection import SMBConnection
-from typing import Dict, List, Optional, Set, Tuple, Any
-import warnings
-from dotenv import load_dotenv
-import re
 import logging
+import json
+import time
+from datetime import datetime
+from urllib.parse import quote
+from typing import Dict, Any, Optional, List, Tuple
+import io
+import re
+import xml.etree.ElementTree as ET
+import requests
 
-warnings.filterwarnings("ignore", category=pd.errors.SettingWithCopyWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
+import yaml
+from smb.SMBConnection import SMBConnection
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Authentication and connection settings from environment
-API_USERNAME = os.getenv("API_USERNAME")
-API_PASSWORD = os.getenv("API_PASSWORD")
-PROXY_USER = os.getenv("PROXY_USER")
-PROXY_PASSWORD = os.getenv("PROXY_PASSWORD")
-PROXY_URL = os.getenv("PROXY_URL")
-NAS_USERNAME = os.getenv("NAS_USERNAME")
-NAS_PASSWORD = os.getenv("NAS_PASSWORD")
-NAS_SERVER_IP = os.getenv("NAS_SERVER_IP")
-NAS_SERVER_NAME = os.getenv("NAS_SERVER_NAME")
-NAS_SHARE_NAME = os.getenv("NAS_SHARE_NAME")
-NAS_BASE_PATH = os.getenv("NAS_BASE_PATH")
-NAS_PORT = int(os.getenv("NAS_PORT", 445))
-CONFIG_PATH = os.getenv("CONFIG_PATH")
-CLIENT_MACHINE_NAME = os.getenv("CLIENT_MACHINE_NAME")
-PROXY_DOMAIN = os.getenv("PROXY_DOMAIN", "MAPLE")
-
-# Validate required environment variables
-required_env_vars = [
-    "API_USERNAME",
-    "API_PASSWORD", 
-    "PROXY_USER",
-    "PROXY_PASSWORD",
-    "PROXY_URL",
-    "NAS_USERNAME",
-    "NAS_PASSWORD",
-    "NAS_SERVER_IP",
-    "NAS_SERVER_NAME",
-    "NAS_SHARE_NAME", 
-    "NAS_BASE_PATH",
-    "CONFIG_PATH",
-    "CLIENT_MACHINE_NAME",
-]
-
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-if missing_vars:
-    raise ValueError(
-        f"Missing required environment variables: {', '.join(missing_vars)}"
-    )
-
-# Global variables for configuration
+# Global variables
 config = {}
 logger = None
-error_logger = None
+execution_log = []  # Detailed execution log entries
+error_log = []  # Error log entries (only if errors occur)
 
 
 def setup_logging() -> logging.Logger:
-    """Set up logging configuration."""
-    temp_log_file = tempfile.NamedTemporaryFile(
-        mode="w+",
-        suffix=".log",
-        prefix=f'stage_3_content_extraction_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
-        delete=False,
-    )
-
+    """Set up minimal console logging configuration."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[logging.FileHandler(temp_log_file.name), logging.StreamHandler()],
+        handlers=[logging.StreamHandler()],
     )
-
-    logger = logging.getLogger(__name__)
-    logger.temp_log_file = temp_log_file.name
-    return logger
+    return logging.getLogger(__name__)
 
 
-class EnhancedErrorLogger:
-    """Handles separate error logging for different failure types."""
+def log_console(message: str, level: str = "INFO"):
+    """Log minimal message to console."""
+    global logger
+    if level == "ERROR":
+        logger.error(message)
+    elif level == "WARNING":
+        logger.warning(message)
+    else:
+        logger.info(message)
 
-    def __init__(self):
-        self.parsing_errors = []
-        self.download_errors = []
-        self.filesystem_errors = []
-        self.validation_errors = []
-        self.processing_errors = []
 
-    def log_parsing_error(self, filename: str, error: str):
-        """Log XML parsing errors."""
-        self.parsing_errors.append(
-            {
-                "timestamp": datetime.now().isoformat(),
-                "filename": filename,
-                "error": error,
-                "action_required": "Manual review of XML structure needed",
-            }
-        )
+def log_execution(message: str, details: Dict[str, Any] = None):
+    """Log detailed execution information for main log file."""
+    global execution_log
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "message": message,
+        "details": details or {},
+    }
+    execution_log.append(log_entry)
 
-    def log_download_error(self, file_path: str, error: str):
-        """Log file download errors."""
-        self.download_errors.append(
-            {
-                "timestamp": datetime.now().isoformat(),
-                "file_path": file_path,
-                "error": error,
-                "action_required": "Check NAS connectivity and file permissions",
-            }
-        )
 
-    def log_processing_error(self, ticker: str, filename: str, error: str):
-        """Log content processing errors."""
-        self.processing_errors.append(
-            {
-                "timestamp": datetime.now().isoformat(),
-                "ticker": ticker,
-                "filename": filename,
-                "error": error,
-                "action_required": "Review content extraction logic",
-            }
-        )
+def log_error(message: str, error_type: str, details: Dict[str, Any] = None):
+    """Log error information for error log file."""
+    global error_log
+    error_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "error_type": error_type,
+        "message": message,
+        "details": details or {},
+    }
+    error_log.append(error_entry)
 
-    def save_error_logs(self, nas_conn: SMBConnection):
-        """Save error logs to separate JSON files on NAS."""
-        global logger
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        error_base_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Logs", "Errors")
-        nas_create_directory(nas_conn, error_base_path)
 
-        # Save each error type if errors exist
-        error_types = [
-            ("parsing_errors", self.parsing_errors),
-            ("download_errors", self.download_errors),
-            ("filesystem_errors", self.filesystem_errors),
-            ("validation_errors", self.validation_errors),
-            ("processing_errors", self.processing_errors),
-        ]
+def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
+    """Save execution and error logs to NAS at completion."""
+    global execution_log, error_log
 
-        summary = {
-            "run_timestamp": timestamp,
-            "total_errors": sum(len(errors) for _, errors in error_types),
-            "errors_by_type": {
-                error_type: len(errors) for error_type, errors in error_types
-            },
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    logs_path = config["stage_3"]["output_logs_path"]
+
+    # Create logs directory
+    nas_create_directory_recursive(nas_conn, logs_path)
+
+    # Save main execution log
+    main_log_content = {
+        "stage": "stage_3_content_extraction",
+        "execution_start": (
+            execution_log[0]["timestamp"]
+            if execution_log
+            else datetime.now().isoformat()
+        ),
+        "execution_end": datetime.now().isoformat(),
+        "summary": stage_summary,
+        "execution_log": execution_log,
+    }
+
+    main_log_filename = f"stage_3_content_extraction_{timestamp}.json"
+    main_log_path = nas_path_join(logs_path, main_log_filename)
+    main_log_json = json.dumps(main_log_content, indent=2)
+    main_log_obj = io.BytesIO(main_log_json.encode("utf-8"))
+
+    if nas_upload_file(nas_conn, main_log_obj, main_log_path):
+        log_console(f"Execution log saved: {main_log_filename}")
+
+    # Save error log only if errors exist
+    if error_log:
+        errors_path = nas_path_join(logs_path, "Errors")
+        nas_create_directory_recursive(nas_conn, errors_path)
+
+        error_log_content = {
+            "stage": "stage_3_content_extraction",
+            "execution_time": datetime.now().isoformat(),
+            "total_errors": len(error_log),
+            "error_summary": stage_summary.get("errors", {}),
+            "errors": error_log,
         }
 
-        for error_type, errors in error_types:
-            if errors:
-                filename = f"stage_3_{error_type}_{timestamp}.json"
-                file_path = nas_path_join(error_base_path, filename)
-                content = json.dumps({"summary": summary, "errors": errors}, indent=2)
-                file_obj = io.BytesIO(content.encode("utf-8"))
-                nas_upload_file(nas_conn, file_obj, file_path)
-                logger.warning(f"Saved {len(errors)} {error_type} to {filename}")
+        error_log_filename = f"stage_3_content_extraction_errors_{timestamp}.json"
+        error_log_path = nas_path_join(errors_path, error_log_filename)
+        error_log_json = json.dumps(error_log_content, indent=2)
+        error_log_obj = io.BytesIO(error_log_json.encode("utf-8"))
+
+        if nas_upload_file(nas_conn, error_log_obj, error_log_path):
+            log_console(f"Error log saved: {error_log_filename}", "WARNING")
 
 
-def sanitize_url_for_logging(url: str) -> str:
-    """Sanitize URL for logging by removing query parameters and auth tokens."""
-    try:
-        from urllib.parse import urlparse
+def validate_environment_variables() -> None:
+    """Validate all required environment variables are present."""
 
-        parsed = urlparse(url)
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-    except (ValueError, TypeError, AttributeError, ImportError) as e:
-        logger.warning(f"URL sanitization failed: {e}")
-        return "[URL_SANITIZED]"
+    required_env_vars = [
+        "API_USERNAME",
+        "API_PASSWORD",
+        "PROXY_USER",
+        "PROXY_PASSWORD",
+        "PROXY_URL",
+        "NAS_USERNAME",
+        "NAS_PASSWORD",
+        "NAS_SERVER_IP",
+        "NAS_SERVER_NAME",
+        "NAS_SHARE_NAME",
+        "NAS_BASE_PATH",
+        "NAS_PORT",
+        "CONFIG_PATH",
+        "CLIENT_MACHINE_NAME",
+    ]
+
+    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    if missing_vars:
+        error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
+        log_error(
+            error_msg,
+            "environment_validation",
+            {
+                "missing_variables": missing_vars,
+                "total_required": len(required_env_vars),
+            },
+        )
+        raise ValueError(error_msg)
+
+    log_execution(
+        "Environment variables validated successfully",
+        {
+            "total_variables": len(required_env_vars),
+            "variables_checked": required_env_vars,
+        },
+    )
 
 
 def get_nas_connection() -> Optional[SMBConnection]:
     """Create and return an SMB connection to the NAS."""
-    global logger
+
     try:
         conn = SMBConnection(
-            username=NAS_USERNAME,
-            password=NAS_PASSWORD,
-            my_name=CLIENT_MACHINE_NAME,
-            remote_name=NAS_SERVER_NAME,
+            username=os.getenv("NAS_USERNAME"),
+            password=os.getenv("NAS_PASSWORD"),
+            my_name=os.getenv("CLIENT_MACHINE_NAME"),
+            remote_name=os.getenv("NAS_SERVER_NAME"),
             use_ntlm_v2=True,
             is_direct_tcp=True,
         )
 
-        if conn.connect(NAS_SERVER_IP, NAS_PORT):
-            logger.info("Connected to NAS successfully")
+        nas_port = int(os.getenv("NAS_PORT", 445))
+        if conn.connect(os.getenv("NAS_SERVER_IP"), nas_port):
+            log_execution(
+                "NAS connection established successfully",
+                {
+                    "connection_type": "SMB/CIFS",
+                    "port": nas_port,
+                    "share_name": os.getenv("NAS_SHARE_NAME"),
+                },
+            )
             return conn
         else:
-            logger.error("Failed to connect to NAS")
+            log_error(
+                "Failed to establish NAS connection",
+                "nas_connection",
+                {"server_ip": os.getenv("NAS_SERVER_IP"), "port": nas_port},
+            )
             return None
 
     except Exception as e:
-        logger.error(f"Error connecting to NAS: {e}")
+        log_error(
+            f"Error creating NAS connection: {e}",
+            "nas_connection",
+            {"exception_type": type(e).__name__, "server_ip": os.getenv("NAS_SERVER_IP")},
+        )
         return None
 
 
-def validate_config_schema(config: Dict[str, Any]) -> None:
-    """Validate configuration schema and parameters."""
-    global logger
+def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
+    """Load and validate configuration from NAS."""
 
-    # Define required configuration structure for Stage 3
-    required_structure = {
-        "stage_3": {
-            "dev_mode": bool,
-            "dev_max_files": int,
-            "input_source": str,
-            "output_file": str,
-            "output_path": str,
-        },
-        "monitored_institutions": dict,
-    }
-
-    # Validate top-level structure
-    for top_key, top_value in required_structure.items():
-        if top_key not in config:
-            raise ValueError(f"Missing required configuration section: {top_key}")
-
-        if isinstance(top_value, dict):
-            # Validate nested structure
-            for nested_key, expected_type in top_value.items():
-                if nested_key not in config[top_key]:
-                    raise ValueError(
-                        f"Missing required configuration parameter: {top_key}.{nested_key}"
-                    )
-
-                actual_value = config[top_key][nested_key]
-                if not isinstance(actual_value, expected_type):
-                    raise ValueError(
-                        f"Invalid type for {top_key}.{nested_key}: expected {expected_type}, got {type(actual_value)}"
-                    )
-
-    # Validate monitored institutions structure
-    if not config["monitored_institutions"]:
-        raise ValueError("monitored_institutions cannot be empty")
-
-    logger.info("Configuration validation successful")
-
-
-def load_stage_config(nas_conn: SMBConnection) -> Dict[str, Any]:
-    """Load and validate shared configuration from NAS."""
-    global logger
     try:
-        logger.info("Loading shared configuration from NAS...")
-        config_data = nas_download_file(nas_conn, CONFIG_PATH)
+        log_execution("Loading configuration from NAS", {"config_path": os.getenv("CONFIG_PATH")})
 
-        if config_data:
-            stage_config = json.loads(config_data.decode("utf-8"))
-            logger.info("Successfully loaded shared configuration from NAS")
+        config_data = nas_download_file(nas_conn, os.getenv("CONFIG_PATH"))
+        if not config_data:
+            error_msg = f"Configuration file not found at {os.getenv('CONFIG_PATH')}"
+            log_error(error_msg, "config_load", {"path": os.getenv("CONFIG_PATH")})
+            raise FileNotFoundError(error_msg)
 
-            # Validate configuration schema and parameters
-            validate_config_schema(stage_config)
+        # Parse YAML configuration
+        stage_config = yaml.safe_load(config_data.decode("utf-8"))
+        log_execution("Configuration loaded successfully", {"sections": list(stage_config.keys())})
 
-            return stage_config
-        else:
-            logger.error("Config file not found on NAS - script cannot proceed")
-            raise FileNotFoundError(f"Configuration file not found at {CONFIG_PATH}")
+        # Validate configuration
+        validate_config_structure(stage_config)
+        return stage_config
 
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON in config file: {e}")
-        raise
-    except ValueError as e:
-        logger.error(f"Configuration validation failed: {e}")
-        raise
+    except yaml.YAMLError as e:
+        error_msg = f"Invalid YAML in configuration file: {e}"
+        log_error(error_msg, "config_parse", {"yaml_error": str(e)})
+        raise ValueError(error_msg)
     except Exception as e:
-        logger.error(f"Error loading config from NAS: {e}")
+        error_msg = f"Error loading configuration from NAS: {e}"
+        log_error(error_msg, "config_load", {"exception_type": type(e).__name__})
+        raise
+
+
+def validate_config_structure(config: Dict[str, Any]) -> None:
+    """Validate configuration structure and required parameters."""
+
+    required_sections = [
+        "ssl_cert_path",
+        "api_settings", 
+        "stage_3",
+        "monitored_institutions"
+    ]
+
+    for section in required_sections:
+        if section not in config:
+            error_msg = f"Missing required configuration section: {section}"
+            log_error(error_msg, "config_validation", {"missing_section": section})
+            raise ValueError(error_msg)
+
+    # Validate stage_3 specific parameters
+    stage_3_config = config["stage_3"]
+    required_stage_3_params = [
+        "description", 
+        "input_queue_path",
+        "output_logs_path",
+        "output_data_path",
+        "dev_mode",
+        "dev_max_files"
+    ]
+
+    for param in required_stage_3_params:
+        if param not in stage_3_config:
+            error_msg = f"Missing required stage_3 parameter: {param}"
+            log_error(error_msg, "config_validation", {"missing_parameter": f"stage_3.{param}"})
+            raise ValueError(error_msg)
+
+    # Validate monitored institutions
+    if not config["monitored_institutions"]:
+        error_msg = "monitored_institutions cannot be empty"
+        log_error(error_msg, "config_validation", {"section": "monitored_institutions"})
+        raise ValueError(error_msg)
+
+    # Validate institution structure
+    for ticker, institution_info in config["monitored_institutions"].items():
+        if not isinstance(institution_info, dict):
+            error_msg = f"Invalid institution info for {ticker}: must be a dictionary"
+            log_error(error_msg, "config_validation", {"ticker": ticker})
+            raise ValueError(error_msg)
+
+        required_fields = ["name", "type", "path_safe_name"]
+        for field in required_fields:
+            if field not in institution_info:
+                error_msg = f"Missing required field '{field}' for institution {ticker}"
+                log_error(error_msg, "config_validation", {"ticker": ticker, "missing_field": field})
+                raise ValueError(error_msg)
+
+    log_execution("Configuration validation successful", {
+        "total_institutions": len(config["monitored_institutions"])
+    })
+
+
+def setup_ssl_certificate(nas_conn: SMBConnection) -> str:
+    """Download SSL certificate from NAS to temporary file."""
+
+    try:
+        log_execution("Setting up SSL certificate", {"ssl_cert_path": config["ssl_cert_path"]})
+        
+        cert_data = nas_download_file(nas_conn, config["ssl_cert_path"])
+        if not cert_data:
+            error_msg = f"SSL certificate not found at {config['ssl_cert_path']}"
+            log_error(error_msg, "ssl_setup", {"path": config["ssl_cert_path"]})
+            raise FileNotFoundError(error_msg)
+
+        # Create temporary certificate file
+        temp_cert_file = tempfile.NamedTemporaryFile(
+            mode="wb", suffix=".cer", delete=False
+        )
+        temp_cert_file.write(cert_data)
+        temp_cert_file.close()
+
+        # Set SSL environment variable for requests
+        os.environ["REQUESTS_CA_BUNDLE"] = temp_cert_file.name
+        os.environ["SSL_CERT_FILE"] = temp_cert_file.name
+
+        log_execution("SSL certificate setup complete", {"temp_cert_path": temp_cert_file.name})
+        return temp_cert_file.name
+
+    except Exception as e:
+        error_msg = f"Error setting up SSL certificate: {e}"
+        log_error(error_msg, "ssl_setup", {"exception_type": type(e).__name__})
+        raise
+
+
+def setup_proxy_configuration() -> str:
+    """Set up proxy configuration with proper credential escaping."""
+
+    try:
+        proxy_domain = os.getenv("PROXY_DOMAIN", "MAPLE")
+        proxy_user = os.getenv("PROXY_USER")
+        proxy_password = os.getenv("PROXY_PASSWORD")
+        proxy_url = os.getenv("PROXY_URL")
+
+        # Escape domain and user for URL
+        escaped_domain = quote(proxy_domain + "\\\\" + proxy_user)
+        quoted_password = quote(proxy_password)
+
+        # Construct proxy URL
+        proxy_with_auth = f"http://{escaped_domain}:{quoted_password}@{proxy_url}"
+
+        log_execution("Proxy configuration setup complete", {
+            "proxy_domain": proxy_domain,
+            "proxy_url": proxy_url
+        })
+
+        return proxy_with_auth
+
+    except Exception as e:
+        error_msg = f"Error setting up proxy configuration: {e}"
+        log_error(error_msg, "proxy_setup", {"exception_type": type(e).__name__})
         raise
 
 
 def nas_path_join(*parts: str) -> str:
     """Join path parts for NAS paths using forward slashes."""
-    # Filter out empty parts and strip slashes
     clean_parts = []
     for part in parts:
         if part:
@@ -289,95 +371,85 @@ def nas_path_join(*parts: str) -> str:
     return "/".join(clean_parts)
 
 
-def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
-    """Check if a file exists on the NAS."""
-    global logger
-    try:
-        conn.getAttributes(NAS_SHARE_NAME, file_path)
-        return True
-    except Exception as e:
-        logger.debug(f"File existence check failed for {file_path}: {e}")
-        return False
-
-
-def nas_create_directory(conn: SMBConnection, dir_path: str) -> bool:
-    """Create directory on NAS with safe iterative parent creation."""
-    global logger
-
-    # Normalize and validate path
-    normalized_path = dir_path.strip("/").rstrip("/")
-    if not normalized_path:
-        logger.error("Cannot create directory with empty path")
-        return False
-
-    # Split path into components
-    path_parts = [part for part in normalized_path.split("/") if part]
-    if not path_parts:
-        logger.error("Cannot create directory with invalid path")
-        return False
-
-    # Build path incrementally from root
-    current_path = ""
-    for part in path_parts:
-        current_path = f"{current_path}/{part}" if current_path else part
-
-        # Check if directory exists
-        if nas_file_exists(conn, current_path):
-            continue
-
-        # Try to create directory
-        try:
-            conn.createDirectory(NAS_SHARE_NAME, current_path)
-            logger.debug(f"Created directory: {current_path}")
-        except Exception as e:
-            # If it fails and doesn't exist, it's a real error
-            if not nas_file_exists(conn, current_path):
-                logger.error(f"Failed to create directory {current_path}: {e}")
-                return False
-
-    return True
-
-
-def nas_upload_file(
-    conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_path: str
-) -> bool:
-    """Upload a file object to NAS."""
-    global logger
-
-    # Validate path for security
-    if not validate_nas_path(nas_file_path):
-        logger.error(f"Invalid NAS file path: {nas_file_path}")
-        return False
-
-    try:
-        parent_dir = "/".join(nas_file_path.split("/")[:-1])
-        if parent_dir:
-            nas_create_directory(conn, parent_dir)
-
-        conn.storeFile(NAS_SHARE_NAME, nas_file_path, local_file_obj)
-        return True
-    except Exception as e:
-        logger.error(f"Failed to upload file to NAS {nas_file_path}: {e}")
-        return False
-
-
 def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes]:
     """Download a file from NAS and return as bytes."""
-    global logger
 
-    # Validate path for security
     if not validate_nas_path(nas_file_path):
-        logger.error(f"Invalid NAS file path: {nas_file_path}")
+        log_error(f"Invalid NAS file path: {nas_file_path}", "path_validation", 
+                 {"path": nas_file_path})
         return None
 
     try:
         file_obj = io.BytesIO()
-        conn.retrieveFile(NAS_SHARE_NAME, nas_file_path, file_obj)
+        conn.retrieveFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, file_obj)
         file_obj.seek(0)
         return file_obj.read()
     except Exception as e:
-        logger.error(f"Failed to download file from NAS {nas_file_path}: {e}")
+        log_error(f"Failed to download file from NAS: {nas_file_path}", "nas_download", 
+                 {"path": nas_file_path, "error": str(e)})
         return None
+
+
+def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_path: str) -> bool:
+    """Upload a file object to NAS."""
+
+    if not validate_nas_path(nas_file_path):
+        log_error(f"Invalid NAS file path: {nas_file_path}", "path_validation", 
+                 {"path": nas_file_path})
+        return False
+
+    try:
+        # Ensure parent directory exists
+        parent_dir = "/".join(nas_file_path.split("/")[:-1])
+        if parent_dir:
+            nas_create_directory_recursive(conn, parent_dir)
+
+        conn.storeFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, local_file_obj)
+        return True
+    except Exception as e:
+        log_error(f"Failed to upload file to NAS: {nas_file_path}", "nas_upload", 
+                 {"path": nas_file_path, "error": str(e)})
+        return False
+
+
+def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
+    """Check if a file exists on the NAS."""
+    try:
+        conn.getAttributes(os.getenv("NAS_SHARE_NAME"), file_path)
+        return True
+    except Exception:
+        return False
+
+
+def nas_create_directory_recursive(conn: SMBConnection, dir_path: str) -> bool:
+    """Create directory on NAS with safe iterative parent creation."""
+
+    normalized_path = dir_path.strip("/").rstrip("/")
+    if not normalized_path:
+        log_error("Cannot create directory with empty path", "directory_creation", {"path": dir_path})
+        return False
+
+    path_parts = [part for part in normalized_path.split("/") if part]
+    if not path_parts:
+        log_error("Cannot create directory with invalid path", "directory_creation", {"path": dir_path})
+        return False
+
+    current_path = ""
+    for part in path_parts:
+        current_path = f"{current_path}/{part}" if current_path else part
+
+        if nas_file_exists(conn, current_path):
+            continue
+
+        try:
+            conn.createDirectory(os.getenv("NAS_SHARE_NAME"), current_path)
+        except Exception as e:
+            if not nas_file_exists(conn, current_path):
+                log_error(f"Failed to create directory: {current_path}", "directory_creation", 
+                         {"path": current_path, "error": str(e)})
+                return False
+
+    return True
 
 
 def validate_file_path(path: str) -> bool:
@@ -390,7 +462,7 @@ def validate_file_path(path: str) -> bool:
         return False
 
     # Check for invalid characters
-    invalid_chars = ["<", ">", ":", '"', "|", "?", "*", "\x00"]
+    invalid_chars = ["<", ">", ":", '"', "|", "?", "*", "\\x00"]
     if any(char in path for char in invalid_chars):
         return False
 
@@ -402,465 +474,570 @@ def validate_file_path(path: str) -> bool:
 
 
 def validate_nas_path(path: str) -> bool:
-    """Validate NAS path structure."""
-    global logger
+    """Validate NAS path structure for security."""
     
     if not path or not isinstance(path, str):
-        logger.debug(f"NAS path validation failed: empty or not string: '{path}'")
         return False
 
-    # Ensure path is relative and safe
     normalized = path.strip("/")
     if not normalized:
-        logger.debug(f"NAS path validation failed: empty after normalization: '{path}'")
         return False
         
     parts = normalized.split("/")
 
     for part in parts:
         if not part or part in [".", ".."]:
-            logger.debug(f"NAS path validation failed: invalid part '{part}' in path: '{path}'")
             return False
         if not validate_file_path(part):
-            logger.debug(f"NAS path validation failed: file path validation failed for part '{part}' in path: '{path}'")
             return False
 
     return True
 
 
-def parse_transcript_xml(xml_content: bytes) -> Dict:
-    """Parse FactSet transcript XML and extract structured data."""
-    global logger
+def sanitize_url_for_logging(url: str) -> str:
+    """Remove auth tokens from URLs before logging."""
+    try:
+        sanitized = re.sub(r"(password|token|auth)=[^&]*", r"\\1=***", url, flags=re.IGNORECASE)
+        sanitized = re.sub(r"://[^@]*@", "://***:***@", sanitized)
+        return sanitized
+    except Exception:
+        return "[URL_SANITIZED]"
+
+
+def extract_metadata_from_file_path(file_path: str) -> Dict[str, Any]:
+    """Extract metadata from file path structure and filename."""
     
-    tree = ET.parse(io.BytesIO(xml_content))
-    root = tree.getroot()
-    
-    # Handle namespace if present
-    namespace = ""
-    if root.tag.startswith('{'):
-        namespace = root.tag.split('}')[0] + '}'
-    
-    # Helper function to handle namespaced tags
-    def ns_tag(tag):
-        return f"{namespace}{tag}" if namespace else tag
-    
-    # Extract metadata
-    meta = root.find(ns_tag('meta'))
-    if meta is None:
-        # Debug: print available elements
-        logger.debug(f"Root tag: {root.tag}")
-        logger.debug(f"Root children: {[child.tag for child in root]}")
-        raise ValueError("No meta section found in XML")
-    
-    # Extract title and date
-    title = meta.find(ns_tag('title'))
-    title_text = title.text if title is not None else "Untitled Transcript"
-    
-    date = meta.find(ns_tag('date'))
-    date_text = date.text if date is not None else "Unknown Date"
-    
-    # Extract companies
-    companies = []
-    companies_elem = meta.find(ns_tag('companies'))
-    if companies_elem is not None:
-        for company in companies_elem.findall(ns_tag('company')):
-            companies.append(company.text if company.text else "")
-    
-    # Extract participants and create speaker mapping
-    participants = {}
-    participants_elem = meta.find(ns_tag('participants'))
-    if participants_elem is not None:
-        for participant in participants_elem.findall(ns_tag('participant')):
-            p_id = participant.get('id')
-            if p_id:
-                participants[p_id] = {
-                    'type': participant.get('type', ''),
-                    'affiliation': participant.get('affiliation', ''),
-                    'affiliation_entity': participant.get('affiliation_entity', ''),
-                    'title': participant.get('title', ''),
-                    'entity': participant.get('entity', ''),
-                    'name': participant.text.strip() if participant.text else 'Unknown Speaker'
-                }
-    
-    # Extract body content
-    body = root.find(ns_tag('body'))
-    if body is None:
-        raise ValueError("No body section found in XML")
-    
-    sections = []
-    for section in body.findall(ns_tag('section')):
-        section_name = section.get('name', 'Unnamed Section')
-        speakers = []
+    try:
+        # Parse path: Data/YYYY/QX/Type/Company/filename.xml
+        path_parts = file_path.split("/")
         
-        for speaker in section.findall(ns_tag('speaker')):
-            speaker_id = speaker.get('id')
-            speaker_type = speaker.get('type', '')  # 'q' or 'a' for Q&A sections
-            
-            # Extract paragraphs from plist
-            paragraphs = []
-            plist = speaker.find(ns_tag('plist'))
-            if plist is not None:
-                for p in plist.findall(ns_tag('p')):
-                    if p.text:
-                        paragraphs.append(p.text.strip())
-            
-            speakers.append({
-                'id': speaker_id,
-                'type': speaker_type,
-                'paragraphs': paragraphs
-            })
+        # Extract from path structure
+        fiscal_year = None
+        fiscal_quarter = None
+        institution_type = None
         
-        sections.append({
-            'name': section_name,
-            'speakers': speakers
+        # Find Data folder and extract following parts
+        for i, part in enumerate(path_parts):
+            if part == "Data" and i + 3 < len(path_parts):
+                fiscal_year = path_parts[i + 1]
+                fiscal_quarter = path_parts[i + 2]  
+                institution_type = path_parts[i + 3]
+                break
+        
+        # Extract filename
+        filename = path_parts[-1] if path_parts else ""
+        
+        # Parse filename: RY-CA_2024-01-25_Earnings_Corrected_12345_67890_1.xml
+        filename_parts = filename.replace(".xml", "").split("_")
+        
+        ticker = None
+        transcript_type = None
+        event_id = None
+        version_id = None
+        
+        if len(filename_parts) >= 6:
+            ticker = filename_parts[0]
+            # transcript_type is at position based on filename structure
+            # Handle underscore in ticker names
+            if len(filename_parts) == 7:
+                # Standard format: RY-CA_date_event_type_event_id_report_id_version
+                transcript_type = filename_parts[3]
+                event_id = filename_parts[4]
+                version_id = filename_parts[6]
+            elif len(filename_parts) == 8:
+                # Underscore ticker: RY_CA_date_event_type_event_id_report_id_version
+                transcript_type = filename_parts[4] 
+                event_id = filename_parts[5]
+                version_id = filename_parts[7]
+        
+        # Lookup company name from config
+        company_name = None
+        if ticker and ticker in config.get("monitored_institutions", {}):
+            company_name = config["monitored_institutions"][ticker].get("name")
+        
+        metadata = {
+            "filename": filename,
+            "fiscal_year": fiscal_year,
+            "fiscal_quarter": fiscal_quarter,
+            "institution_type": institution_type,
+            "ticker": ticker,
+            "company_name": company_name,
+            "transcript_type": transcript_type,
+            "event_id": event_id,
+            "version_id": version_id
+        }
+        
+        log_execution(f"Extracted metadata from file path: {file_path}", metadata)
+        return metadata
+        
+    except Exception as e:
+        log_error(f"Failed to extract metadata from file path: {file_path}", "metadata_extraction", 
+                 {"path": file_path, "error": str(e)})
+        return {}
+
+
+def load_processing_queue(nas_conn: SMBConnection) -> List[Dict[str, Any]]:
+    """Load Stage 2 processing queue from NAS."""
+    
+    try:
+        queue_path = config["stage_3"]["input_queue_path"]
+        log_execution("Loading processing queue from NAS", {"queue_path": queue_path})
+        
+        queue_data = nas_download_file(nas_conn, queue_path)
+        if not queue_data:
+            error_msg = f"Processing queue not found at {queue_path}"
+            log_error(error_msg, "queue_load", {"path": queue_path})
+            raise FileNotFoundError(error_msg)
+        
+        queue_records = json.loads(queue_data.decode("utf-8"))
+        log_execution("Processing queue loaded successfully", {
+            "total_files": len(queue_records)
         })
-    
-    return {
-        'title': title_text,
-        'date': date_text,
-        'companies': companies,
-        'participants': participants,
-        'sections': sections
-    }
+        
+        return queue_records
+        
+    except json.JSONDecodeError as e:
+        error_msg = f"Invalid JSON in processing queue: {e}"
+        log_error(error_msg, "queue_parse", {"json_error": str(e)})
+        raise ValueError(error_msg)
+    except Exception as e:
+        error_msg = f"Error loading processing queue: {e}"
+        log_error(error_msg, "queue_load", {"exception_type": type(e).__name__})
+        raise
 
 
-def format_speaker_string(participant_data: Dict) -> str:
-    """
-    Format speaker information into a clean string.
-    Returns speaker_string
-    """
-    name = participant_data.get('name', 'Unknown Speaker')
-    title = participant_data.get('title', '')
-    affiliation = participant_data.get('affiliation', '')
+def parse_transcript_xml(xml_content: bytes) -> Optional[Dict[str, Any]]:
+    """Parse transcript XML and extract structured data."""
     
-    # Build speaker string: "Name, Title, Affiliation"
-    parts = [name]
+    try:
+        # Parse XML with namespace handling
+        root = ET.fromstring(xml_content)
+        
+        # Detect namespace if present
+        namespace = ""
+        if root.tag.startswith("{"):
+            namespace = root.tag.split("}")[0] + "}"
+        
+        # Helper function to find elements with namespace
+        def find_element(parent, tag):
+            return parent.find(f"{namespace}{tag}")
+        
+        def find_all_elements(parent, tag):
+            return parent.findall(f"{namespace}{tag}")
+        
+        # Extract metadata
+        meta = find_element(root, "meta")
+        if meta is None:
+            log_error("XML meta section not found", "xml_parsing", {"xml_size": len(xml_content)})
+            return None
+        
+        # Extract title
+        title_elem = find_element(meta, "title")
+        title = title_elem.text if title_elem is not None else ""
+        
+        # Extract participants and create mapping
+        participants = {}
+        participants_elem = find_element(meta, "participants")
+        if participants_elem is not None:
+            for participant in find_all_elements(participants_elem, "participant"):
+                pid = participant.get("pid", "")
+                ptype = participant.get("ptype", "")
+                affiliation = participant.get("affiliation", "")
+                
+                # Extract name (could be in nested tags)
+                name_elem = find_element(participant, "name")
+                name = name_elem.text if name_elem is not None else ""
+                
+                # Extract title (could be in nested tags)
+                title_elem = find_element(participant, "title")
+                ptitle = title_elem.text if title_elem is not None else ""
+                
+                participants[pid] = {
+                    "name": name,
+                    "title": ptitle,
+                    "affiliation": affiliation,
+                    "type": ptype
+                }
+        
+        # Extract body content
+        body = find_element(root, "body")
+        if body is None:
+            log_error("XML body section not found", "xml_parsing", {"xml_size": len(xml_content)})
+            return None
+        
+        # Extract sections
+        sections = []
+        for section in find_all_elements(body, "section"):
+            section_name = section.get("name", "")
+            section_content = []
+            
+            for speaker in find_all_elements(section, "speaker"):
+                speaker_id = speaker.get("id", "")
+                speaker_type = speaker.get("type", "")
+                
+                # Extract paragraphs
+                plist = find_element(speaker, "plist")
+                paragraphs = []
+                if plist is not None:
+                    for p in find_all_elements(plist, "p"):
+                        if p.text:
+                            paragraphs.append(p.text.strip())
+                
+                if paragraphs:  # Only include speakers with content
+                    section_content.append({
+                        "speaker_id": speaker_id,
+                        "speaker_type": speaker_type,
+                        "paragraphs": paragraphs
+                    })
+            
+            if section_content:  # Only include sections with content
+                sections.append({
+                    "name": section_name,
+                    "speakers": section_content
+                })
+        
+        return {
+            "title": title,
+            "participants": participants,
+            "sections": sections
+        }
+        
+    except ET.ParseError as e:
+        log_error(f"XML parsing error: {e}", "xml_parsing", {"error": str(e)})
+        return None
+    except Exception as e:
+        log_error(f"Unexpected error parsing XML: {e}", "xml_parsing", {"error": str(e)})
+        return None
+
+
+def format_speaker_string(participant_data: Dict[str, Any]) -> str:
+    """Format speaker information into clean readable string."""
+    
+    name = participant_data.get("name", "").strip()
+    title = participant_data.get("title", "").strip()
+    affiliation = participant_data.get("affiliation", "").strip()
+    
+    # Build speaker string components
+    parts = []
+    if name:
+        parts.append(name)
     if title:
         parts.append(title)
     if affiliation:
         parts.append(affiliation)
     
-    speaker_string = ", ".join(parts)
-    
-    return speaker_string
+    return ", ".join(parts) if parts else "Unknown Speaker"
 
 
 def determine_qa_flag(speaker_type: str) -> Optional[str]:
-    """Determine Q&A flag from speaker type attribute."""
-    if speaker_type == 'q':
+    """Determine Q&A flag from XML speaker type attribute."""
+    
+    if speaker_type == "q":
         return "question"
-    elif speaker_type == 'a': 
+    elif speaker_type == "a": 
         return "answer"
     else:
         return None
 
 
-def extract_transcript_paragraphs(
-    original_record: Dict[str, Any], 
-    xml_content: bytes
-) -> List[Dict[str, Any]]:
-    """
-    Extract all paragraphs from XML with sequential ordering.
-    Each paragraph becomes a record with all original fields + new Stage 3 fields.
-    """
-    global logger, error_logger
+def extract_transcript_paragraphs(base_record: Dict[str, Any], xml_content: bytes) -> List[Dict[str, Any]]:
+    """Extract paragraph-level content from XML transcript."""
     
-    try:
-        # Parse XML (reuse logic from HTML viewer)
-        transcript_data = parse_transcript_xml(xml_content)
-        paragraph_records = []
-        global_paragraph_id = 1  # Sequential across entire transcript
-        speaker_block_id = 1  # Sequential across entire transcript
-        section_id = 1  # Sequential section identifier
-        
-        # Iterate through sections -> speakers -> paragraphs
-        for section in transcript_data['sections']:
-            section_name = section['name']
-            
-            for speaker_block in section['speakers']:
-                speaker_id = speaker_block['id']
-                speaker_type = speaker_block.get('type', '')  # 'q', 'a', or ''
-                current_speaker_block_id = speaker_block_id
-                speaker_block_id += 1  # Increment for next speaker block
-                
-                # Get speaker details from participants
-                speaker_info = transcript_data['participants'].get(speaker_id, {})
-                
-                # Format speaker as string
-                speaker_string = format_speaker_string(speaker_info)
-                
-                # Determine Q&A flag
-                qa_flag = determine_qa_flag(speaker_type)
-                
-                # Process each paragraph in this speaker's plist
-                for paragraph_text in speaker_block['paragraphs']:
-                    if paragraph_text.strip():  # Skip empty paragraphs
-                        
-                        # Create record with Stage 2 fields first, then Stage 3 fields at the end
-                        paragraph_record = {
-                            # Stage 2 fields in requested order
-                            **original_record,
-                            
-                            # Stage 3 fields at the end
-                            "section_id": section_id,
-                            "speaker_block_id": current_speaker_block_id,
-                            "paragraph_id": global_paragraph_id,
-                            "section_name": section_name,
-                            "speaker": speaker_string,
-                            "question_answer_flag": qa_flag,
-                            "paragraph_content": paragraph_text.strip()
-                        }
-                        
-                        paragraph_records.append(paragraph_record)
-                        global_paragraph_id += 1
-            
-            section_id += 1  # Increment for next section
-        
-        logger.info(f"Extracted {len(paragraph_records)} paragraphs from {original_record.get('filename', 'unknown')}")
-        return paragraph_records
-    
-    except Exception as e:
-        error_logger.log_processing_error(
-            original_record.get('ticker', 'unknown'),
-            original_record.get('filename', 'unknown'),
-            str(e)
-        )
-        logger.error(f"Failed to extract paragraphs from {original_record.get('filename', 'unknown')}: {e}")
-        return []
-
-
-def load_processing_queue(nas_conn: SMBConnection) -> List[Dict[str, Any]]:
-    """Load files to process from Stage 2 output."""
-    global logger, config
-    
-    input_path = nas_path_join(NAS_BASE_PATH, config["stage_3"]["input_source"])
-    
-    if not nas_file_exists(nas_conn, input_path):
-        logger.warning(f"No processing queue found at {input_path}")
+    # Parse XML content
+    parsed_data = parse_transcript_xml(xml_content)
+    if not parsed_data:
+        log_error("Failed to parse XML content", "content_extraction", {"file_path": base_record.get("file_path", "")})
         return []
     
+    # Extract title for base record
+    title = parsed_data.get("title", "")
+    participants = parsed_data.get("participants", {})
+    sections = parsed_data.get("sections", [])
+    
+    # Create enhanced base record with extracted metadata and title
+    enhanced_base_record = {**base_record, "title": title}
+    
+    paragraph_records = []
+    global_paragraph_id = 1
+    current_speaker_block_id = 1
+    
+    # Process each section
+    for section_id, section in enumerate(sections, 1):
+        section_name = section.get("name", f"Section {section_id}")
+        
+        # Process each speaker block in section
+        for speaker_block in section.get("speakers", []):
+            speaker_id = speaker_block.get("speaker_id", "")
+            speaker_type = speaker_block.get("speaker_type", "")
+            paragraphs = speaker_block.get("paragraphs", [])
+            
+            # Get speaker information
+            participant_data = participants.get(speaker_id, {})
+            speaker_string = format_speaker_string(participant_data)
+            qa_flag = determine_qa_flag(speaker_type)
+            
+            # Process each paragraph in speaker block
+            for paragraph_text in paragraphs:
+                if paragraph_text.strip():  # Only process non-empty paragraphs
+                    paragraph_record = {
+                        **enhanced_base_record,  # All base fields including title
+                        "section_id": section_id,
+                        "section_name": section_name,
+                        "paragraph_id": global_paragraph_id,
+                        "speaker_block_id": current_speaker_block_id,
+                        "question_answer_flag": qa_flag,
+                        "speaker": speaker_string,
+                        "paragraph_content": paragraph_text.strip()
+                    }
+                    
+                    paragraph_records.append(paragraph_record)
+                    global_paragraph_id += 1
+            
+            # Increment speaker block ID after processing all paragraphs in block
+            if paragraphs:
+                current_speaker_block_id += 1
+    
+    log_execution(f"Extracted {len(paragraph_records)} paragraphs from transcript", {
+        "file_path": base_record.get("file_path", ""),
+        "total_paragraphs": len(paragraph_records),
+        "total_sections": len(sections),
+        "title": title
+    })
+    
+    return paragraph_records
+
+
+def process_transcript_file(nas_conn: SMBConnection, file_record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Process a single transcript file and return paragraph records."""
+    
+    file_path = file_record.get("file_path", "")
+    date_last_modified = file_record.get("date_last_modified", "")
+    
     try:
-        queue_data = nas_download_file(nas_conn, input_path)
-        if queue_data:
-            queue_json = json.loads(queue_data.decode("utf-8"))
-            files_to_process = queue_json.get("files", [])
-            logger.info(f"Loaded {len(files_to_process)} files from processing queue")
-            return files_to_process
-        else:
-            logger.error(f"Failed to download processing queue from {input_path}")
+        log_execution(f"Processing transcript file: {file_path}")
+        
+        # Extract metadata from file path
+        metadata = extract_metadata_from_file_path(file_path)
+        
+        # Create enhanced base record combining Stage 2 data and extracted metadata
+        base_record = {
+            "file_path": file_path,
+            "date_last_modified": date_last_modified,
+            **metadata  # Add all extracted metadata fields
+        }
+        
+        # Download XML content from NAS
+        xml_content = nas_download_file(nas_conn, file_path)
+        if not xml_content:
+            log_error(f"Failed to download XML content: {file_path}", "xml_download", {"path": file_path})
             return []
-    
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON in processing queue: {e}")
-        return []
+        
+        # Extract paragraph-level content
+        paragraph_records = extract_transcript_paragraphs(base_record, xml_content)
+        
+        log_execution(f"Successfully processed transcript file: {file_path}", {
+            "paragraphs_extracted": len(paragraph_records)
+        })
+        
+        return paragraph_records
+        
     except Exception as e:
-        logger.error(f"Error loading processing queue: {e}")
+        log_error(f"Error processing transcript file: {file_path}", "content_extraction", {
+            "path": file_path,
+            "error": str(e),
+            "exception_type": type(e).__name__
+        })
         return []
 
 
-def save_extracted_content(
-    nas_conn: SMBConnection,
-    all_paragraph_records: List[Dict[str, Any]]
-) -> bool:
-    """Save extracted content records to NAS."""
-    global logger, config
-    
-    output_data = {
-        "schema_version": "1.0",
-        "processing_timestamp": datetime.now().isoformat(),
-        "total_records": len(all_paragraph_records),
-        "total_transcripts_processed": len(set(record.get('filename', '') for record in all_paragraph_records)),
-        "records": all_paragraph_records
-    }
-    
-    output_path = nas_path_join(
-        NAS_BASE_PATH,
-        config["stage_3"]["output_path"],
-        config["stage_3"]["output_file"]
-    )
+def save_extracted_content(nas_conn: SMBConnection, all_paragraph_records: List[Dict[str, Any]]) -> bool:
+    """Save extracted paragraph records to NAS."""
     
     try:
-        output_content = json.dumps(output_data, indent=2)
+        output_path = config["stage_3"]["output_data_path"]
+        output_filename = "extracted_transcript_sections.json"
+        output_file_path = nas_path_join(output_path, output_filename)
+        
+        # Create output directory
+        nas_create_directory_recursive(nas_conn, output_path)
+        
+        # Convert records to JSON
+        output_content = json.dumps(all_paragraph_records, indent=2)
         output_file_obj = io.BytesIO(output_content.encode("utf-8"))
         
-        if nas_upload_file(nas_conn, output_file_obj, output_path):
-            logger.info(f"Saved {len(all_paragraph_records)} content records to {output_path}")
+        # Upload to NAS
+        if nas_upload_file(nas_conn, output_file_obj, output_file_path):
+            log_execution("Extracted content saved successfully", {
+                "output_path": output_file_path,
+                "total_records": len(all_paragraph_records)
+            })
             return True
         else:
-            logger.error(f"Failed to upload extracted content to {output_path}")
+            log_error("Failed to save extracted content", "output_save", {"path": output_file_path})
             return False
-    
+            
     except Exception as e:
-        logger.error(f"Error saving extracted content: {e}")
+        log_error(f"Error saving extracted content: {e}", "output_save", {
+            "error": str(e),
+            "exception_type": type(e).__name__
+        })
         return False
 
 
-def upload_logs_to_nas(nas_conn: SMBConnection, logger: logging.Logger, error_logger) -> None:
-    """Upload logs to NAS immediately (for critical failures)."""
-    try:
-        # Save error logs first
-        error_logger.save_error_logs(nas_conn)
-        
-        # Close all logging handlers to ensure file is not in use
-        for handler in logger.handlers[:]:
-            handler.close()
-            logger.removeHandler(handler)
-
-        # Force any remaining buffered log data to be written
-        logging.shutdown()
-
-        # Upload the log file
-        log_file_path = nas_path_join(
-            NAS_BASE_PATH,
-            "Outputs",
-            "Logs",
-            f"stage_3_content_extraction_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log",
-        )
-
-        # Read the entire log file and convert to BytesIO for upload
-        with open(logger.temp_log_file, "rb") as log_file:
-            log_content = log_file.read()
-
-        log_file_obj = io.BytesIO(log_content)
-        nas_upload_file(nas_conn, log_file_obj, log_file_path)
-        print(f"Emergency log upload completed to: {log_file_path}")
-        
-    except Exception as e:
-        print(f"Emergency log upload failed: {e}")
-
-
 def main() -> None:
-    """Main function to orchestrate Stage 3 transcript content extraction."""
-    global config, logger, error_logger
+    """Main function to orchestrate Stage 3 content extraction."""
+    global config, logger
 
+    # Initialize logging
     logger = setup_logging()
-    error_logger = EnhancedErrorLogger()
-    print(f"Local log file: {logger.temp_log_file}")  # Always show where local log is
-    logger.info("STAGE 3: TRANSCRIPT CONTENT EXTRACTION & PARAGRAPH-LEVEL BREAKDOWN")
+    log_console("=== STAGE 3: TRANSCRIPT CONTENT EXTRACTION & PARAGRAPH-LEVEL BREAKDOWN ===")
 
-    # Connect to NAS and load configuration
-    nas_conn = get_nas_connection()
-    if not nas_conn:
-        logger.error("Failed to connect to NAS - aborting content extraction")
-        return
+    # Initialize stage summary
+    stage_summary = {
+        "status": "unknown",
+        "execution_time_seconds": 0,
+        "total_files_queued": 0,
+        "files_processed": 0,
+        "paragraphs_extracted": 0,
+        "errors": {
+            "environment_validation": 0,
+            "nas_connection": 0,
+            "config_load": 0,
+            "ssl_setup": 0,
+            "queue_load": 0,
+            "metadata_extraction": 0,
+            "xml_processing": 0,
+            "content_extraction": 0
+        }
+    }
+
+    start_time = datetime.now()
+    ssl_cert_path = None
+    nas_conn = None
 
     try:
-        # Load shared configuration from NAS
-        config = load_stage_config(nas_conn)
-        logger.info(f"Loaded configuration for Stage 3")
-        logger.info(f"Development mode: {config['stage_3']['dev_mode']}")
-        
-        if config['stage_3']['dev_mode']:
-            logger.info(f"Max files in dev mode: {config['stage_3']['dev_max_files']}")
+        # Step 1: Environment validation
+        log_console("Step 1: Validating environment variables...")
+        validate_environment_variables()
 
-        start_time = datetime.now()
-
-        # Step 1: Load processing queue from Stage 2
-        logger.info("Step 1: Loading processing queue from Stage 2...")
-        files_to_process = load_processing_queue(nas_conn)
-        
-        if not files_to_process:
-            logger.warning("No files to process - exiting")
+        # Step 2: NAS connection
+        log_console("Step 2: Connecting to NAS...")
+        nas_conn = get_nas_connection()
+        if not nas_conn:
+            stage_summary["status"] = "failed"
+            log_console("Failed to establish NAS connection", "ERROR")
             return
-        
-        # Apply development mode limit if enabled
-        if config['stage_3']['dev_mode']:
-            original_count = len(files_to_process)
-            files_to_process = files_to_process[:config['stage_3']['dev_max_files']]
-            logger.info(f"Development mode: Processing {len(files_to_process)} of {original_count} files")
 
-        # Step 2: Process each file and extract paragraph-level content
-        logger.info("Step 2: Processing XML files and extracting content...")
+        # Step 3: Configuration loading
+        log_console("Step 3: Loading configuration...")
+        config = load_config_from_nas(nas_conn)
+        log_console(f"Loaded configuration for {len(config['monitored_institutions'])} institutions")
+
+        # Step 4: SSL certificate setup
+        log_console("Step 4: Setting up SSL certificate...")
+        ssl_cert_path = setup_ssl_certificate(nas_conn)
+
+        # Step 5: Proxy configuration
+        log_console("Step 5: Setting up proxy configuration...")
+        proxy_url = setup_proxy_configuration()
+
+        # Step 6: Load processing queue
+        log_console("Step 6: Loading processing queue from Stage 2...")
+        processing_queue = load_processing_queue(nas_conn)
+        stage_summary["total_files_queued"] = len(processing_queue)
+
+        if not processing_queue:
+            log_console("No files found in processing queue", "WARNING")
+            stage_summary["status"] = "completed_no_files"
+            return
+
+        # Step 7: Development mode handling
+        dev_mode = config["stage_3"].get("dev_mode", False)
+        if dev_mode:
+            max_files = config["stage_3"].get("dev_max_files", 2)
+            processing_queue = processing_queue[:max_files]
+            log_console(f"Development mode: Processing only {len(processing_queue)} files", "WARNING")
+
+        # Step 8: Process transcript files
+        log_console("Step 8: Processing transcript files...")
+        log_console(f"Total files to process: {len(processing_queue)}")
+        
         all_paragraph_records = []
         
-        for i, file_record in enumerate(files_to_process, 1):
-            filename = file_record.get('filename', 'unknown')
-            file_path = file_record.get('file_path', '')
+        for i, record in enumerate(processing_queue):
+            file_path = record.get("file_path", "")
+            log_console(f"Processing file {i+1}/{len(processing_queue)}: {file_path}")
             
-            logger.info(f"Processing file {i}/{len(files_to_process)}: {filename}")
+            # Process single transcript file
+            paragraph_records = process_transcript_file(nas_conn, record)
             
-            # Download XML file from NAS (file_path already contains full path from share root)
-            xml_content = nas_download_file(nas_conn, file_path)
-            
-            if not xml_content:
-                error_logger.log_download_error(file_path, "Failed to download XML file")
-                continue
-            
-            # Extract paragraph-level content
-            paragraph_records = extract_transcript_paragraphs(file_record, xml_content)
-            all_paragraph_records.extend(paragraph_records)
-        
-        # Step 3: Save extracted content records
-        logger.info("Step 3: Saving extracted content records...")
-        if not save_extracted_content(nas_conn, all_paragraph_records):
-            logger.error("Failed to save extracted content")
-            # Upload logs immediately on critical failure
-            try:
-                upload_logs_to_nas(nas_conn, logger, error_logger)
-            except:
-                pass
-            return
+            if paragraph_records:
+                all_paragraph_records.extend(paragraph_records)
+                stage_summary["paragraphs_extracted"] += len(paragraph_records)
+                stage_summary["files_processed"] += 1
+                log_console(f"Extracted {len(paragraph_records)} paragraphs from {file_path}")
+            else:
+                log_console(f"No paragraphs extracted from {file_path}", "WARNING")
 
+        # Step 9: Save extracted content
+        log_console("Step 9: Saving extracted content...")
+        if all_paragraph_records:
+            if not save_extracted_content(nas_conn, all_paragraph_records):
+                stage_summary["status"] = "failed"
+                log_console("Failed to save extracted content", "ERROR")
+                return
+        else:
+            log_console("No content extracted - nothing to save", "WARNING")
+
+        # Calculate execution time
         end_time = datetime.now()
         execution_time = end_time - start_time
+        stage_summary["execution_time_seconds"] = execution_time.total_seconds()
+        stage_summary["status"] = "completed_successfully"
 
-        # Save error logs
-        error_logger.save_error_logs(nas_conn)
+        # Count errors by type
+        for error_entry in error_log:
+            error_type = error_entry.get("error_type", "unknown")
+            if error_type in stage_summary["errors"]:
+                stage_summary["errors"][error_type] += 1
 
         # Final summary
-        logger.info("STAGE 3 CONTENT EXTRACTION COMPLETE")
-        logger.info(f"Files processed: {len(files_to_process)}")
-        logger.info(f"Total paragraph records created: {len(all_paragraph_records)}")
-        logger.info(f"Average paragraphs per file: {len(all_paragraph_records) / len(files_to_process) if files_to_process else 0:.1f}")
-        logger.info(f"Execution time: {execution_time}")
-
-        # Upload log file to NAS
-        try:
-            # Close all logging handlers to ensure file is not in use
-            for handler in logger.handlers[:]:
-                handler.close()
-                logger.removeHandler(handler)
-
-            # Force any remaining buffered log data to be written
-            logging.shutdown()
-
-            # Now safely upload the log file
-            log_file_path = nas_path_join(
-                NAS_BASE_PATH,
-                "Outputs",
-                "Logs",
-                f"stage_3_content_extraction_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log",
-            )
-
-            # Read the entire log file and convert to BytesIO for upload
-            with open(logger.temp_log_file, "rb") as log_file:
-                log_content = log_file.read()
-
-            log_file_obj = io.BytesIO(log_content)
-            nas_upload_file(nas_conn, log_file_obj, log_file_path)
-
-        except Exception as e:
-            print(
-                f"Error uploading log file: {e}"
-            )  # Can't use logger since it's shut down
+        log_console("=== STAGE 3 CONTENT EXTRACTION COMPLETE ===")
+        log_console(f"Files processed: {stage_summary['files_processed']}")
+        log_console(f"Paragraphs extracted: {stage_summary['paragraphs_extracted']}")
+        log_console(f"Total errors: {sum(stage_summary['errors'].values())}")
+        log_console(f"Execution time: {execution_time}")
 
     except Exception as e:
-        logger.error(f"Stage 3 content extraction failed: {e}")
-        # Try to save error logs even if main execution failed
-        try:
-            error_logger.save_error_logs(nas_conn)
-        except:
-            pass
-    finally:
-        if nas_conn:
-            nas_conn.close()
+        stage_summary["status"] = "failed"
+        error_msg = f"Stage 3 content extraction failed: {e}"
+        log_console(error_msg, "ERROR")
+        log_error(error_msg, "main_execution", {"exception_type": type(e).__name__})
 
-        try:
-            os.unlink(logger.temp_log_file)
-        except (OSError, FileNotFoundError) as e:
-            print(f"Cleanup failed for log file: {e}")
-        except:
-            pass
+    finally:
+        # Save logs to NAS
+        if nas_conn:
+            try:
+                save_logs_to_nas(nas_conn, stage_summary)
+            except Exception as e:
+                log_console(f"Failed to save logs to NAS: {e}", "WARNING")
+
+        # Cleanup
+        if ssl_cert_path:
+            try:
+                os.unlink(ssl_cert_path)
+                log_execution("SSL certificate cleanup completed")
+            except Exception as e:
+                log_console(f"SSL certificate cleanup failed: {e}", "WARNING")
+
+        if nas_conn:
+            try:
+                nas_conn.close()
+                log_execution("NAS connection closed")
+            except Exception as e:
+                log_console(f"Error closing NAS connection: {e}", "WARNING")
+
+        log_console(f"Stage 3 content extraction {stage_summary['status']}")
 
 
 if __name__ == "__main__":
