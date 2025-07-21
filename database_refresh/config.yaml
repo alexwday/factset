@@ -46,54 +46,62 @@ stage_1:
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
 
+# Stage 2 specific settings
+stage_2:
+  description: "Transcript consolidation and master database management"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  master_database_path: "Outputs/Database/master_database.json"
+  refresh_output_path: "Outputs/Refresh"
+
 # Monitored Financial Institutions
 # Format: ticker: {name, type}
 monitored_institutions:
   # Canadian Banks
-  BMO-CA: {name: "Bank of Montreal", type: "Canadian"}
-  CM-CA: {name: "Canadian Imperial Bank of Commerce", type: "Canadian"}
-  NA-CA: {name: "National Bank of Canada", type: "Canadian"}
-  RY-CA: {name: "Royal Bank of Canada", type: "Canadian"}
-  BNS-CA: {name: "Bank of Nova Scotia", type: "Canadian"}
-  TD-CA: {name: "Toronto-Dominion Bank", type: "Canadian"}
+  BMO-CA: {name: "Bank of Montreal", type: "Canadian", path_safe_name: "BMO-CA_Bank_of_Montreal"}
+  CM-CA: {name: "Canadian Imperial Bank of Commerce", type: "Canadian", path_safe_name: "CM-CA_Canadian_Imperial_Bank_of_Commerce"}
+  NA-CA: {name: "National Bank of Canada", type: "Canadian", path_safe_name: "NA-CA_National_Bank_of_Canada"}
+  RY-CA: {name: "Royal Bank of Canada", type: "Canadian", path_safe_name: "RY-CA_Royal_Bank_of_Canada"}
+  BNS-CA: {name: "Bank of Nova Scotia", type: "Canadian", path_safe_name: "BNS-CA_Bank_of_Nova_Scotia"}
+  TD-CA: {name: "Toronto-Dominion Bank", type: "Canadian", path_safe_name: "TD-CA_Toronto-Dominion_Bank"}
   
   # European Banks
-  BBVA-ES: {name: "Banco Bilbao Vizcaya Argentaria S.A.", type: "European"}
-  BCS-GB: {name: "Barclays PLC", type: "European"}
-  BNP-FR: {name: "BNP Paribas", type: "European"}
-  DBK-DE: {name: "Deutsche Bank AG", type: "European"}
-  HSBA-GB: {name: "HSBC Holdings plc", type: "European"}
-  ING-NL: {name: "ING Groep N.V.", type: "European"}
-  ISP-IT: {name: "Intesa Sanpaolo", type: "European"}
-  LLOY-GB: {name: "Lloyds Banking Group plc", type: "European"}
-  RBS-GB: {name: "NatWest Group plc", type: "European"}
-  SAN-ES: {name: "Banco Santander S.A.", type: "European"}
-  GLE-FR: {name: "Societe Generale", type: "European"}
-  STAN-GB: {name: "Standard Chartered PLC", type: "European"}
-  UBS-CH: {name: "UBS Group AG", type: "European"}
-  UCG-IT: {name: "UniCredit S.p.A.", type: "European"}
+  BBVA-ES: {name: "Banco Bilbao Vizcaya Argentaria S.A.", type: "European", path_safe_name: "BBVA-ES_Banco_Bilbao_Vizcaya_Argentaria_SA"}
+  BCS-GB: {name: "Barclays PLC", type: "European", path_safe_name: "BCS-GB_Barclays_PLC"}
+  BNP-FR: {name: "BNP Paribas", type: "European", path_safe_name: "BNP-FR_BNP_Paribas"}
+  DBK-DE: {name: "Deutsche Bank AG", type: "European", path_safe_name: "DBK-DE_Deutsche_Bank_AG"}
+  HSBA-GB: {name: "HSBC Holdings plc", type: "European", path_safe_name: "HSBA-GB_HSBC_Holdings_plc"}
+  ING-NL: {name: "ING Groep N.V.", type: "European", path_safe_name: "ING-NL_ING_Groep_NV"}
+  ISP-IT: {name: "Intesa Sanpaolo", type: "European", path_safe_name: "ISP-IT_Intesa_Sanpaolo"}
+  LLOY-GB: {name: "Lloyds Banking Group plc", type: "European", path_safe_name: "LLOY-GB_Lloyds_Banking_Group_plc"}
+  RBS-GB: {name: "NatWest Group plc", type: "European", path_safe_name: "RBS-GB_NatWest_Group_plc"}
+  SAN-ES: {name: "Banco Santander S.A.", type: "European", path_safe_name: "SAN-ES_Banco_Santander_SA"}
+  GLE-FR: {name: "Societe Generale", type: "European", path_safe_name: "GLE-FR_Societe_Generale"}
+  STAN-GB: {name: "Standard Chartered PLC", type: "European", path_safe_name: "STAN-GB_Standard_Chartered_PLC"}
+  UBS-CH: {name: "UBS Group AG", type: "European", path_safe_name: "UBS-CH_UBS_Group_AG"}
+  UCG-IT: {name: "UniCredit S.p.A.", type: "European", path_safe_name: "UCG-IT_UniCredit_SpA"}
   
   # Insurance Companies
-  GWO-CA: {name: "Great-West Lifeco Inc.", type: "Insurance"}
-  IFC-CA: {name: "Intact Financial Corporation", type: "Insurance"}
-  MFC-CA: {name: "Manulife Financial Corporation", type: "Insurance"}
-  SLF-CA: {name: "Sun Life Financial Inc.", type: "Insurance"}
+  GWO-CA: {name: "Great-West Lifeco Inc.", type: "Insurance", path_safe_name: "GWO-CA_Great-West_Lifeco_Inc"}
+  IFC-CA: {name: "Intact Financial Corporation", type: "Insurance", path_safe_name: "IFC-CA_Intact_Financial_Corporation"}
+  MFC-CA: {name: "Manulife Financial Corporation", type: "Insurance", path_safe_name: "MFC-CA_Manulife_Financial_Corporation"}
+  SLF-CA: {name: "Sun Life Financial Inc.", type: "Insurance", path_safe_name: "SLF-CA_Sun_Life_Financial_Inc"}
   
   # U.S. Banks
-  BAC-US: {name: "Bank of America Corporation", type: "US"}
-  C-US: {name: "Citigroup Inc.", type: "US"}
-  GS-US: {name: "Goldman Sachs Group Inc.", type: "US"}
-  JPM-US: {name: "JPMorgan Chase & Co.", type: "US"}
-  MS-US: {name: "Morgan Stanley", type: "US"}
-  WFC-US: {name: "Wells Fargo & Company", type: "US"}
+  BAC-US: {name: "Bank of America Corporation", type: "US", path_safe_name: "BAC-US_Bank_of_America_Corporation"}
+  C-US: {name: "Citigroup Inc.", type: "US", path_safe_name: "C-US_Citigroup_Inc"}
+  GS-US: {name: "Goldman Sachs Group Inc.", type: "US", path_safe_name: "GS-US_Goldman_Sachs_Group_Inc"}
+  JPM-US: {name: "JPMorgan Chase & Co.", type: "US", path_safe_name: "JPM-US_JPMorgan_Chase_Co"}
+  MS-US: {name: "Morgan Stanley", type: "US", path_safe_name: "MS-US_Morgan_Stanley"}
+  WFC-US: {name: "Wells Fargo & Company", type: "US", path_safe_name: "WFC-US_Wells_Fargo_Company"}
   
   # U.S. Boutiques
-  CCO-CA: {name: "Canaccord Genuity Group Inc", type: "US_Boutique"}
-  EVR-US: {name: "Evercore Inc", type: "US_Boutique"}
-  HLI-US: {name: "Houlihan Lokey Inc", type: "US_Boutique"}
-  LAZ-US: {name: "Lazard Ltd", type: "US_Boutique"}
-  MC-US: {name: "Moelis & Company", type: "US_Boutique"}
-  PIPR-US: {name: "Piper Sandler Companies", type: "US_Boutique"}
-  PJT-US: {name: "PJT Partners Inc", type: "US_Boutique"}
-  RJF-US: {name: "Raymond James Financial Inc", type: "US_Boutique"}
-  SF-US: {name: "Stifel Financial Corp", type: "US_Boutique"}
+  CCO-CA: {name: "Canaccord Genuity Group Inc", type: "US_Boutique", path_safe_name: "CCO-CA_Canaccord_Genuity_Group_Inc"}
+  EVR-US: {name: "Evercore Inc", type: "US_Boutique", path_safe_name: "EVR-US_Evercore_Inc"}
+  HLI-US: {name: "Houlihan Lokey Inc", type: "US_Boutique", path_safe_name: "HLI-US_Houlihan_Lokey_Inc"}
+  LAZ-US: {name: "Lazard Ltd", type: "US_Boutique", path_safe_name: "LAZ-US_Lazard_Ltd"}
+  MC-US: {name: "Moelis & Company", type: "US_Boutique", path_safe_name: "MC-US_Moelis_Company"}
+  PIPR-US: {name: "Piper Sandler Companies", type: "US_Boutique", path_safe_name: "PIPR-US_Piper_Sandler_Companies"}
+  PJT-US: {name: "PJT Partners Inc", type: "US_Boutique", path_safe_name: "PJT-US_PJT_Partners_Inc"}
+  RJF-US: {name: "Raymond James Financial Inc", type: "US_Boutique", path_safe_name: "RJF-US_Raymond_James_Financial_Inc"}
+  SF-US: {name: "Stifel Financial Corp", type: "US_Boutique", path_safe_name: "SF-US_Stifel_Financial_Corp"}
