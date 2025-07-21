@@ -1,6 +1,6 @@
 """
-Stage 0: Bulk Transcript Sync
-Downloads ALL historical earnings transcripts from 2023-present for monitored financial institutions.
+Stage 1: Daily Transcript Sync
+Downloads new/updated earnings transcripts from recent date range for monitored financial institutions.
 Self-contained standalone script that loads config from NAS at runtime.
 """
 
@@ -9,7 +9,7 @@ import fds.sdk.EventsandTranscripts
 from fds.sdk.EventsandTranscripts.api import transcripts_api
 import os
 from urllib.parse import quote
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import requests
 import logging
@@ -71,7 +71,7 @@ def setup_logging() -> logging.Logger:
     temp_log_file = tempfile.NamedTemporaryFile(
         mode='w+', 
         suffix='.log', 
-        prefix=f'stage_0_bulk_refresh_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
+        prefix=f'stage_1_daily_sync_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
         delete=False
     )
     
@@ -182,8 +182,8 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
     
     # Define required configuration structure
     required_structure = {
-        'stage_0': {
-            'sync_start_date': str,
+        'stage_1': {
+            'sync_date_range': int,
             'description': str
         },
         'api_settings': {
@@ -223,10 +223,11 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
     
     # Validate specific parameter values
     try:
-        # Validate sync_start_date format
-        datetime.strptime(config['stage_0']['sync_start_date'], "%Y-%m-%d")
-    except ValueError as e:
-        raise ValueError(f"Invalid sync_start_date format: {e}")
+        # Validate sync_date_range is non-negative integer
+        if not isinstance(config['stage_1']['sync_date_range'], int) or config['stage_1']['sync_date_range'] < 0:
+            raise ValueError("sync_date_range must be a non-negative integer")
+    except KeyError as e:
+        raise ValueError(f"Missing required stage_1 configuration: {e}")
     
     # Validate API settings ranges
     if config['api_settings']['request_delay'] < 0:
@@ -247,7 +248,7 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
     if not config['api_settings']['transcript_types']:
         raise ValueError("transcript_types cannot be empty")
     
-    valid_transcript_types = ['Raw', 'Corrected', 'NearRealTime']
+    valid_transcript_types = ['Raw', 'Corrected']
     for transcript_type in config['api_settings']['transcript_types']:
         if transcript_type not in valid_transcript_types:
             raise ValueError(f"Invalid transcript type: {transcript_type}. Must be one of: {valid_transcript_types}")
@@ -589,33 +590,6 @@ def get_fallback_quarter_year() -> Tuple[str, str]:
     # Instead, use a special "Unknown" folder that operators can manually sort
     return "Unknown", "Unknown"
 
-def create_base_directory_structure(nas_conn: SMBConnection) -> None:
-    """Create the base directory structure for the transcript repository on NAS."""
-    global logger
-    logger.info("Creating base directory structure on NAS...")
-    
-    inputs_path = nas_path_join(NAS_BASE_PATH, "Inputs")
-    outputs_path = nas_path_join(NAS_BASE_PATH, "Outputs")
-    
-    nas_create_directory(nas_conn, inputs_path)
-    nas_create_directory(nas_conn, outputs_path)
-    
-    certificate_path = nas_path_join(inputs_path, "certificate")
-    config_path = nas_path_join(inputs_path, "config")
-    data_path = nas_path_join(outputs_path, "Data")
-    logs_path = nas_path_join(outputs_path, "Logs")
-    
-    nas_create_directory(nas_conn, certificate_path)
-    nas_create_directory(nas_conn, config_path)
-    nas_create_directory(nas_conn, data_path)
-    nas_create_directory(nas_conn, logs_path)
-    
-    # Create error logs directory
-    error_logs_path = nas_path_join(logs_path, "Errors")
-    nas_create_directory(nas_conn, error_logs_path)
-    
-    # Note: Year/Quarter folders will be created dynamically as needed
-
 def create_enhanced_directory_structure(nas_conn: SMBConnection, ticker: str, 
                                       institution_type: str, transcript_type: str,
                                       quarter: str, year: str) -> Optional[str]:
@@ -649,6 +623,32 @@ def create_enhanced_directory_structure(nas_conn: SMBConnection, ticker: str,
     
     nas_create_directory(nas_conn, full_path)
     return full_path
+
+def create_base_directory_structure(nas_conn: SMBConnection) -> None:
+    """Create the base directory structure for the transcript repository on NAS."""
+    global logger
+    logger.info("Creating base directory structure on NAS...")
+    
+    inputs_path = nas_path_join(NAS_BASE_PATH, "Inputs")
+    outputs_path = nas_path_join(NAS_BASE_PATH, "Outputs")
+    
+    nas_create_directory(nas_conn, inputs_path)
+    nas_create_directory(nas_conn, outputs_path)
+    
+    certificate_path = nas_path_join(inputs_path, "certificate")
+    config_path = nas_path_join(inputs_path, "config")
+    data_path = nas_path_join(outputs_path, "Data")
+    logs_path = nas_path_join(outputs_path, "Logs")
+    
+    nas_create_directory(nas_conn, certificate_path)
+    nas_create_directory(nas_conn, config_path)
+    nas_create_directory(nas_conn, data_path)
+    nas_create_directory(nas_conn, logs_path)
+    
+    # Enhanced structure creates type folders dynamically within fiscal year/quarter folders
+    # No need to pre-create legacy type-based folders
+
+# Removed create_ticker_directory_structure - replaced by enhanced directory structure
 
 def create_filename(transcript_data: Dict[str, Any], target_ticker: Optional[str] = None) -> str:
     """Create standardized filename from transcript data."""
@@ -1002,13 +1002,83 @@ def download_transcript_with_enhanced_structure(nas_conn: SMBConnection, transcr
                 
     return False
 
+def get_daily_transcripts_by_date(api_instance: transcripts_api.TranscriptsApi, 
+                                 target_date: datetime.date, 
+                                 monitored_tickers: List[str]) -> List[Tuple[Dict[str, Any], str]]:
+    """Get all transcripts for target date, filter to monitored institutions."""
+    global logger, config
+    logger.info(f"Querying transcripts for date: {target_date}")
+    
+    # Implement retry logic using config settings
+    for attempt in range(config['api_settings']['max_retries']):
+        try:
+            # Use date-based API endpoint instead of company-based
+            response = api_instance.get_transcripts_dates(
+                start_date=target_date,
+                end_date=target_date,
+                sort=["-storyDateTime"],
+                pagination_limit=1000  # Maximum to get all results
+            )
+            
+            if not response or not hasattr(response, 'data') or not response.data:
+                logger.info(f"No transcripts found for date: {target_date}")
+                return []
+            
+            # Validate API response structure
+            if not validate_api_response_structure(response):
+                logger.error(f"Invalid API response structure for date: {target_date}")
+                return []
+            
+            all_transcripts = [transcript.to_dict() for transcript in response.data]
+            logger.info(f"Found {len(all_transcripts)} total transcripts for date: {target_date}")
+            
+            # Filter to only transcripts where one of our monitored tickers is the ONLY primary ID
+            filtered_transcripts = []
+            for transcript in all_transcripts:
+                primary_ids = transcript.get('primary_ids', [])
+                
+                # Validate that primary_ids is actually a list
+                if not isinstance(primary_ids, list):
+                    logger.warning(f"Invalid primary_ids type for transcript: {type(primary_ids)}")
+                    continue
+                
+                # Check if exactly one primary ID and it's one of our monitored tickers
+                if len(primary_ids) == 1 and primary_ids[0] in monitored_tickers:
+                    # Also filter for earnings transcripts
+                    if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', '')):
+                        filtered_transcripts.append((transcript, primary_ids[0]))
+            
+            logger.info(f"Filtered to {len(filtered_transcripts)} earnings transcripts for monitored institutions")
+            return filtered_transcripts
+            
+        except Exception as e:
+            if attempt < config['api_settings']['max_retries'] - 1:
+                # Calculate delay with exponential backoff if enabled
+                if config['api_settings'].get('use_exponential_backoff', False):
+                    base_delay = config['api_settings']['retry_delay']
+                    max_delay = config['api_settings'].get('max_backoff_delay', 120.0)
+                    exponential_delay = base_delay * (2 ** attempt)
+                    actual_delay = min(exponential_delay, max_delay)
+                    logger.warning(f"API query attempt {attempt + 1} failed, retrying in {actual_delay:.1f}s (exponential backoff): {e}")
+                else:
+                    actual_delay = config['api_settings']['retry_delay']
+                    logger.warning(f"API query attempt {attempt + 1} failed, retrying in {actual_delay:.1f}s: {e}")
+                
+                time.sleep(actual_delay)
+            else:
+                logger.error(f"API query failed after {attempt + 1} attempts for date {target_date}: {e}")
+                return []
+    
+    return []
+
+
 def process_bank(ticker: str, institution_info: Dict[str, str], 
-                api_instance: transcripts_api.TranscriptsApi, 
+                transcripts_for_ticker: List[Dict[str, Any]],
                 nas_conn: SMBConnection, configuration, 
                 proxy_user: str, proxy_password: str) -> Dict[str, Any]:
-    """Process a single bank: query API, check NAS files, download new transcripts."""
+    """Process transcripts for a single bank."""
     global logger, config
-    logger.info(f"Processing: {institution_info['name']} ({ticker})")
+    logger.info(f"Processing: {institution_info['name']} ({ticker}) - {len(transcripts_for_ticker)} transcripts")
     
     institution_type = institution_info['type']
     bank_downloads = {
@@ -1019,67 +1089,17 @@ def process_bank(ticker: str, institution_info: Dict[str, str],
     }
     
     try:
-        start_date = datetime.strptime(config['stage_0']['sync_start_date'], "%Y-%m-%d").date()
-        end_date = datetime.now().date()
-        
-        api_params = {
-            'ids': [ticker],
-            'start_date': start_date,
-            'end_date': end_date,
-            'categories': config['api_settings']['industry_categories'],
-            'sort': config['api_settings']['sort_order'],
-            'pagination_limit': config['api_settings']['pagination_limit'],
-            'pagination_offset': config['api_settings']['pagination_offset']
-        }
-        
-        response = api_instance.get_transcripts_ids(**api_params)
-        
-        if not response or not hasattr(response, 'data') or not response.data:
-            logger.warning(f"No transcripts found for {ticker} - ticker may not exist or have no coverage")
+        if not transcripts_for_ticker:
+            logger.info(f"No transcripts found for {ticker}")
             return bank_downloads
         
-        # Validate API response structure
-        if not validate_api_response_structure(response):
-            logger.error(f"Invalid API response structure for {ticker}")
-            return bank_downloads
-        
-        all_transcripts = [transcript.to_dict() for transcript in response.data]
-        logger.info(f"Found {len(all_transcripts)} total transcripts for {ticker}")
-        
-        # Filter to only transcripts where our ticker is the ONLY primary ID
-        filtered_transcripts = []
-        for transcript in all_transcripts:
-            primary_ids = transcript.get('primary_ids', [])
-            
-            # Validate that primary_ids is actually a list
-            if not isinstance(primary_ids, list):
-                logger.warning(f"Invalid primary_ids type for transcript: {type(primary_ids)}")
-                continue
-            
-            if primary_ids == [ticker]:
-                filtered_transcripts.append(transcript)
-        
-        logger.info(f"Filtered to {len(filtered_transcripts)} transcripts where {ticker} is sole primary company")
-        
-        # Filter for earnings transcripts
-        earnings_transcripts = [
-            transcript for transcript in filtered_transcripts
-            if transcript.get('event_type', '') and 'Earnings' in str(transcript.get('event_type', ''))
-        ]
-        
-        logger.info(f"Found {len(earnings_transcripts)} earnings transcripts for {ticker}")
-        
-        if not earnings_transcripts:
-            logger.info(f"No earnings transcripts found for {ticker}")
-            return bank_downloads
-        
-        # Mark that we found transcripts (directories will be created dynamically)
+        # Directory structure will be created during download with enhanced structure
         bank_downloads['found_transcripts'] = True
         
         total_downloaded = 0
         
         for transcript_type in config['api_settings']['transcript_types']:
-            type_transcripts = [t for t in earnings_transcripts if t.get('transcript_type') == transcript_type]
+            type_transcripts = [t for t in transcripts_for_ticker if t.get('transcript_type') == transcript_type]
             
             if not type_transcripts:
                 continue
@@ -1196,12 +1216,12 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
 # No automatic config creation - config must be manually placed on NAS
 
 def main() -> None:
-    """Main function to orchestrate the Stage 0 bulk transcript sync."""
+    """Main function to orchestrate the Stage 1 daily transcript sync."""
     global config, logger, error_logger
     
     logger = setup_logging()
     error_logger = EnhancedErrorLogger()
-    logger.info("STAGE 0: BULK TRANSCRIPT SYNC WITH ENHANCED FOLDER STRUCTURE")
+    logger.info("STAGE 1: DAILY TRANSCRIPT SYNC WITH ENHANCED FOLDER STRUCTURE")
     
     temp_cert_path = None
     
@@ -1243,37 +1263,73 @@ def main() -> None:
         total_institutions = len(config['monitored_institutions'])
         total_downloaded = 0
         
-        logger.info(f"Starting bulk sync for {total_institutions} institutions")
-        logger.info(f"Date range: {config['stage_0']['sync_start_date']} to {datetime.now().date()}")
+        # Calculate date range for daily sync
+        current_date = datetime.now().date()
+        sync_date_range = config['stage_1']['sync_date_range']
+        
+        # Generate list of dates to check
+        target_dates = []
+        for i in range(sync_date_range + 1):  # Include current date
+            target_date = current_date - timedelta(days=i)
+            target_dates.append(target_date)
+        
+        logger.info(f"Starting daily sync for {total_institutions} institutions")
+        logger.info(f"Date range: {target_dates[-1]} to {target_dates[0]} ({len(target_dates)} days)")
         
         institutions_with_transcripts = []
-        institutions_without_transcripts = []
+        monitored_tickers = list(config['monitored_institutions'].keys())
         
         with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
             api_instance = transcripts_api.TranscriptsApi(api_client)
             
-            for i, (ticker, institution_info) in enumerate(config['monitored_institutions'].items(), 1):
-                logger.info(f"Processing institution {i}/{total_institutions}")
+            # Get all transcripts for all target dates - efficient discovery
+            all_transcripts_by_ticker = {}
+            for ticker in monitored_tickers:
+                all_transcripts_by_ticker[ticker] = []
+            
+            for target_date in target_dates:
+                logger.info(f"Querying transcripts for date: {target_date}")
                 
-                bank_downloads = process_bank(ticker, institution_info, api_instance, nas_conn, configuration, user, password)
-                total_downloaded += bank_downloads['total']
+                daily_transcripts = get_daily_transcripts_by_date(api_instance, target_date, monitored_tickers)
                 
-                if bank_downloads['found_transcripts']:
-                    institutions_with_transcripts.append({
-                        'ticker': ticker,
-                        'name': institution_info['name'],
-                        'type': institution_info['type'],
-                        'downloaded': bank_downloads['total']
-                    })
-                else:
-                    institutions_without_transcripts.append({
-                        'ticker': ticker,
-                        'name': institution_info['name'],
-                        'type': institution_info['type']
-                    })
+                # Group transcripts by ticker
+                for transcript, ticker in daily_transcripts:
+                    all_transcripts_by_ticker[ticker].append(transcript)
                 
-                if i < total_institutions:
+                # Rate limiting between date queries
+                if target_date != target_dates[-1]:  # Don't sleep after last date
                     time.sleep(config['api_settings']['request_delay'])
+            
+            # Log summary of discovery results
+            banks_with_transcripts = [ticker for ticker, transcripts in all_transcripts_by_ticker.items() if transcripts]
+            total_transcripts_found = sum(len(transcripts) for transcripts in all_transcripts_by_ticker.values())
+            
+            if banks_with_transcripts:
+                logger.info(f"Discovery complete: Found {total_transcripts_found} transcripts for {len(banks_with_transcripts)} banks: {', '.join(banks_with_transcripts)}")
+            else:
+                logger.info("Discovery complete: No new transcripts found for any monitored banks")
+            
+            # Process each institution with their accumulated transcripts (proven logic)
+            for i, (ticker, institution_info) in enumerate(config['monitored_institutions'].items(), 1):
+                transcripts_for_ticker = all_transcripts_by_ticker[ticker]
+                
+                # Only process if we found transcripts for this bank
+                if transcripts_for_ticker:
+                    logger.info(f"Processing institution {i}/{total_institutions}: {institution_info['name']} ({ticker})")
+                    
+                    bank_downloads = process_bank(ticker, institution_info, transcripts_for_ticker, nas_conn, configuration, user, password)
+                    total_downloaded += bank_downloads['total']
+                    
+                    if bank_downloads['found_transcripts']:
+                        institutions_with_transcripts.append({
+                            'ticker': ticker,
+                            'name': institution_info['name'],
+                            'type': institution_info['type'],
+                            'downloaded': bank_downloads['total']
+                        })
+                # No else clause needed - we only care about banks with transcripts
+                
+                # No artificial delays between banks - we already have all the data
         
         end_time = datetime.now()
         execution_time = end_time - start_time
@@ -1281,19 +1337,17 @@ def main() -> None:
         # Save error logs to NAS
         error_logger.save_error_logs(nas_conn)
         
-        logger.info("STAGE 0 BULK SYNC WITH ENHANCED STRUCTURE COMPLETE")
+        logger.info("STAGE 1 DAILY SYNC WITH ENHANCED STRUCTURE COMPLETE")
         logger.info(f"Total new transcripts downloaded: {total_downloaded}")
         logger.info(f"Execution time: {execution_time}")
         
-        # Log summary of institutions processed
-        logger.info(f"Institutions with transcripts found: {len(institutions_with_transcripts)}")
-        for inst in institutions_with_transcripts:
-            logger.info(f"  {inst['ticker']} ({inst['type']}): {inst['downloaded']} transcripts downloaded")
-        
-        if institutions_without_transcripts:
-            logger.warning(f"Institutions with NO transcripts found: {len(institutions_without_transcripts)}")
-            for inst in institutions_without_transcripts:
-                logger.warning(f"  {inst['ticker']} - {inst['name']} ({inst['type']}): No earnings transcripts or ticker not found")
+        # Log summary of institutions with activity
+        if institutions_with_transcripts:
+            logger.info(f"Institutions with transcripts found: {len(institutions_with_transcripts)}")
+            for inst in institutions_with_transcripts:
+                logger.info(f"  {inst['ticker']} ({inst['type']}): {inst['downloaded']} transcripts downloaded")
+        else:
+            logger.info("No new transcripts found for any monitored institutions")
         
         # Upload log file to NAS - properly close logging first
         try:
@@ -1307,7 +1361,7 @@ def main() -> None:
             
             # Now safely upload the log file
             log_file_path = nas_path_join(NAS_BASE_PATH, "Outputs", "Logs", 
-                                        f"stage_0_bulk_refresh_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
+                                        f"stage_1_daily_sync_log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log")
             
             # Read the entire log file and convert to BytesIO for upload
             with open(logger.temp_log_file, 'rb') as log_file:
@@ -1320,7 +1374,7 @@ def main() -> None:
             print(f"Error uploading log file: {e}")  # Can't use logger since it's shut down
         
     except Exception as e:
-        logger.error(f"Bulk sync failed: {e}")
+        logger.error(f"Daily sync failed: {e}")
         # Try to save error logs even if main execution failed
         try:
             error_logger.save_error_logs(nas_conn)
