@@ -844,10 +844,80 @@ def process_transcript_file(nas_conn: SMBConnection, file_record: Dict[str, Any]
         return []
 
 
+def validate_and_preview_json(all_paragraph_records: List[Dict[str, Any]]) -> bool:
+    """Validate JSON structure and preview first few records."""
+    
+    try:
+        log_console("🔍 Validating JSON structure...")
+        
+        # Test JSON serialization
+        test_json = json.dumps(all_paragraph_records, indent=2)
+        
+        # Test JSON deserialization  
+        test_data = json.loads(test_json)
+        
+        if len(test_data) != len(all_paragraph_records):
+            log_error("JSON validation failed: Record count mismatch", "json_validation", {
+                "original_count": len(all_paragraph_records),
+                "parsed_count": len(test_data)
+            })
+            return False
+        
+        log_console(f"✅ JSON validation passed: {len(test_data)} records")
+        
+        # Preview first 3 records
+        preview_count = min(3, len(test_data))
+        log_console(f"📋 Previewing first {preview_count} records:")
+        
+        for i in range(preview_count):
+            record = test_data[i]
+            log_console(f"\n--- Record {i+1} ---")
+            log_console(f"File: {record.get('filename', 'N/A')}")
+            log_console(f"Ticker: {record.get('ticker', 'N/A')}")
+            log_console(f"Company: {record.get('company_name', 'N/A')}")
+            log_console(f"Transcript Type: {record.get('transcript_type', 'N/A')}")
+            log_console(f"Event ID: {record.get('event_id', 'N/A')}")
+            log_console(f"Version ID: {record.get('version_id', 'N/A')}")
+            log_console(f"Title: {record.get('title', 'N/A')[:50]}...")
+            log_console(f"Speaker: {record.get('speaker', 'N/A')}")
+            log_console(f"Section: {record.get('section_name', 'N/A')}")
+            log_console(f"Q&A Flag: {record.get('question_answer_flag', 'N/A')}")
+            log_console(f"Content: {record.get('paragraph_content', 'N/A')[:100]}...")
+        
+        # Show field statistics
+        sample_record = test_data[0] if test_data else {}
+        log_console(f"\n📊 Record structure ({len(sample_record)} fields):")
+        for key in sorted(sample_record.keys()):
+            log_console(f"  - {key}")
+        
+        return True
+        
+    except json.JSONDecodeError as e:
+        log_error(f"JSON encoding/decoding error: {e}", "json_validation", {
+            "error": str(e),
+            "error_position": getattr(e, 'pos', None)
+        })
+        log_console(f"❌ JSON validation failed: {e}", "ERROR")
+        return False
+        
+    except Exception as e:
+        log_error(f"JSON validation error: {e}", "json_validation", {
+            "error": str(e),
+            "exception_type": type(e).__name__
+        })
+        log_console(f"❌ JSON validation failed: {e}", "ERROR")
+        return False
+
+
 def save_extracted_content(nas_conn: SMBConnection, all_paragraph_records: List[Dict[str, Any]]) -> bool:
     """Save extracted paragraph records to NAS."""
     
     try:
+        # First validate and preview the JSON
+        if not validate_and_preview_json(all_paragraph_records):
+            log_console("JSON validation failed - not saving file", "ERROR")
+            return False
+        
         output_path = config["stage_3"]["output_data_path"]
         output_filename = "extracted_transcript_sections.json"
         output_file_path = nas_path_join(output_path, output_filename)
@@ -865,6 +935,7 @@ def save_extracted_content(nas_conn: SMBConnection, all_paragraph_records: List[
                 "output_path": output_file_path,
                 "total_records": len(all_paragraph_records)
             })
+            log_console(f"✅ File saved successfully: {output_filename}")
             return True
         else:
             log_error("Failed to save extracted content", "output_save", {"path": output_file_path})
