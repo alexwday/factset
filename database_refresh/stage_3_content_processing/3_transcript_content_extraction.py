@@ -642,7 +642,7 @@ def parse_transcript_xml(xml_content: bytes) -> Optional[Dict[str, Any]]:
                         "affiliation_entity": participant.get("affiliation_entity", ""),
                         "title": participant.get("title", ""),
                         "entity": participant.get("entity", ""),
-                        "name": participant.text.strip() if participant.text else "Unknown Speaker"
+                        "name": participant.text.strip().replace('"', '\\"').replace('\n', ' ').replace('\r', ' ').replace('\t', ' ') if participant.text else "Unknown Speaker"
                     }
         
         # Extract body content
@@ -667,7 +667,9 @@ def parse_transcript_xml(xml_content: bytes) -> Optional[Dict[str, Any]]:
                 if plist is not None:
                     for p in find_all_elements(plist, "p"):
                         if p.text:
-                            paragraphs.append(p.text.strip())
+                            # Clean text to prevent JSON breaking characters
+                            clean_text = p.text.strip().replace('"', '\\"').replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+                            paragraphs.append(clean_text)
                 
                 if paragraphs:  # Only include speakers with content
                     section_content.append({
@@ -779,7 +781,7 @@ def extract_transcript_paragraphs(base_record: Dict[str, Any], xml_content: byte
                         "speaker_block_id": current_speaker_block_id,
                         "question_answer_flag": qa_flag,
                         "speaker": speaker_string,
-                        "paragraph_content": paragraph_text.strip()
+                        "paragraph_content": paragraph_text.strip().replace('"', '\\"').replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
                     }
                     
                     paragraph_records.append(paragraph_record)
