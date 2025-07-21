@@ -49,7 +49,7 @@ stage_1:
 # Stage 2 specific settings
 stage_2:
   description: "Transcript consolidation and master database management"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   master_database_path: "Outputs/Database/master_database.json"
   refresh_output_path: "Outputs/Refresh"

@@ -261,7 +261,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     stage_2_config = config["stage_2"]
     required_stage_2_params = [
         "description", 
-        "output_data_path",
+        "input_data_path",
         "output_logs_path",
         "master_database_path",
         "refresh_output_path"
@@ -548,7 +548,7 @@ def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str,
     """Scan NAS for ALL transcript files. Structure: Data/YYYY/QX/Type/Company/files.xml"""
     
     log_execution("Starting comprehensive NAS file scan")
-    data_base_path = config["stage_2"]["output_data_path"]
+    data_base_path = config["stage_2"]["input_data_path"]
     nas_inventory = {}
     
     # Scan all years
@@ -680,39 +680,48 @@ def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory:
     return files_to_process, files_to_remove
 
 
-def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str], files_to_remove: List[str]) -> bool:
-    """Save processing queues to NAS refresh folder."""
+def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str], files_to_remove: List[str], nas_inventory: Dict[str, Dict[str, Any]], database_inventory: Dict[str, Dict[str, Any]]) -> bool:
+    """Save processing queues to NAS refresh folder as simple JSON records."""
     
     refresh_path = config["stage_2"]["refresh_output_path"]
     nas_create_directory_recursive(nas_conn, refresh_path)
 
-    timestamp = datetime.now().isoformat()
     success = True
 
-    # Save files to process
-    process_data = {
-        "timestamp": timestamp,
-        "total_files": len(files_to_process),
-        "files": files_to_process
-    }
+    # Convert files_to_process to JSON records
+    process_records = []
+    for file_path in files_to_process:
+        # Get the NAS record for this file to include date_last_modified
+        nas_record = nas_inventory.get(file_path, {})
+        record = {
+            "file_path": file_path,
+            "date_last_modified": nas_record.get("date_last_modified", datetime.now().isoformat())
+        }
+        process_records.append(record)
 
+    # Save files to process as simple JSON records
     process_path = nas_path_join(refresh_path, "files_to_process.json")
-    process_content = json.dumps(process_data, indent=2)
+    process_content = json.dumps(process_records, indent=2)
     process_file_obj = io.BytesIO(process_content.encode("utf-8"))
 
     if not nas_upload_file(nas_conn, process_file_obj, process_path):
         log_error("Failed to save files_to_process.json", "queue_save", {"path": process_path})
         success = False
 
-    # Save files to remove
-    remove_data = {
-        "timestamp": timestamp,
-        "total_files": len(files_to_remove),
-        "files": files_to_remove
-    }
+    # Convert files_to_remove to JSON records  
+    remove_records = []
+    for file_path in files_to_remove:
+        # Get the database record for this file to include date_last_modified
+        db_record = database_inventory.get(file_path, {})
+        record = {
+            "file_path": file_path,
+            "date_last_modified": db_record.get("date_last_modified", datetime.now().isoformat())
+        }
+        remove_records.append(record)
 
+    # Save files to remove as simple JSON records
     remove_path = nas_path_join(refresh_path, "files_to_remove.json")
-    remove_content = json.dumps(remove_data, indent=2)
+    remove_content = json.dumps(remove_records, indent=2)
     remove_file_obj = io.BytesIO(remove_content.encode("utf-8"))
 
     if not nas_upload_file(nas_conn, remove_file_obj, remove_path):
@@ -812,7 +821,7 @@ def main() -> None:
 
         # Step 9: Save processing queues
         log_console("Step 9: Saving processing queues...")
-        if not save_processing_queues(nas_conn, files_to_process, files_to_remove):
+        if not save_processing_queues(nas_conn, files_to_process, files_to_remove, nas_inventory, database_inventory):
             stage_summary["status"] = "failed"
             log_console("Failed to save processing queues", "ERROR")
             return
