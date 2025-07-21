@@ -174,6 +174,11 @@ def validate_environment_variables() -> None:
     )
 
 
+def validate_api_response_structure(response) -> bool:
+    """Validate basic API response structure."""
+    return hasattr(response, 'data') and response.data is not None
+
+
 def get_nas_connection() -> Optional[SMBConnection]:
     """Create and return an SMB connection to the NAS."""
 
@@ -985,131 +990,6 @@ def get_daily_transcripts_by_date(api_instance, target_date: datetime.date, moni
     return []
 
 
-def get_api_transcripts_for_company(
-    api_instance,
-    ticker: str,
-    institution_info: Dict[str, str],
-    start_date: datetime.date,
-    end_date: datetime.date,
-    configuration,
-) -> List[Dict[str, Any]]:
-    """Get all transcripts for a company from the API within date range with retry logic."""
-    global config
-
-    for attempt in range(config["api_settings"]["max_retries"]):
-        try:
-            log_execution(
-                f"Querying API for {ticker} transcripts (attempt {attempt + 1})",
-                {
-                    "ticker": ticker,
-                    "institution": institution_info["name"],
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                    "attempt": attempt + 1,
-                },
-            )
-
-            api_params = {
-                "ids": [ticker],
-                "start_date": start_date,
-                "end_date": end_date,
-                "categories": config["api_settings"]["industry_categories"],
-                "sort": config["api_settings"]["sort_order"],
-                "pagination_limit": config["api_settings"]["pagination_limit"],
-                "pagination_offset": config["api_settings"]["pagination_offset"],
-            }
-
-            response = api_instance.get_transcripts_ids(**api_params)
-
-            if not response or not hasattr(response, "data") or not response.data:
-                log_execution(f"No transcripts found for {ticker}", {"ticker": ticker})
-                return []
-
-            all_transcripts = [transcript.to_dict() for transcript in response.data]
-
-            # Filter to only transcripts where our ticker is the SOLE primary ID (anti-contamination)
-            filtered_transcripts = []
-            contamination_rejected = 0
-            for transcript in all_transcripts:
-                primary_ids = transcript.get("primary_ids", [])
-                if isinstance(primary_ids, list) and primary_ids == [ticker]:
-                    filtered_transcripts.append(transcript)
-                else:
-                    contamination_rejected += 1
-
-            # Filter for earnings transcripts only
-            earnings_transcripts = []
-            non_earnings_rejected = 0
-            for transcript in filtered_transcripts:
-                event_type = transcript.get("event_type", "")
-                if event_type and "Earnings" in str(event_type):
-                    earnings_transcripts.append(transcript)
-                else:
-                    non_earnings_rejected += 1
-
-            log_execution(
-                f"API query and filtering completed for {ticker}",
-                {
-                    "ticker": ticker,
-                    "total_api_transcripts": len(all_transcripts),
-                    "contamination_filter": {
-                        "passed": len(filtered_transcripts),
-                        "rejected": contamination_rejected,
-                        "rejection_reason": "Multiple primary IDs (cross-contamination risk)",
-                    },
-                    "earnings_filter": {
-                        "passed": len(earnings_transcripts),
-                        "rejected": non_earnings_rejected,
-                        "rejection_reason": "Non-earnings event type",
-                    },
-                    "final_count": len(earnings_transcripts),
-                    "filtering_logic": "SOLE primary ID + earnings events only",
-                },
-            )
-
-            return earnings_transcripts
-
-        except Exception as e:
-            if attempt < config["api_settings"]["max_retries"] - 1:
-                # Calculate delay with exponential backoff if enabled
-                if config["api_settings"].get("use_exponential_backoff", False):
-                    base_delay = config["api_settings"]["retry_delay"]
-                    max_delay = config["api_settings"].get("max_backoff_delay", 120.0)
-                    exponential_delay = base_delay * (2**attempt)
-                    actual_delay = min(exponential_delay, max_delay)
-                    log_console(
-                        f"API query attempt {attempt + 1} failed for {ticker}, retrying in {actual_delay:.1f}s (exponential backoff): {e}",
-                        "WARNING",
-                    )
-                else:
-                    actual_delay = config["api_settings"]["retry_delay"]
-                    log_console(
-                        f"API query attempt {attempt + 1} failed for {ticker}, retrying in {actual_delay:.1f}s: {e}",
-                        "WARNING",
-                    )
-
-                time.sleep(actual_delay)
-            else:
-                log_error(
-                    f"Failed to query API for {ticker} after {attempt + 1} attempts: {e}",
-                    "api_query",
-                    {
-                        "ticker": ticker,
-                        "error_details": str(e),
-                        "attempts": attempt + 1,
-                    },
-                )
-                return []
-
-    # If we get here, all retries failed
-    log_error(
-        f"All API query attempts failed for {ticker}",
-        "api_query",
-        {"ticker": ticker, "max_retries": config["api_settings"]["max_retries"]},
-    )
-    return []
-
-
 def create_api_transcript_list(
     api_transcripts: List[Dict[str, Any]], ticker: str, institution_info: Dict[str, str]
 ) -> List[Dict[str, str]]:
@@ -1161,7 +1041,6 @@ def compare_transcripts(
     version_updates = 0
     new_transcript_types = 0
     new_events = 0
-    outdated_events = 0
     unchanged_transcripts = 0
 
     # Process each event_id in API
@@ -1199,15 +1078,12 @@ def compare_transcripts(
             to_download.extend(api_versions)
             new_events += 1
 
-    # Process each event_id in NAS that's not in API (outside 3-year window)
-    for event_id, nas_versions in nas_by_event_id.items():
-        if event_id not in api_by_event_id:
-            to_remove.extend(nas_versions)
-            outdated_events += 1
-
+    # Stage 1 Daily Sync: Do NOT remove files that aren't in API
+    # (Stage 0 handles rolling window cleanup - Stage 1 only adds new transcripts)
+    
     # Log detailed comparison results
     log_execution(
-        "Transcript comparison analysis completed",
+        "Daily sync transcript comparison completed",
         {
             "api_events": len(api_by_event_id),
             "nas_events": len(nas_by_event_id),
@@ -1215,7 +1091,6 @@ def compare_transcripts(
                 "version_updates": version_updates,
                 "new_transcript_types": new_transcript_types,
                 "new_events": new_events,
-                "outdated_events_to_remove": outdated_events,
                 "unchanged_transcripts": unchanged_transcripts,
             },
             "actions_summary": {
@@ -1223,7 +1098,7 @@ def compare_transcripts(
                 "total_to_remove": len(to_remove),
                 "net_change": len(to_download) - len(to_remove),
             },
-            "comparison_logic": "API version always considered latest, 3-year window enforced",
+            "comparison_logic": "Daily sync - only downloads new/updated transcripts, version management only",
         },
     )
 
@@ -1441,7 +1316,7 @@ def main() -> None:
     logger = setup_logging()
     start_time = datetime.now()
 
-    log_console("=== STAGE 0: HISTORICAL TRANSCRIPT SYNC ===")
+    log_console("=== STAGE 1: DAILY TRANSCRIPT SYNC ===")
     log_execution(
         "Stage 1 daily sync started",
         {
@@ -1497,7 +1372,8 @@ def main() -> None:
             {
                 "monitored_institutions": len(config["monitored_institutions"]),
                 "transcript_types": config["api_settings"]["transcript_types"],
-                "approach": "3-year rolling window",
+                "approach": "daily sync - configurable date range",
+                "sync_date_range": config["stage_1"]["sync_date_range"],
             },
         )
 
@@ -1570,14 +1446,9 @@ def main() -> None:
                 if transcripts_for_ticker:
                     log_console(f"Processing institution {i}/{len(config['monitored_institutions'])}: {institution_info['name']} ({ticker})")
                     
-                    # Convert API transcripts to standardized format
-                    api_transcripts = {
-                        'transcripts_with_links': transcripts_for_ticker
-                    }
-
-                    # Convert to standardized format
+                    # Convert to standardized format for comparison
                     api_transcript_list = create_api_transcript_list(
-                        api_transcripts, ticker, institution_info
+                        transcripts_for_ticker, ticker, institution_info
                     )
 
                     # Filter NAS inventory for this company
@@ -1618,11 +1489,11 @@ def main() -> None:
                         # Rate limit between downloads
                         time.sleep(config["api_settings"]["request_delay"])
 
-                    # Remove out-of-scope transcripts (Stage 1 doesn't remove files outside window)
+                    # Remove old versions when new versions are downloaded (version management only)
                     for transcript in to_remove:
                         if remove_nas_file(nas_conn, transcript["full_path"]):
                             removed_count += 1
-                            log_console(f"Removed NAS XML (duplicate version): {transcript['full_path']}")
+                            log_console(f"Removed old version: {transcript['full_path']}")
 
                     total_downloaded += downloaded_count
 
@@ -1631,7 +1502,7 @@ def main() -> None:
                         f"{ticker} ({i}/{len(config['monitored_institutions'])}): "
                         f"{len(api_transcript_list)} API transcripts, "
                         f"{downloaded_count} downloaded, "
-                        f"{removed_count} removed (duplicates), "
+                        f"{removed_count} old versions removed, "
                         f"{skipped_count} skipped (errors), "
                         f"{title_filtered_count} filtered (invalid title)"
                     )
@@ -1650,7 +1521,7 @@ def main() -> None:
                             "downloads_filtered_title": title_filtered_count,
                             "removals_attempted": len(to_remove),
                             "removals_successful": removed_count,
-                            "explanation": "Daily sync for recent transcripts only",
+                            "explanation": "Daily sync - adds new transcripts and manages versions only",
                         },
                     )
 
@@ -1746,7 +1617,7 @@ def main() -> None:
             log_console("NAS connection closed")
 
         cleanup_temporary_files(ssl_cert_path)
-        log_console("=== STAGE 0 COMPLETE ===")
+        log_console("=== STAGE 1: DAILY SYNC COMPLETE ===")
 
 
 if __name__ == "__main__":
