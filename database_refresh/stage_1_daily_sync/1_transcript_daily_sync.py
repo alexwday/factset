@@ -1438,13 +1438,16 @@ def main() -> None:
             else:
                 log_console("Discovery complete: No new transcripts found for any monitored institutions")
 
-            # Phase 2: Process each institution with their accumulated transcripts
-            for i, (ticker, institution_info) in enumerate(config["monitored_institutions"].items(), 1):
-                transcripts_for_ticker = all_transcripts_by_ticker[ticker]
+            # Phase 2: Process ONLY institutions with transcripts (performance optimization)
+            if not banks_with_transcripts:
+                log_console("No transcripts to process - skipping institution processing")
+            else:
+                log_console(f"Processing {len(banks_with_transcripts)} institutions with transcripts...")
                 
-                # Only process if we found transcripts for this institution
-                if transcripts_for_ticker:
-                    log_console(f"Processing institution {i}/{len(config['monitored_institutions'])}: {institution_info['name']} ({ticker})")
+                for i, ticker in enumerate(banks_with_transcripts, 1):
+                    institution_info = config["monitored_institutions"][ticker]
+                    transcripts_for_ticker = all_transcripts_by_ticker[ticker]
+                    log_console(f"Processing institution {i}/{len(banks_with_transcripts)}: {institution_info['name']} ({ticker})")
                     
                     # Convert to standardized format for comparison
                     api_transcript_list = create_api_transcript_list(
@@ -1534,9 +1537,9 @@ def main() -> None:
                             'downloaded': downloaded_count
                         })
 
-                # Add rate limiting between institutions (except for the last one)  
-                if i < len(config["monitored_institutions"]):
-                    time.sleep(config["api_settings"]["request_delay"])
+                    # Add rate limiting between institutions (except for the last one)  
+                    if i < len(banks_with_transcripts):
+                        time.sleep(config["api_settings"]["request_delay"])
 
         # Final summary
         if institutions_with_transcripts:
