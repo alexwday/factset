@@ -800,22 +800,26 @@ def create_speaker_block_window(current_block_index: int,
                                speaker_blocks: List[Dict],
                                qa_state: Dict = None) -> List[Dict]:
     """
-    Create context window around current speaker block with dynamic extension.
+    Create optimized context window for Q&A boundary detection.
     
-    For question end decisions: Include all blocks back to question start
-    For other decisions: Use standard window size
+    Expands window strategically to capture complete question-answer exchanges.
     """
     window_config = config["stage_05_qa_pairing"]["window_config"]
-    context_before = window_config["context_blocks_before"]
-    context_after = window_config["context_blocks_after"]
+    base_context_before = window_config["context_blocks_before"]
+    base_context_after = window_config["context_blocks_after"]
     
-    # Dynamic extension for question continuation decisions
-    if qa_state and qa_state.get("extends_question_start"):
+    # For active Q&A groups, expand context to see full exchange
+    if qa_state and qa_state.get("group_active"):
         question_start_index = qa_state.get("question_start_index", 0)
-        start_index = max(0, question_start_index)
+        # Always include from question start for better context
+        start_index = max(0, question_start_index - 1)  # Include one block before question start
+        
+        # Expand forward context to see potential exchange continuation
+        context_after = base_context_after + 1  # Look ahead for exchange completion
     else:
-        # Standard window
-        start_index = max(0, current_block_index - context_before)
+        # Standard window for new exchange detection
+        start_index = max(0, current_block_index - base_context_before)
+        context_after = base_context_after
     
     end_index = min(len(speaker_blocks), current_block_index + context_after + 1)
     
@@ -824,28 +828,28 @@ def create_speaker_block_window(current_block_index: int,
 
 def format_speaker_block_context(window_blocks: List[Dict], current_block_index: int) -> str:
     """
-    Format speaker blocks with clear context boundaries for LLM analysis.
+    Format speaker blocks with enhanced focus on Q&A exchange flow.
     """
     context_sections = []
     current_block_id = window_blocks[current_block_index]["speaker_block_id"]
     
-    # 1. PRIOR BLOCK CONTEXT
+    # 1. CONVERSATION HISTORY
     prior_blocks = [b for b in window_blocks if b["speaker_block_id"] < current_block_id]
     if prior_blocks:
-        context_sections.append("=== PRIOR SPEAKER BLOCK CONTEXT ===")
+        context_sections.append("=== CONVERSATION HISTORY ===")
         for block in prior_blocks:
             context_sections.append(format_single_speaker_block(block))
     
-    # 2. CURRENT BLOCK CONTEXT (DECISION POINT)
+    # 2. CURRENT DECISION POINT
     current_block = next(b for b in window_blocks if b["speaker_block_id"] == current_block_id)
-    context_sections.append("=== CURRENT SPEAKER BLOCK (DECISION POINT) ===")
-    context_sections.append(f"**ANALYZE THIS BLOCK FOR Q&A BOUNDARY DECISION:**")
+    context_sections.append("=== 🎯 DECISION POINT: CURRENT SPEAKER BLOCK ===")
+    context_sections.append("**MAKE BOUNDARY DECISION FOR THIS BLOCK:**")
     context_sections.append(format_single_speaker_block(current_block))
     
-    # 3. FUTURE BLOCK CONTEXT
+    # 3. UPCOMING SPEAKERS (for context)
     future_blocks = [b for b in window_blocks if b["speaker_block_id"] > current_block_id]
     if future_blocks:
-        context_sections.append("=== FUTURE SPEAKER BLOCK CONTEXT ===")
+        context_sections.append("=== UPCOMING SPEAKERS (for context) ===")
         for block in future_blocks:
             context_sections.append(format_single_speaker_block(block))
     
@@ -853,7 +857,7 @@ def format_speaker_block_context(window_blocks: List[Dict], current_block_index:
 
 
 def format_single_speaker_block(block: Dict) -> str:
-    """Format a single speaker block with full paragraph content and clear structure."""
+    """Format a single speaker block using actual speaker information from the data."""
     paragraphs_text = []
     
     for para in block["paragraphs"]:
@@ -861,112 +865,93 @@ def format_single_speaker_block(block: Dict) -> str:
         content = para['paragraph_content'].strip()
         paragraphs_text.append(f"    • {content}")
     
-    # Extract speaker role information for context
+    # Use the actual speaker field as provided in the data
     speaker = block['speaker']
-    xml_role = block.get('question_answer_flag', 'general')
-    section_name = block.get('section_name', 'unknown')
-    
-    # Determine speaker type context
-    speaker_context = ""
-    if "analyst" in speaker.lower():
-        speaker_context = " [ANALYST - typically asks questions]"
-    elif any(title in speaker.lower() for title in ["ceo", "cfo", "president", "chief", "executive"]):
-        speaker_context = " [EXECUTIVE - typically provides answers]"
-    elif "operator" in speaker.lower():
-        speaker_context = " [OPERATOR - manages call flow]"
     
     return f"""
 SPEAKER BLOCK {block['speaker_block_id']}:
-  Speaker: {speaker}{speaker_context}
-  XML Role: {xml_role}
-  Section Name: {section_name}
+  Speaker: {speaker}
   Content:
 {chr(10).join(paragraphs_text)}"""
 
 
 def create_qa_boundary_prompt(formatted_context: str, current_block_id: int, qa_state: Dict = None) -> str:
     """
-    Create state-driven prompt for Q&A boundary detection with clear decision options.
+    Create focused prompt for Q&A boundary detection: analyst questions → complete executive responses.
     """
     # Extract state information
     current_group_active = qa_state.get("group_active", False) if qa_state else False
     current_group_id = qa_state.get("current_qa_group_id") if qa_state else None
-    last_status = qa_state.get("last_decision_status") if qa_state else None
     
-    # Determine valid options based on current state
+    # Determine current objective
     if current_group_active:
-        valid_options = "CONTINUE current group OR END current group"
-        primary_objective = f"Decide if current block continues or ends Q&A group {current_group_id}"
+        objective = f"Determine if current block CONTINUES or ENDS Q&A group {current_group_id}"
+        your_options = "CONTINUE (same Q&A exchange) or END (Q&A exchange complete)"
     else:
-        valid_options = "START new group OR mark as STANDALONE (operator/non-Q&A)"
-        primary_objective = "Decide if current block starts a new Q&A exchange"
+        objective = "Determine if current block STARTS a new Q&A exchange"  
+        your_options = "START (analyst begins question) or STANDALONE (operator/filler)"
     
-    # Create state context
-    state_context = f"""**CURRENT STATE**:
-- Q&A Group Active: {"YES" if current_group_active else "NO"}
-- Active Group ID: {current_group_id if current_group_id else "None"}
-- Last Decision: {last_status if last_status else "None"}
-- Your Options: {valid_options}"""
-    
-    return f"""**CONTEXT**: You are analyzing earnings call speaker blocks to capture complete analyst-responder exchanges. Focus on speaker patterns to determine conversation boundaries.
+    return f"""**PURPOSE**: Group sequential Q&A exchanges where analyst questions get complete executive responses.
 
-{state_context}
-
-**OBJECTIVE**: {primary_objective}
+**CURRENT STATE**: Group {"ACTIVE" if current_group_active else "INACTIVE"} | Group ID: {current_group_id or "None"}
+**YOUR TASK**: {objective}
+**YOUR OPTIONS**: {your_options}
 
 {formatted_context}
 
-**DECISION LOGIC**:
+**CORE LOGIC** (Priority Order):
 
-**Speaker Pattern Analysis**:
-- **ANALYST speakers**: Usually start new Q&A exchanges with questions
-- **EXECUTIVE speakers**: Usually respond to analyst questions  
-- **OPERATOR speakers**: Manage call flow - always mark as STANDALONE
+1. **OPERATORS/MODERATORS** → Always STANDALONE (ignore call management)
+   - Content like: "Next question comes from...", "Our next caller is...", "Thank you, next question..."
 
-**Exchange Completion Rules**:
-1. Capture ENTIRE analyst question → executive response → any follow-up → closing
-2. An exchange ends when: 
-   - Executive finishes responding AND next speaker is different analyst
-   - Executive finishes responding AND operator speaks
-   - Analyst says brief thanks/closing after getting response
-3. Continue exchange when:
-   - Same executive continues multi-part answer
-   - Same analyst asks follow-up to same executive
-   - Brief acknowledgments within ongoing conversation
+2. **Q&A GROUP STARTS** → When someone begins asking a question:
+   - Question content: "Can you walk us through...", "What's your outlook on...", "My question is about..."
+   - Multiple speakers can contribute to same question
+   - START even if operator transitions occurred just before
 
-**Current Block Analysis**:
-- Look at CURRENT speaker role and content
-- Consider PRIOR speaker context for conversation flow
-- Consider NEXT speaker to avoid cutting off mid-exchange
+3. **Q&A GROUP CONTINUES** → When the same exchange is ongoing:
+   - Response content: "Absolutely. Let me break this down...", "To answer your question..."
+   - Follow-up content: "And also...", "Just to clarify...", "Let me add to that..."
+   - Multiple speakers can contribute to same response
+   - Same exchange continues until fully answered
 
-**Response Requirements**:
-- Brief reasoning (max 100 chars): focus on speaker pattern
-- Examples: "Analyst starts Q", "Exec continues answer", "Exchange complete", "Operator manages"
-- High confidence (0.8+) for clear patterns, lower for ambiguous cases"""
+4. **Q&A GROUP ENDS** → When the exchange is complete:
+   - Response concludes AND next speaker starts different question
+   - Response concludes AND operator transitions to next question
+   - Brief closing: "Thank you", "Got it", "That's helpful"
+
+**EXAMPLES**:
+- Block 10: "Could you provide more color on margins?" → START (question begins)
+- Block 11: "Absolutely. Let me break this down..." → CONTINUE (response begins)  
+- Block 12: "First quarter margins expanded 200bp..." → CONTINUE (response continues)
+- Block 13: "And we expect this trend to persist..." → CONTINUE (response continues)
+- Block 14: "Thank you" → END (question fully answered)
+- Block 15: "Next question comes from John at Bank ABC..." → STANDALONE (ignore operator)
+- Block 16: "My question is about revenue guidance..." → START (new question)
+
+**KEY INSIGHT**: Each Q&A group = ONE complete question-answer cycle. Focus on CONTENT patterns, not speaker titles."""
 
 
 def create_qa_boundary_detection_tools(qa_state: Dict = None):
-    """Create dynamic function calling tools based on current Q&A state."""
+    """Create focused function calling tools for Q&A boundary detection."""
     
     # Extract state information
     current_group_active = qa_state.get("group_active", False) if qa_state else False
     current_group_id = qa_state.get("current_qa_group_id") if qa_state else None
     
-    # Create dynamic enum based on current state
+    # Create dynamic enum and description based on current state
     if current_group_active:
-        # If group is active, can only continue or end
         status_enum = ["group_continue", "group_end", "standalone"]
-        description = f"Continue or end active Q&A group {current_group_id}, or mark operator as standalone"
+        description = f"Q&A Group {current_group_id} is ACTIVE. Decide: CONTINUE (same exchange), END (exchange complete), or STANDALONE (operator)"
     else:
-        # If no active group, can only start new or mark standalone
         status_enum = ["group_start", "standalone"]
-        description = "Start new Q&A group or mark operator/non-Q&A as standalone"
+        description = "No active Q&A group. Decide: START (analyst begins question) or STANDALONE (operator/filler)"
     
     return [
         {
             "type": "function",
             "function": {
-                "name": "analyze_speaker_block_boundaries",
+                "name": "determine_qa_group_boundary",
                 "description": description,
                 "parameters": {
                     "type": "object",
@@ -981,9 +966,9 @@ def create_qa_boundary_detection_tools(qa_state: Dict = None):
                                 },
                                 "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                                 "reasoning": {
-                                    "type": "string",
-                                    "maxLength": 100,
-                                    "description": "Brief reasoning: speaker role and conversation flow"
+                                    "type": "string", 
+                                    "maxLength": 150,
+                                    "description": "Concise reasoning focusing on: speaker role, question/answer pattern, exchange status"
                                 }
                             },
                             "required": ["current_block_id", "group_status", "confidence_score", "reasoning"]
@@ -1014,40 +999,33 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
 
 def is_operator_block(speaker_block: Dict) -> bool:
     """
-    Detect if a speaker block is from an operator and should be excluded from Q&A assignments.
-    Uses both speaker name and content pattern detection.
+    Detect if a speaker block contains operator/moderator content that should be excluded from Q&A assignments.
+    Focuses on content patterns rather than speaker name inference.
     """
-    speaker = speaker_block.get("speaker", "").lower()
-    
-    # Check for operator indicators in speaker name
-    speaker_indicators = ["operator", "conference", "moderator", "host", "call operator"]
-    
-    for indicator in speaker_indicators:
-        if indicator in speaker:
-            return True
-    
-    # Also check content for operator language patterns
+    # Get all content from the speaker block
     all_content = ""
     for para in speaker_block.get("paragraphs", []):
         content = para.get("paragraph_content", "")
         all_content += " " + content.lower()
     
-    # Operator content patterns
+    # Operator/moderator content patterns - these indicate call management rather than Q&A content
     operator_content_patterns = [
         "next question", "our next question", "next caller", "next participant",
         "question comes from", "question is from", "caller is from",
         "please hold", "please stand by", "one moment please",
         "we have no further questions", "no more questions", "end of q&a",
-        "concludes our question", "concludes the q&a", "end of our q&a"
+        "concludes our question", "concludes the q&a", "end of our q&a",
+        "thank you for joining", "this concludes", "that concludes",
+        "we will now take", "we'll take the next"
     ]
     
-    # If content contains operator patterns, it's likely an operator
+    # If content contains operator patterns, mark as operator
     for pattern in operator_content_patterns:
         if pattern in all_content:
             return True
     
-    # Special case: "thank you" + "next question" is operator language
-    if "thank you" in all_content and any(pattern in all_content for pattern in ["next question", "next caller", "question comes from", "question is from"]):
+    # Special case: "thank you" + transition patterns indicate operator
+    if "thank you" in all_content and any(transition in all_content for transition in ["next question", "next caller", "question comes from", "question is from"]):
         return True
     
     return False
@@ -1122,9 +1100,9 @@ def analyze_speaker_block_boundary(current_block_index: int,
         current_block = speaker_blocks[current_block_index]
         current_block_id = current_block["speaker_block_id"]
         
-        # Check if this is an operator block - exclude from Q&A assignments
+        # Check if this is an operator/moderator block - exclude from Q&A assignments
         if is_operator_block(current_block):
-            log_execution(f"Block {current_block_id} identified as operator block - excluding from Q&A groups")
+            log_execution(f"Block {current_block_id} identified as operator/moderator block - excluding from Q&A groups")
             return {
                 "current_block_id": current_block_id,
                 "qa_group_id": None,  # No Q&A group assignment
@@ -1132,7 +1110,7 @@ def analyze_speaker_block_boundary(current_block_index: int,
                 "qa_group_end_block": None,
                 "group_status": "standalone",  # Operator blocks are standalone
                 "confidence_score": 1.0,  # High confidence in operator detection
-                "reasoning": f"Operator block detected (speaker: {current_block.get('speaker', 'unknown')}) - excluded from Q&A assignments"
+                "reasoning": f"Operator/moderator content detected - excluded from Q&A assignments"
             }
         
         # Create context window for non-operator blocks
