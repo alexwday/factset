@@ -1213,67 +1213,18 @@ def determine_qa_group_method(block_decisions: List[Dict]) -> str:
     avg_confidence = calculate_qa_group_confidence(block_decisions)
     
     if avg_confidence >= 0.8:
-        return "llm_detection"
+        return "llm_detection_high_confidence"
     elif avg_confidence >= 0.6:
         return "llm_detection_medium_confidence"
     else:
-        return "xml_fallback"
+        return "llm_detection_low_confidence"
 
 
-def apply_xml_fallback_grouping(speaker_blocks: List[Dict]) -> List[Dict]:
+
+
+def process_qa_boundaries_llm_only(speaker_blocks: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
     """
-    Fallback Q&A grouping using XML type attributes when LLM analysis fails.
-    """
-    log_execution("Applying XML fallback grouping for Q&A boundary detection")
-    
-    qa_groups = []
-    current_group = []
-    group_id = 1
-    
-    for block in speaker_blocks:
-        xml_type = block.get("question_answer_flag")
-        
-        if xml_type == "question":
-            # Start new group if we have an existing group
-            if current_group:
-                qa_groups.append({
-                    "qa_group_id": group_id,
-                    "start_block_id": current_group[0]["speaker_block_id"],
-                    "end_block_id": current_group[-1]["speaker_block_id"],
-                    "confidence": 0.5,  # Lower confidence for fallback
-                    "method": "xml_fallback",
-                    "blocks": current_group
-                })
-                group_id += 1
-            
-            current_group = [block]
-        
-        elif xml_type == "answer" and current_group:
-            # Add to current group
-            current_group.append(block)
-        
-        else:
-            # Handle blocks without clear XML type
-            if current_group:
-                current_group.append(block)
-    
-    # Add final group if exists
-    if current_group:
-        qa_groups.append({
-            "qa_group_id": group_id,
-            "start_block_id": current_group[0]["speaker_block_id"],
-            "end_block_id": current_group[-1]["speaker_block_id"],
-            "confidence": 0.5,
-            "method": "xml_fallback",
-            "blocks": current_group
-        })
-    
-    return qa_groups
-
-
-def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
-    """
-    Main Q&A boundary processing with comprehensive fallback handling.
+    Q&A boundary processing using LLM detection only - no fallbacks.
     """
     try:
         # Filter to only Q&A sections
@@ -1361,9 +1312,9 @@ def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_
                 qa_state["last_block_id"] = block_id
                 
             else:
-                # LLM analysis failed, use XML fallback
-                log_execution(f"LLM analysis failed for block {block['speaker_block_id']}, falling back to XML grouping")
-                return apply_xml_fallback_grouping(qa_speaker_blocks)
+                # LLM analysis failed - skip this block and continue
+                log_execution(f"LLM analysis failed for block {block['speaker_block_id']}, skipping block")
+                enhanced_error_logger.log_boundary_error(transcript_id, block['speaker_block_id'], "LLM analysis failed - block skipped")
         
         # Group decisions into Q&A groups
         qa_groups = []
@@ -1405,7 +1356,7 @@ def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_
         error_msg = f"Q&A boundary processing failed: {e}"
         log_error(error_msg, "processing", {})
         enhanced_error_logger.log_processing_error(transcript_id, error_msg)
-        return apply_xml_fallback_grouping(speaker_blocks)
+        return []  # Return empty list - no fallback, LLM-only approach
 
 
 def finalize_qa_group(group_decisions: List[Dict], speaker_blocks: List[Dict]) -> Dict:
@@ -1501,7 +1452,7 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
         speaker_blocks = group_records_by_speaker_block(transcript_records)
         
         # Process Q&A boundaries
-        qa_groups = process_qa_boundaries_with_fallbacks(speaker_blocks, transcript_id, enhanced_error_logger)
+        qa_groups = process_qa_boundaries_llm_only(speaker_blocks, transcript_id, enhanced_error_logger)
         
         # Apply Q&A assignments to records
         enhanced_records = apply_qa_assignments_to_records(transcript_records, qa_groups)
