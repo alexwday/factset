@@ -63,6 +63,18 @@ stage_3:
   dev_mode: true
   dev_max_files: 2
 
+# Stage 4 specific settings
+stage_4:
+  description: "Transcript content validation"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/extracted_transcript_sections.json"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  dev_mode: true
+  dev_max_files: 2
+  expected_sections:
+    - "MANAGEMENT DISCUSSION SECTION"
+    - "Q&A"
+
 # Monitored Financial Institutions
 # Format: ticker: {name, type}
 monitored_institutions:
