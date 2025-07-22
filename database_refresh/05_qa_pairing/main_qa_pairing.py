@@ -783,7 +783,7 @@ def group_records_by_speaker_block(records: List[Dict]) -> List[Dict]:
             "speaker_block_id": block_id,
             "speaker": first_paragraph["speaker"],
             "question_answer_flag": first_paragraph.get("question_answer_flag"),
-            "section_type": first_paragraph.get("section_type"),
+            "section_name": first_paragraph.get("section_name"),
             "paragraphs": paragraphs
         }
         
@@ -864,7 +864,7 @@ def format_single_speaker_block(block: Dict) -> str:
     # Extract speaker role information for context
     speaker = block['speaker']
     xml_role = block.get('question_answer_flag', 'general')
-    section_type = block.get('section_type', 'unknown')
+    section_name = block.get('section_name', 'unknown')
     
     # Determine speaker type context
     speaker_context = ""
@@ -879,7 +879,7 @@ def format_single_speaker_block(block: Dict) -> str:
 SPEAKER BLOCK {block['speaker_block_id']}:
   Speaker: {speaker}{speaker_context}
   XML Role: {xml_role}
-  Section Type: {section_type}
+  Section Name: {section_name}
   Content:
 {chr(10).join(paragraphs_text)}"""
 
@@ -1300,7 +1300,7 @@ def process_qa_boundaries_with_fallbacks(speaker_blocks: List[Dict], transcript_
     try:
         # Filter to only Q&A sections
         qa_speaker_blocks = [block for block in speaker_blocks 
-                           if block.get("section_type") == "Investor Q&A"]
+                           if block.get("section_name") == "Q&A"]
         
         if not qa_speaker_blocks:
             log_execution(f"No Q&A sections found in transcript {transcript_id}")
@@ -1479,7 +1479,7 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
         enhanced_record = record.copy()
         
         # Only apply Q&A assignments to Q&A section records
-        if record.get("section_type") == "Investor Q&A":
+        if record.get("section_name") == "Q&A":
             speaker_block_id = record["speaker_block_id"]
             
             if speaker_block_id in block_to_qa_map:
