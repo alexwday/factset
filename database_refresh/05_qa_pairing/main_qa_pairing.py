@@ -716,14 +716,14 @@ def load_stage_4_content(nas_conn: SMBConnection) -> Dict[str, Any]:
     
     try:
         input_source = config["stage_05_qa_pairing"]["input_source"]
-        full_input_path = f"{os.getenv('NAS_BASE_PATH')}/{input_source}"
+        # input_source already contains the full NAS path, don't add NAS_BASE_PATH again
         
-        log_execution("Loading Stage 4 validated content from NAS", {"input_path": full_input_path})
+        log_execution("Loading Stage 4 validated content from NAS", {"input_path": input_source})
         
-        content_data = nas_download_file(nas_conn, full_input_path)
+        content_data = nas_download_file(nas_conn, input_source)
         if not content_data:
-            error_msg = f"Stage 4 content file not found at {full_input_path}"
-            log_error(error_msg, "content_load", {"path": full_input_path})
+            error_msg = f"Stage 4 content file not found at {input_source}"
+            log_error(error_msg, "content_load", {"path": input_source})
             raise FileNotFoundError(error_msg)
         
         content = json.loads(content_data.decode("utf-8"))
