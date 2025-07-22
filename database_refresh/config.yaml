@@ -33,40 +33,40 @@ api_settings:
   use_exponential_backoff: true
   max_backoff_delay: 120.0
 
-# Stage 0 specific settings
-stage_0:
+# Stage 00 specific settings
+stage_00_download_historical:
   description: "Historical download using 3-year rolling window"
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
 
-# Stage 1 specific settings
-stage_1:
+# Stage 01 specific settings
+stage_01_download_daily:
   description: "Daily incremental sync of recent transcripts"
   sync_date_range: 1  # Number of days to look back (0 = today only, 1 = today + yesterday)
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
 
-# Stage 2 specific settings
-stage_2:
+# Stage 02 specific settings
+stage_02_database_sync:
   description: "Transcript consolidation and master database management"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   master_database_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Database/master_database.json"
   refresh_output_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
 
-# Stage 3 specific settings
-stage_3:
+# Stage 03 specific settings
+stage_03_extract_content:
   description: "XML content extraction and paragraph-level breakdown"
-  input_queue_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/files_to_process.json"
+  input_queue_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_02_process_queue.json"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
   dev_mode: true
   dev_max_files: 2
 
-# Stage 4 specific settings
-stage_4:
+# Stage 04 specific settings
+stage_04_validate_structure:
   description: "Transcript content validation"
-  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/extracted_transcript_sections.json"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_03_extracted_content.json"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
   dev_mode: true

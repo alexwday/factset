@@ -78,7 +78,7 @@ def setup_logging() -> logging.Logger:
     temp_log_file = tempfile.NamedTemporaryFile(
         mode="w+",
         suffix=".log",
-        prefix=f'stage_7_content_enhancement_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
+        prefix=f'stage_07_llm_summarization_content_enhancement_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
         delete=False,
     )
 
@@ -190,7 +190,7 @@ class EnhancedErrorLogger:
             }
             
             error_log_content = json.dumps(error_data, indent=2)
-            error_log_file = f"stage_7_content_enhancement_{timestamp}_errors.json"
+            error_log_file = f"stage_07_llm_summarization_content_enhancement_{timestamp}_errors.json"
             
             nas_upload_file(
                 nas_conn,
@@ -382,10 +382,10 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict:
             full_config = json.loads(config_data.decode("utf-8"))
             logger.info("Successfully loaded shared configuration from NAS")
 
-            if "stage_7" not in full_config:
+            if "stage_07_llm_summarization" not in full_config:
                 raise ValueError("Stage 7 configuration not found in config file")
                 
-            stage_config = full_config["stage_7"]
+            stage_config = full_config["stage_07_llm_summarization"]
             
             # Validate required configuration sections
             required_sections = ["llm_config", "processing_config"]
@@ -449,7 +449,7 @@ def get_oauth_token() -> Optional[str]:
     global logger, error_logger, config
     
     try:
-        token_endpoint = config["stage_7"]["llm_config"]["token_endpoint"]
+        token_endpoint = config["stage_07_llm_summarization"]["llm_config"]["token_endpoint"]
         
         auth_data = {
             'grant_type': 'client_credentials',
@@ -499,8 +499,8 @@ def setup_llm_client() -> Optional[OpenAI]:
             
         client = OpenAI(
             api_key=oauth_token,
-            base_url=config["stage_7"]["llm_config"]["base_url"],
-            timeout=config["stage_7"]["llm_config"]["timeout"]
+            base_url=config["stage_07_llm_summarization"]["llm_config"]["base_url"],
+            timeout=config["stage_07_llm_summarization"]["llm_config"]["timeout"]
         )
         
         logger.info("LLM client setup completed")
@@ -529,8 +529,8 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> Dict:
     """Calculate token costs based on configuration."""
     global config
     
-    prompt_cost_per_1k = config["stage_7"]["llm_config"]["cost_per_1k_prompt_tokens"]
-    completion_cost_per_1k = config["stage_7"]["llm_config"]["cost_per_1k_completion_tokens"]
+    prompt_cost_per_1k = config["stage_07_llm_summarization"]["llm_config"]["cost_per_1k_prompt_tokens"]
+    completion_cost_per_1k = config["stage_07_llm_summarization"]["llm_config"]["cost_per_1k_completion_tokens"]
     
     prompt_cost = (prompt_tokens / 1000) * prompt_cost_per_1k
     completion_cost = (completion_tokens / 1000) * completion_cost_per_1k
@@ -551,7 +551,7 @@ def load_stage6_output(nas_conn: SMBConnection) -> Dict:
     global logger, error_logger, config
     
     try:
-        input_path = f"{NAS_BASE_PATH}/{config['stage_7']['input_source']}"
+        input_path = f"{NAS_BASE_PATH}/{config['stage_07_llm_summarization']['input_source']}"
         
         if not validate_nas_path(input_path):
             raise ValueError("Invalid input file path")
@@ -996,16 +996,16 @@ def process_qa_group_summary(qa_group_records: List[Dict], previous_qa_summaries
         
         # Single LLM call for entire QA group
         response = llm_client.chat.completions.create(
-            model=config["stage_7"]["llm_config"]["model"],
+            model=config["stage_07_llm_summarization"]["llm_config"]["model"],
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context}
             ],
             tools=create_qa_group_summary_tools(),
             tool_choice="required",
-            temperature=config["stage_7"]["llm_config"]["temperature"],
-            max_tokens=config["stage_7"]["llm_config"]["max_tokens"],
-            timeout=config["stage_7"]["llm_config"]["timeout"]
+            temperature=config["stage_07_llm_summarization"]["llm_config"]["temperature"],
+            max_tokens=config["stage_07_llm_summarization"]["llm_config"]["max_tokens"],
+            timeout=config["stage_07_llm_summarization"]["llm_config"]["timeout"]
         )
         
         # Process LLM response
@@ -1239,7 +1239,7 @@ def process_transcript_with_sliding_window(transcript_records: List[Dict], trans
         
         enhanced_records = []
         previous_speaker_blocks = []  # Store processed blocks with summaries
-        batch_size = config["stage_7"]["processing_config"]["batch_size"]
+        batch_size = config["stage_07_llm_summarization"]["processing_config"]["batch_size"]
         
         for block_id in sorted_block_ids:
             current_block_records = speaker_blocks[block_id]
@@ -1285,15 +1285,15 @@ def process_transcript_with_sliding_window(transcript_records: List[Dict], trans
                 try:
                     # LLM call for current batch
                     response = llm_client.chat.completions.create(
-                        model=config["stage_7"]["llm_config"]["model"],
+                        model=config["stage_07_llm_summarization"]["llm_config"]["model"],
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": context}
                         ],
                         tools=create_indexed_summary_tools(len(valid_batch)),
                         tool_choice="required",
-                        temperature=config["stage_7"]["llm_config"]["temperature"],
-                        max_tokens=config["stage_7"]["llm_config"]["max_tokens"]
+                        temperature=config["stage_07_llm_summarization"]["llm_config"]["temperature"],
+                        max_tokens=config["stage_07_llm_summarization"]["llm_config"]["max_tokens"]
                     )
                     
                     # Parse and validate response
@@ -1399,7 +1399,7 @@ def save_enhanced_output(nas_conn: SMBConnection, enhanced_records: List[Dict]) 
         }
         
         # Save to NAS
-        output_path = f"{NAS_BASE_PATH}/{config['stage_7']['output_path']}/{config['stage_7']['output_file']}"
+        output_path = f"{NAS_BASE_PATH}/{config['stage_07_llm_summarization']['output_path']}/{config['stage_07_llm_summarization']['output_file']}"
         
         if not validate_nas_path(output_path):
             raise ValueError("Invalid output file path")
@@ -1412,7 +1412,7 @@ def save_enhanced_output(nas_conn: SMBConnection, enhanced_records: List[Dict]) 
             output_path
         )
         
-        logger.info(f"Enhanced output saved to NAS: {config['stage_7']['output_file']}")
+        logger.info(f"Enhanced output saved to NAS: {config['stage_07_llm_summarization']['output_file']}")
         logger.info(f"Total records: {len(enhanced_records)}")
         logger.info(f"Records enhanced: {output_data['enhancement_summary']['paragraphs_enhanced']}")
         
@@ -1436,7 +1436,7 @@ def upload_logs_to_nas(nas_conn: SMBConnection, main_logger: logging.Logger,
             with open(main_logger.temp_log_file, 'r') as f:
                 log_content = f.read()
             
-            log_filename = f"stage_7_content_enhancement_{timestamp}.log"
+            log_filename = f"stage_07_llm_summarization_content_enhancement_{timestamp}.log"
             nas_upload_file(
                 nas_conn,
                 io.BytesIO(log_content.encode('utf-8')),
@@ -1493,10 +1493,10 @@ def main() -> None:
         # Load configuration
         config = load_stage_config(nas_conn)
         logger.info("Loaded configuration for Stage 7")
-        logger.info(f"Development mode: {config['stage_7']['dev_mode']}")
+        logger.info(f"Development mode: {config['stage_07_llm_summarization']['dev_mode']}")
         
-        if config['stage_7']['dev_mode']:
-            logger.info(f"Max transcripts in dev mode: {config['stage_7']['dev_max_transcripts']}")
+        if config['stage_07_llm_summarization']['dev_mode']:
+            logger.info(f"Max transcripts in dev mode: {config['stage_07_llm_summarization']['dev_max_transcripts']}")
 
         # Setup SSL certificate
         ssl_cert_path = setup_ssl_certificate(nas_conn)
@@ -1509,8 +1509,8 @@ def main() -> None:
         records = stage6_data["records"]
         
         # Apply dev mode limits
-        if config['stage_7']['dev_mode']:
-            max_transcripts = config['stage_7']['dev_max_transcripts']
+        if config['stage_07_llm_summarization']['dev_mode']:
+            max_transcripts = config['stage_07_llm_summarization']['dev_max_transcripts']
             logger.info(f"Development mode: limiting to {max_transcripts} transcripts")
             
             # Group by transcript and take first N

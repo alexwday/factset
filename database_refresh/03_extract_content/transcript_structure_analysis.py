@@ -1,6 +1,6 @@
 """
 Transcript Structure Analysis for Stage 3 Output
-Analyzes extracted_transcript_sections.json to understand section distribution, lengths, and content patterns.
+Analyzes stage_03_extracted_content.json to understand section distribution, lengths, and content patterns.
 """
 
 import os
@@ -136,7 +136,7 @@ def load_stage3_output(nas_conn: SMBConnection) -> Optional[List[Dict[str, Any]]
     """Load Stage 3 extracted transcript sections from NAS."""
     try:
         # Standard Stage 3 output path
-        output_path = "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/extracted_transcript_sections.json"
+        output_path = "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_03_extracted_content.json"
         
         log_console(f"Loading Stage 3 output from: {output_path}")
         

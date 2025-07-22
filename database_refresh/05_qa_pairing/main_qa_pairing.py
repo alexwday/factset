@@ -75,7 +75,7 @@ def setup_logging() -> logging.Logger:
     temp_log_file = tempfile.NamedTemporaryFile(
         mode="w+",
         suffix=".log",
-        prefix=f'stage_5_qa_pairing_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
+        prefix=f'stage_05_qa_pairing_qa_pairing_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
         delete=False,
     )
 
@@ -160,7 +160,7 @@ class EnhancedErrorLogger:
         
         for error_type, errors in error_types.items():
             if errors:
-                filename = f"stage_5_qa_pairing_{error_type}_errors_{timestamp}.json"
+                filename = f"stage_05_qa_pairing_qa_pairing_{error_type}_errors_{timestamp}.json"
                 nas_path = f"{NAS_BASE_PATH}/Outputs/Logs/Errors/{filename}"
                 
                 try:
@@ -186,7 +186,7 @@ def get_oauth_token() -> Optional[str]:
     global logger, error_logger
     
     try:
-        token_endpoint = config["stage_5"]["llm_config"]["token_endpoint"]
+        token_endpoint = config["stage_05_qa_pairing"]["llm_config"]["token_endpoint"]
         
         # Prepare OAuth request
         auth_data = {
@@ -243,7 +243,7 @@ def setup_llm_client() -> Optional[OpenAI]:
             return None
         
         # Setup OpenAI client with custom configuration
-        llm_config = config["stage_5"]["llm_config"]
+        llm_config = config["stage_05_qa_pairing"]["llm_config"]
         
         client = OpenAI(
             api_key=oauth_token,  # Use OAuth token as API key
@@ -354,7 +354,7 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> bool:
         temp_cert_file = tempfile.NamedTemporaryFile(
             mode="wb",
             suffix=".cer",
-            prefix="stage_5_cert_",
+            prefix="stage_05_qa_pairing_cert_",
             delete=False
         )
         
@@ -397,9 +397,9 @@ def load_config_from_nas(nas_conn: SMBConnection) -> bool:
         config = json.loads(config_file.read().decode('utf-8'))
         logger.info("Successfully loaded configuration from NAS")
         
-        # Validate stage_5 configuration exists
-        if "stage_5" not in config:
-            error_msg = "stage_5 configuration section missing"
+        # Validate stage_05_qa_pairing configuration exists
+        if "stage_05_qa_pairing" not in config:
+            error_msg = "stage_05_qa_pairing configuration section missing"
             logger.error(error_msg)
             error_logger.log_processing_error("system", error_msg)
             return False
@@ -464,7 +464,7 @@ def create_speaker_block_window(current_block_index: int,
     For question end decisions: Include all blocks back to question start
     For other decisions: Use standard window size
     """
-    window_config = config["stage_5"]["window_config"]
+    window_config = config["stage_05_qa_pairing"]["window_config"]
     context_before = window_config["context_blocks_before"]
     context_after = window_config["context_blocks_after"]
     
@@ -661,8 +661,8 @@ def create_qa_boundary_detection_tools(qa_state: Dict = None):
 
 def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     """Calculate cost based on token usage and configured rates."""
-    prompt_cost_per_1k = config["stage_5"]["llm_config"]["cost_per_1k_prompt_tokens"]
-    completion_cost_per_1k = config["stage_5"]["llm_config"]["cost_per_1k_completion_tokens"]
+    prompt_cost_per_1k = config["stage_05_qa_pairing"]["llm_config"]["cost_per_1k_prompt_tokens"]
+    completion_cost_per_1k = config["stage_05_qa_pairing"]["llm_config"]["cost_per_1k_completion_tokens"]
     
     prompt_cost = (prompt_tokens / 1000) * prompt_cost_per_1k
     completion_cost = (completion_tokens / 1000) * completion_cost_per_1k
@@ -800,12 +800,12 @@ def retry_with_validation_feedback(current_block_index: int, speaker_blocks: Lis
         
         # Make retry LLM API call
         response = llm_client.chat.completions.create(
-            model=config["stage_5"]["llm_config"]["model"],
+            model=config["stage_05_qa_pairing"]["llm_config"]["model"],
             messages=[{"role": "user", "content": retry_prompt}],
             tools=create_qa_boundary_detection_tools(qa_state),
             tool_choice="required",
-            temperature=config["stage_5"]["llm_config"]["temperature"],
-            max_tokens=config["stage_5"]["llm_config"]["max_tokens"]
+            temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
+            max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
         )
         
         # Parse retry response
@@ -884,12 +884,12 @@ def analyze_speaker_block_boundary(current_block_index: int,
         
         # Make LLM API call with dynamic tools
         response = llm_client.chat.completions.create(
-            model=config["stage_5"]["llm_config"]["model"],
+            model=config["stage_05_qa_pairing"]["llm_config"]["model"],
             messages=[{"role": "user", "content": prompt}],
             tools=create_qa_boundary_detection_tools(qa_state),
             tool_choice="required",
-            temperature=config["stage_5"]["llm_config"]["temperature"],
-            max_tokens=config["stage_5"]["llm_config"]["max_tokens"]
+            temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
+            max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
         )
         
         # Parse and validate response
@@ -1406,7 +1406,7 @@ def upload_logs_to_nas(nas_conn: SMBConnection, logger: logging.Logger, error_lo
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         
         # Upload main log file
-        log_filename = f"stage_5_qa_pairing_execution_log_{timestamp}.log"
+        log_filename = f"stage_05_qa_pairing_qa_pairing_execution_log_{timestamp}.log"
         log_nas_path = f"{NAS_BASE_PATH}/Outputs/Logs/{log_filename}"
         
         with open(logger.temp_log_file, 'rb') as log_file:
@@ -1460,8 +1460,8 @@ def main():
             raise Exception("LLM client setup failed")
         
         # Load input data
-        stage_5_config = config["stage_5"]
-        input_file_path = f"{NAS_BASE_PATH}/{stage_5_config['input_source']}"
+        stage_05_qa_pairing_config = config["stage_05_qa_pairing"]
+        input_file_path = f"{NAS_BASE_PATH}/{stage_05_qa_pairing_config['input_source']}"
         
         logger.info(f"Loading input data from: {input_file_path}")
         
@@ -1479,8 +1479,8 @@ def main():
         logger.info(f"Processing {len(transcripts)} transcripts")
         
         # Apply development mode limits if enabled
-        if stage_5_config.get("dev_mode", False):
-            max_transcripts = stage_5_config.get("dev_max_transcripts", 2)
+        if stage_05_qa_pairing_config.get("dev_mode", False):
+            max_transcripts = stage_05_qa_pairing_config.get("dev_max_transcripts", 2)
             transcript_items = list(transcripts.items())[:max_transcripts]
             transcripts = dict(transcript_items)
             logger.info(f"Development mode: Limited to {len(transcripts)} transcripts")
@@ -1542,8 +1542,8 @@ def main():
         }
         
         # Save output to NAS
-        output_filename = stage_5_config["output_file"]
-        output_path = f"{NAS_BASE_PATH}/{stage_5_config['output_path']}/{output_filename}"
+        output_filename = stage_05_qa_pairing_config["output_file"]
+        output_path = f"{NAS_BASE_PATH}/{stage_05_qa_pairing_config['output_path']}/{output_filename}"
         
         logger.info(f"Saving output to: {output_path}")
         

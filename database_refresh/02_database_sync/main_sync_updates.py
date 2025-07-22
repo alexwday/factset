@@ -80,14 +80,14 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
     global execution_log, error_log
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    logs_path = config["stage_2"]["output_logs_path"]
+    logs_path = config["stage_02_database_sync"]["output_logs_path"]
 
     # Create logs directory
     nas_create_directory_recursive(nas_conn, logs_path)
 
     # Save main execution log
     main_log_content = {
-        "stage": "stage_2_transcript_consolidation",
+        "stage": "stage_02_database_sync_consolidation",
         "execution_start": (
             execution_log[0]["timestamp"]
             if execution_log
@@ -98,7 +98,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
         "execution_log": execution_log,
     }
 
-    main_log_filename = f"stage_2_transcript_consolidation_{timestamp}.json"
+    main_log_filename = f"stage_02_database_sync_consolidation_{timestamp}.json"
     main_log_path = nas_path_join(logs_path, main_log_filename)
     main_log_json = json.dumps(main_log_content, indent=2)
     main_log_obj = io.BytesIO(main_log_json.encode("utf-8"))
@@ -112,14 +112,14 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
         nas_create_directory_recursive(nas_conn, errors_path)
 
         error_log_content = {
-            "stage": "stage_2_transcript_consolidation",
+            "stage": "stage_02_database_sync_consolidation",
             "execution_time": datetime.now().isoformat(),
             "total_errors": len(error_log),
             "error_summary": stage_summary.get("errors", {}),
             "errors": error_log,
         }
 
-        error_log_filename = f"stage_2_transcript_consolidation_errors_{timestamp}.json"
+        error_log_filename = f"stage_02_database_sync_consolidation_errors_{timestamp}.json"
         error_log_path = nas_path_join(errors_path, error_log_filename)
         error_log_json = json.dumps(error_log_content, indent=2)
         error_log_obj = io.BytesIO(error_log_json.encode("utf-8"))
@@ -247,7 +247,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     required_sections = [
         "ssl_cert_path",
         "api_settings", 
-        "stage_2",
+        "stage_02_database_sync",
         "monitored_institutions"
     ]
 
@@ -257,9 +257,9 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             log_error(error_msg, "config_validation", {"missing_section": section})
             raise ValueError(error_msg)
 
-    # Validate stage_2 specific parameters
-    stage_2_config = config["stage_2"]
-    required_stage_2_params = [
+    # Validate stage_02_database_sync specific parameters
+    stage_02_database_sync_config = config["stage_02_database_sync"]
+    required_stage_02_database_sync_params = [
         "description", 
         "input_data_path",
         "output_logs_path",
@@ -267,10 +267,10 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
         "refresh_output_path"
     ]
 
-    for param in required_stage_2_params:
-        if param not in stage_2_config:
-            error_msg = f"Missing required stage_2 parameter: {param}"
-            log_error(error_msg, "config_validation", {"missing_parameter": f"stage_2.{param}"})
+    for param in required_stage_02_database_sync_params:
+        if param not in stage_02_database_sync_config:
+            error_msg = f"Missing required stage_02_database_sync parameter: {param}"
+            log_error(error_msg, "config_validation", {"missing_parameter": f"stage_02_database_sync.{param}"})
             raise ValueError(error_msg)
 
     # Validate monitored institutions
@@ -548,7 +548,7 @@ def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str,
     """Scan NAS for ALL transcript files. Structure: Data/YYYY/QX/Type/Company/files.xml"""
     
     log_execution("Starting comprehensive NAS file scan")
-    data_base_path = config["stage_2"]["input_data_path"]
+    data_base_path = config["stage_02_database_sync"]["input_data_path"]
     nas_inventory = {}
     
     # Scan all years
@@ -598,7 +598,7 @@ def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str,
 def load_master_database(nas_conn: SMBConnection) -> Optional[Dict[str, Any]]:
     """Load existing master database or return None if it doesn't exist."""
     
-    db_path = config["stage_2"]["master_database_path"]
+    db_path = config["stage_02_database_sync"]["master_database_path"]
     
     if nas_file_exists(nas_conn, db_path):
         log_execution("Loading existing master database", {"database_path": db_path})
@@ -683,7 +683,7 @@ def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory:
 def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str], files_to_remove: List[str], nas_inventory: Dict[str, Dict[str, Any]], database_inventory: Dict[str, Dict[str, Any]]) -> bool:
     """Save processing queues to NAS refresh folder as simple JSON records."""
     
-    refresh_path = config["stage_2"]["refresh_output_path"]
+    refresh_path = config["stage_02_database_sync"]["refresh_output_path"]
     nas_create_directory_recursive(nas_conn, refresh_path)
 
     success = True
@@ -700,12 +700,12 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
         process_records.append(record)
 
     # Save files to process as simple JSON records
-    process_path = nas_path_join(refresh_path, "files_to_process.json")
+    process_path = nas_path_join(refresh_path, "stage_02_process_queue.json")
     process_content = json.dumps(process_records, indent=2)
     process_file_obj = io.BytesIO(process_content.encode("utf-8"))
 
     if not nas_upload_file(nas_conn, process_file_obj, process_path):
-        log_error("Failed to save files_to_process.json", "queue_save", {"path": process_path})
+        log_error("Failed to save stage_02_process_queue.json", "queue_save", {"path": process_path})
         success = False
 
     # Convert files_to_remove to JSON records  
@@ -720,12 +720,12 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
         remove_records.append(record)
 
     # Save files to remove as simple JSON records
-    remove_path = nas_path_join(refresh_path, "files_to_remove.json")
+    remove_path = nas_path_join(refresh_path, "stage_02_removal_queue.json")
     remove_content = json.dumps(remove_records, indent=2)
     remove_file_obj = io.BytesIO(remove_content.encode("utf-8"))
 
     if not nas_upload_file(nas_conn, remove_file_obj, remove_path):
-        log_error("Failed to save files_to_remove.json", "queue_save", {"path": remove_path})
+        log_error("Failed to save stage_02_removal_queue.json", "queue_save", {"path": remove_path})
         success = False
 
     if success:

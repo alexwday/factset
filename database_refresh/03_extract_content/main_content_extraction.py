@@ -80,14 +80,14 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
     global execution_log, error_log
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    logs_path = config["stage_3"]["output_logs_path"]
+    logs_path = config["stage_03_extract_content"]["output_logs_path"]
 
     # Create logs directory
     nas_create_directory_recursive(nas_conn, logs_path)
 
     # Save main execution log
     main_log_content = {
-        "stage": "stage_3_content_extraction",
+        "stage": "stage_03_extract_content_extraction",
         "execution_start": (
             execution_log[0]["timestamp"]
             if execution_log
@@ -98,7 +98,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
         "execution_log": execution_log,
     }
 
-    main_log_filename = f"stage_3_content_extraction_{timestamp}.json"
+    main_log_filename = f"stage_03_extract_content_extraction_{timestamp}.json"
     main_log_path = nas_path_join(logs_path, main_log_filename)
     main_log_json = json.dumps(main_log_content, indent=2)
     main_log_obj = io.BytesIO(main_log_json.encode("utf-8"))
@@ -112,14 +112,14 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
         nas_create_directory_recursive(nas_conn, errors_path)
 
         error_log_content = {
-            "stage": "stage_3_content_extraction",
+            "stage": "stage_03_extract_content_extraction",
             "execution_time": datetime.now().isoformat(),
             "total_errors": len(error_log),
             "error_summary": stage_summary.get("errors", {}),
             "errors": error_log,
         }
 
-        error_log_filename = f"stage_3_content_extraction_errors_{timestamp}.json"
+        error_log_filename = f"stage_03_extract_content_extraction_errors_{timestamp}.json"
         error_log_path = nas_path_join(errors_path, error_log_filename)
         error_log_json = json.dumps(error_log_content, indent=2)
         error_log_obj = io.BytesIO(error_log_json.encode("utf-8"))
@@ -247,7 +247,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     required_sections = [
         "ssl_cert_path",
         "api_settings", 
-        "stage_3",
+        "stage_03_extract_content",
         "monitored_institutions"
     ]
 
@@ -257,9 +257,9 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             log_error(error_msg, "config_validation", {"missing_section": section})
             raise ValueError(error_msg)
 
-    # Validate stage_3 specific parameters
-    stage_3_config = config["stage_3"]
-    required_stage_3_params = [
+    # Validate stage_03_extract_content specific parameters
+    stage_03_extract_content_config = config["stage_03_extract_content"]
+    required_stage_03_extract_content_params = [
         "description", 
         "input_queue_path",
         "output_logs_path",
@@ -268,10 +268,10 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
         "dev_max_files"
     ]
 
-    for param in required_stage_3_params:
-        if param not in stage_3_config:
-            error_msg = f"Missing required stage_3 parameter: {param}"
-            log_error(error_msg, "config_validation", {"missing_parameter": f"stage_3.{param}"})
+    for param in required_stage_03_extract_content_params:
+        if param not in stage_03_extract_content_config:
+            error_msg = f"Missing required stage_03_extract_content parameter: {param}"
+            log_error(error_msg, "config_validation", {"missing_parameter": f"stage_03_extract_content.{param}"})
             raise ValueError(error_msg)
 
     # Validate monitored institutions
@@ -574,7 +574,7 @@ def load_processing_queue(nas_conn: SMBConnection) -> List[Dict[str, Any]]:
     """Load Stage 2 processing queue from NAS."""
     
     try:
-        queue_path = config["stage_3"]["input_queue_path"]
+        queue_path = config["stage_03_extract_content"]["input_queue_path"]
         log_execution("Loading processing queue from NAS", {"queue_path": queue_path})
         
         queue_data = nas_download_file(nas_conn, queue_path)
@@ -918,8 +918,8 @@ def save_extracted_content(nas_conn: SMBConnection, all_paragraph_records: List[
             log_console("JSON validation failed - not saving file", "ERROR")
             return False
         
-        output_path = config["stage_3"]["output_data_path"]
-        output_filename = "extracted_transcript_sections.json"
+        output_path = config["stage_03_extract_content"]["output_data_path"]
+        output_filename = "stage_03_extracted_content.json"
         output_file_path = nas_path_join(output_path, output_filename)
         
         # Create output directory
@@ -1017,9 +1017,9 @@ def main() -> None:
             return
 
         # Step 7: Development mode handling
-        dev_mode = config["stage_3"].get("dev_mode", False)
+        dev_mode = config["stage_03_extract_content"].get("dev_mode", False)
         if dev_mode:
-            max_files = config["stage_3"].get("dev_max_files", 2)
+            max_files = config["stage_03_extract_content"].get("dev_max_files", 2)
             processing_queue = processing_queue[:max_files]
             log_console(f"Development mode: Processing only {len(processing_queue)} files", "WARNING")
 

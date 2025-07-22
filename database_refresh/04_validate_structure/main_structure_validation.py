@@ -79,14 +79,14 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
     global execution_log, error_log
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    logs_path = config["stage_4"]["output_logs_path"]
+    logs_path = config["stage_04_validate_structure"]["output_logs_path"]
 
     # Create logs directory
     nas_create_directory_recursive(nas_conn, logs_path)
 
     # Save main execution log
     main_log_content = {
-        "stage": "stage_4_content_validation",
+        "stage": "stage_04_validate_structure_validation",
         "execution_start": (
             execution_log[0]["timestamp"]
             if execution_log
@@ -97,7 +97,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
         "execution_log": execution_log,
     }
 
-    main_log_filename = f"stage_4_content_validation_{timestamp}.json"
+    main_log_filename = f"stage_04_validate_structure_validation_{timestamp}.json"
     main_log_path = nas_path_join(logs_path, main_log_filename)
     main_log_json = json.dumps(main_log_content, indent=2)
     main_log_obj = io.BytesIO(main_log_json.encode("utf-8"))
@@ -111,14 +111,14 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
         nas_create_directory_recursive(nas_conn, errors_path)
 
         error_log_content = {
-            "stage": "stage_4_content_validation",
+            "stage": "stage_04_validate_structure_validation",
             "execution_time": datetime.now().isoformat(),
             "total_errors": len(error_log),
             "error_summary": stage_summary.get("errors", {}),
             "errors": error_log,
         }
 
-        error_log_filename = f"stage_4_content_validation_errors_{timestamp}.json"
+        error_log_filename = f"stage_04_validate_structure_validation_errors_{timestamp}.json"
         error_log_path = nas_path_join(errors_path, error_log_filename)
         error_log_json = json.dumps(error_log_content, indent=2)
         error_log_obj = io.BytesIO(error_log_json.encode("utf-8"))
@@ -246,7 +246,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     required_sections = [
         "ssl_cert_path",
         "api_settings", 
-        "stage_4",
+        "stage_04_validate_structure",
         "monitored_institutions"
     ]
 
@@ -256,9 +256,9 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             log_error(error_msg, "config_validation", {"missing_section": section})
             raise ValueError(error_msg)
 
-    # Validate stage_4 specific parameters
-    stage_4_config = config["stage_4"]
-    required_stage_4_params = [
+    # Validate stage_04_validate_structure specific parameters
+    stage_04_validate_structure_config = config["stage_04_validate_structure"]
+    required_stage_04_validate_structure_params = [
         "description", 
         "input_data_path",
         "output_logs_path",
@@ -268,17 +268,17 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
         "expected_sections"
     ]
 
-    for param in required_stage_4_params:
-        if param not in stage_4_config:
-            error_msg = f"Missing required stage_4 parameter: {param}"
-            log_error(error_msg, "config_validation", {"missing_parameter": f"stage_4.{param}"})
+    for param in required_stage_04_validate_structure_params:
+        if param not in stage_04_validate_structure_config:
+            error_msg = f"Missing required stage_04_validate_structure parameter: {param}"
+            log_error(error_msg, "config_validation", {"missing_parameter": f"stage_04_validate_structure.{param}"})
             raise ValueError(error_msg)
 
     # Validate expected sections
-    expected_sections = stage_4_config.get("expected_sections", [])
+    expected_sections = stage_04_validate_structure_config.get("expected_sections", [])
     if not expected_sections or len(expected_sections) != 2:
-        error_msg = "stage_4.expected_sections must contain exactly 2 section names"
-        log_error(error_msg, "config_validation", {"section": "stage_4.expected_sections"})
+        error_msg = "stage_04_validate_structure.expected_sections must contain exactly 2 section names"
+        log_error(error_msg, "config_validation", {"section": "stage_04_validate_structure.expected_sections"})
         raise ValueError(error_msg)
 
     # Validate monitored institutions
@@ -502,7 +502,7 @@ def load_extracted_content(nas_conn: SMBConnection) -> Dict[str, Any]:
     """Load Stage 3 extracted content from NAS."""
     
     try:
-        input_path = config["stage_4"]["input_data_path"]
+        input_path = config["stage_04_validate_structure"]["input_data_path"]
         log_execution("Loading extracted content from NAS", {"input_path": input_path})
         
         content_data = nas_download_file(nas_conn, input_path)
@@ -535,7 +535,7 @@ def validate_transcript_structure(transcript_records: List[Dict[str, Any]], tran
         log_execution(f"Validating transcript structure: {transcript_key}")
         
         # Get expected section names from config
-        expected_sections = config["stage_4"]["expected_sections"]
+        expected_sections = config["stage_04_validate_structure"]["expected_sections"]
         
         # Group records by section
         sections_found = {}
@@ -636,7 +636,7 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
     """Save validation outputs to NAS."""
     
     try:
-        output_path = config["stage_4"]["output_data_path"]
+        output_path = config["stage_04_validate_structure"]["output_data_path"]
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         
         # Create output directory
@@ -665,7 +665,7 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
                 "records": valid_records
             }
             
-            valid_filename = "validated_transcript_content.json"
+            valid_filename = "stage_04_validated_content.json"
             valid_file_path = nas_path_join(output_path, valid_filename)
             valid_json = json.dumps(valid_output_content, indent=2)
             valid_file_obj = io.BytesIO(valid_json.encode("utf-8"))
@@ -694,7 +694,7 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
                 "validation_failures": invalid_transcripts
             }
             
-            invalid_filename = "invalid_content_for_review.json"
+            invalid_filename = "stage_04_invalid_content.json"
             invalid_file_path = nas_path_join(output_path, invalid_filename)
             invalid_json = json.dumps(invalid_output_content, indent=2)
             invalid_file_obj = io.BytesIO(invalid_json.encode("utf-8"))
@@ -767,7 +767,7 @@ def main() -> None:
         # Step 3: Configuration loading
         log_console("Step 3: Loading configuration...")
         config = load_config_from_nas(nas_conn)
-        log_console(f"Loaded configuration - Expected sections: {config['stage_4']['expected_sections']}")
+        log_console(f"Loaded configuration - Expected sections: {config['stage_04_validate_structure']['expected_sections']}")
 
         # Step 4: SSL certificate setup (for consistency with other stages)
         log_console("Step 4: Setting up SSL certificate...")
@@ -795,9 +795,9 @@ def main() -> None:
         stage_summary["total_records_processed"] = len(content_records)
 
         # Step 7: Development mode handling
-        dev_mode = config["stage_4"].get("dev_mode", False)
+        dev_mode = config["stage_04_validate_structure"].get("dev_mode", False)
         if dev_mode:
-            max_files = config["stage_4"].get("dev_max_files", 2)
+            max_files = config["stage_04_validate_structure"].get("dev_max_files", 2)
             # Group by transcript first, then limit
             transcripts = {}
             for record in content_records:

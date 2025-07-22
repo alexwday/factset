@@ -77,7 +77,7 @@ def setup_logging() -> logging.Logger:
     temp_log_file = tempfile.NamedTemporaryFile(
         mode="w+",
         suffix=".log",
-        prefix=f'stage_6_detailed_classification_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
+        prefix=f'stage_06_llm_classification_detailed_classification_log_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}_',
         delete=False,
     )
 
@@ -189,7 +189,7 @@ class EnhancedErrorLogger:
             }
             
             error_log_content = json.dumps(error_data, indent=2)
-            error_log_file = f"stage_6_detailed_classification_{timestamp}_errors.json"
+            error_log_file = f"stage_06_llm_classification_detailed_classification_{timestamp}_errors.json"
             
             nas_upload_file(
                 nas_conn,
@@ -490,10 +490,10 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict:
             full_config = json.loads(config_data.decode("utf-8"))
             logger.info("Successfully loaded shared configuration from NAS")
 
-            if "stage_6" not in full_config:
+            if "stage_06_llm_classification" not in full_config:
                 raise ValueError("Stage 6 configuration not found in config file")
                 
-            stage_config = full_config["stage_6"]
+            stage_config = full_config["stage_06_llm_classification"]
             
             # Validate required configuration sections
             required_sections = ["llm_config", "processing_config", "financial_categories"]
@@ -564,7 +564,7 @@ def get_oauth_token() -> Optional[str]:
     global logger, error_logger, config
     
     try:
-        token_endpoint = config["stage_6"]["llm_config"]["token_endpoint"]
+        token_endpoint = config["stage_06_llm_classification"]["llm_config"]["token_endpoint"]
         
         auth_data = {
             'grant_type': 'client_credentials',
@@ -614,8 +614,8 @@ def setup_llm_client() -> Optional[OpenAI]:
             
         client = OpenAI(
             api_key=oauth_token,
-            base_url=config["stage_6"]["llm_config"]["base_url"],
-            timeout=config["stage_6"]["llm_config"]["timeout"]
+            base_url=config["stage_06_llm_classification"]["llm_config"]["base_url"],
+            timeout=config["stage_06_llm_classification"]["llm_config"]["timeout"]
         )
         
         logger.info("LLM client setup completed")
@@ -644,8 +644,8 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> Dict:
     """Calculate token costs based on configuration."""
     global config
     
-    prompt_cost_per_1k = config["stage_6"]["llm_config"]["cost_per_1k_prompt_tokens"]
-    completion_cost_per_1k = config["stage_6"]["llm_config"]["cost_per_1k_completion_tokens"]
+    prompt_cost_per_1k = config["stage_06_llm_classification"]["llm_config"]["cost_per_1k_prompt_tokens"]
+    completion_cost_per_1k = config["stage_06_llm_classification"]["llm_config"]["cost_per_1k_completion_tokens"]
     
     prompt_cost = (prompt_tokens / 1000) * prompt_cost_per_1k
     completion_cost = (completion_tokens / 1000) * completion_cost_per_1k
@@ -666,7 +666,7 @@ def load_stage5_output(nas_conn: SMBConnection) -> Dict:
     global logger, error_logger, config
     
     try:
-        input_path = f"{NAS_BASE_PATH}/{config['stage_6']['input_source']}"
+        input_path = f"{NAS_BASE_PATH}/{config['stage_06_llm_classification']['input_source']}"
         
         if not validate_nas_path(input_path):
             raise ValueError("Invalid input file path")
@@ -726,10 +726,10 @@ def build_categories_description() -> str:
     """Build category descriptions from config for prompts."""
     global config
     
-    if "stage_6" not in config or "financial_categories" not in config["stage_6"]:
+    if "stage_06_llm_classification" not in config or "financial_categories" not in config["stage_06_llm_classification"]:
         return "Categories not available in configuration"
     
-    categories = config["stage_6"]["financial_categories"]
+    categories = config["stage_06_llm_classification"]["financial_categories"]
     category_lines = []
     
     for i, cat in enumerate(categories, 1):
@@ -1030,7 +1030,7 @@ def process_management_discussion_section(md_records: List[Dict[str, Any]]) -> L
         
         # Process in 5-paragraph windows
         previous_classifications = []
-        window_size = config["stage_6"]["processing_config"]["md_paragraph_window_size"]
+        window_size = config["stage_06_llm_classification"]["processing_config"]["md_paragraph_window_size"]
         
         for window_start in range(0, len(block_records), window_size):
             window_end = min(window_start + window_size, len(block_records))
@@ -1039,8 +1039,8 @@ def process_management_discussion_section(md_records: List[Dict[str, Any]]) -> L
             # Get prior blocks context (750-char previews)
             prior_blocks_context = get_prior_blocks_context(
                 speaker_blocks, block_id, 
-                max_blocks=config["stage_6"]["processing_config"]["max_speaker_blocks_context"], 
-                preview_chars=config["stage_6"]["processing_config"]["prior_block_preview_chars"]
+                max_blocks=config["stage_06_llm_classification"]["processing_config"]["max_speaker_blocks_context"], 
+                preview_chars=config["stage_06_llm_classification"]["processing_config"]["prior_block_preview_chars"]
             )
             
             # Format context
@@ -1063,15 +1063,15 @@ def process_management_discussion_section(md_records: List[Dict[str, Any]]) -> L
             # Call LLM
             try:
                 response = llm_client.chat.completions.create(
-                    model=config["stage_6"]["llm_config"]["model"],
+                    model=config["stage_06_llm_classification"]["llm_config"]["model"],
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": context}
                     ],
                     tools=create_management_discussion_tools(),
                     tool_choice="required",
-                    temperature=config["stage_6"]["llm_config"]["temperature"],
-                    max_tokens=config["stage_6"]["llm_config"]["max_tokens"]
+                    temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
+                    max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
                 )
                 
                 # Parse and apply classifications
@@ -1146,15 +1146,15 @@ def process_qa_group(qa_group_records: List[Dict[str, Any]]) -> List[Dict[str, A
     try:
         # Single LLM call for entire conversation
         response = llm_client.chat.completions.create(
-            model=config["stage_6"]["llm_config"]["model"],
+            model=config["stage_06_llm_classification"]["llm_config"]["model"],
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": conversation_context}
             ],
             tools=create_qa_conversation_tools(),
             tool_choice="required",
-            temperature=config["stage_6"]["llm_config"]["temperature"],
-            max_tokens=config["stage_6"]["llm_config"]["max_tokens"]
+            temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
+            max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
         )
         
         # Parse and apply to ALL records in group
@@ -1227,7 +1227,7 @@ def save_classified_output(nas_conn: SMBConnection, classified_records: List[Dic
         }
         
         # Save to NAS
-        output_path = f"{NAS_BASE_PATH}/{config['stage_6']['output_path']}/{config['stage_6']['output_file']}"
+        output_path = f"{NAS_BASE_PATH}/{config['stage_06_llm_classification']['output_path']}/{config['stage_06_llm_classification']['output_file']}"
         
         if not validate_nas_path(output_path):
             raise ValueError("Invalid output file path")
@@ -1240,7 +1240,7 @@ def save_classified_output(nas_conn: SMBConnection, classified_records: List[Dic
             output_path
         )
         
-        logger.info(f"Classified output saved to NAS: {config['stage_6']['output_file']}")
+        logger.info(f"Classified output saved to NAS: {config['stage_06_llm_classification']['output_file']}")
         logger.info(f"Total records: {len(classified_records)}")
         logger.info(f"Records with classifications: {output_data['classification_summary']['total_with_classifications']}")
         
@@ -1264,7 +1264,7 @@ def upload_logs_to_nas(nas_conn: SMBConnection, main_logger: logging.Logger,
             with open(main_logger.temp_log_file, 'r') as f:
                 log_content = f.read()
             
-            log_filename = f"stage_6_detailed_classification_{timestamp}.log"
+            log_filename = f"stage_06_llm_classification_detailed_classification_{timestamp}.log"
             nas_upload_file(
                 nas_conn,
                 io.BytesIO(log_content.encode('utf-8')),
@@ -1319,10 +1319,10 @@ def main() -> None:
         # Load configuration
         config = load_stage_config(nas_conn)
         logger.info("Loaded configuration for Stage 6")
-        logger.info(f"Development mode: {config['stage_6']['dev_mode']}")
+        logger.info(f"Development mode: {config['stage_06_llm_classification']['dev_mode']}")
         
-        if config['stage_6']['dev_mode']:
-            logger.info(f"Max transcripts in dev mode: {config['stage_6']['dev_max_transcripts']}")
+        if config['stage_06_llm_classification']['dev_mode']:
+            logger.info(f"Max transcripts in dev mode: {config['stage_06_llm_classification']['dev_max_transcripts']}")
 
         # Setup SSL certificate
         ssl_cert_path = setup_ssl_certificate(nas_conn)
