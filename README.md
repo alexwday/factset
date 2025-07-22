@@ -9,15 +9,15 @@ factset/
 ├── .env                                    # Shared authentication (create from .env.example)
 ├── .env.example                           # Template for environment variables
 ├── database_refresh/                      # Database refresh pipeline
-│   ├── config.json                        # Configuration for database refresh stages
-│   ├── stage_0_bulk_refresh/              # Historical bulk download (optional)
-│   ├── stage_1_daily_sync/                # Daily incremental sync (scheduled)
-│   ├── stage_2_processing/                # Transcript consolidation & change detection
-│   ├── stage_3_content_processing/        # XML content extraction & paragraph breakdown
-│   ├── stage_4_llm_classification/        # LLM-based section type classification
-│   ├── stage_5_qa_pairing/                # Q&A conversation boundary detection
-│   ├── stage_6_detailed_classification/   # Detailed financial category classification
-│   └── stage_7_content_enhancement/       # Paragraph-level content enhancement
+│   ├── config.yaml                        # Configuration for database refresh stages
+│   ├── 00_download_historical/            # Historical bulk download (optional)
+│   ├── 01_download_daily/                 # Daily incremental sync (scheduled)
+│   ├── 02_database_sync/                  # Database synchronization & consolidation
+│   ├── 03_extract_content/                # XML content extraction & paragraph breakdown
+│   ├── 04_validate_structure/             # Structure validation
+│   ├── 05_qa_pairing/                     # Q&A conversation boundary detection
+│   ├── 06_llm_classification/             # LLM-based section classification
+│   └── 07_llm_summarization/              # Content summarization
 ├── pm_call_summary/                       # PM Call Summary pipeline
 │   └── config.json                        # Configuration for PM summary stages
 ├── docs/                                  # Documentation & FactSet SDK docs
@@ -81,47 +81,41 @@ Required environment variables:
 Each stage is a standalone Python script:
 
 ```bash
-# Stage 0: Bulk historical sync (implemented)
-python database_refresh/stage_0_bulk_refresh/0_transcript_bulk_sync.py
+# Stage 0: Bulk historical sync
+python database_refresh/00_download_historical/main_historical_sync.py
 
-# Stage 1: Daily incremental sync (implemented)
-python database_refresh/stage_1_daily_sync/1_transcript_daily_sync.py
+# Stage 1: Daily incremental sync
+python database_refresh/01_download_daily/main_daily_sync.py
 
-# Stage 1: With earnings monitor (runs every 5 minutes with notifications)
-python database_refresh/stage_1_daily_sync/earnings_monitor.py
+# Stage 2: Database synchronization and consolidation
+python database_refresh/02_database_sync/main_sync_updates.py
 
-# Stage 2: Transcript consolidation and change detection (implemented)
-python database_refresh/stage_2_processing/2_transcript_consolidation.py
+# Stage 3: Content extraction from XML transcripts
+python database_refresh/03_extract_content/main_content_extraction.py
 
-# Stage 3: XML content extraction and paragraph-level breakdown (implemented)
-python database_refresh/stage_3_content_processing/3_transcript_content_extraction.py
+# Stage 4: Structure validation
+python database_refresh/04_validate_structure/main_structure_validation.py
 
-# Stage 4: LLM-based transcript section classification (implemented)
-python database_refresh/stage_4_llm_classification/4_transcript_llm_classification.py
+# Stage 5: Q&A pairing system
+python database_refresh/05_qa_pairing/main_qa_pairing.py
 
-# Stage 5: Q&A conversation boundary detection and pairing (implemented)
-python database_refresh/stage_5_qa_pairing/5_transcript_qa_pairing.py
+# Stage 6: LLM classification
+python database_refresh/06_llm_classification/main_classification.py
 
-# Stage 6: Detailed financial category classification (implemented)
-python database_refresh/stage_6_detailed_classification/6_transcript_detailed_classification.py
-
-# Stage 7: Content enhancement system (implemented)
-python database_refresh/stage_7_content_enhancement/7_transcript_content_enhancement.py
-
-# Test Scripts: Analysis and visualization tools
-python test_scripts/stage_4_analysis_visualizer.py
+# Stage 7: LLM summarization
+python database_refresh/07_llm_summarization/main_summarization.py
 ```
 
 **Current Status**: 
-- Stage 0 is production-ready with enhanced fiscal quarter organization ✅
-- Stage 1 is production-ready with enhanced folder structure and comprehensive error logging ✅
-- Stage 2 is production-ready with transcript consolidation and change detection ✅
-- Stage 3 is production-ready with XML content extraction and paragraph-level breakdown ✅
-- Stage 4 is production-ready with LLM-based section type classification and enhanced execution metrics ✅
-- Stage 5 is production-ready with Q&A conversation boundary detection, fixed group counting, and comprehensive timing ✅
-- Stage 6 is production-ready with detailed financial category classification using dual processing approaches ✅
-- Stage 7 is production-ready with paragraph-level content enhancement using sliding window approach ✅
-- All stages feature robust title parsing with 4 regex patterns and smart fallbacks ✅
+- Stage 0 (Historical Download): Production-ready with enhanced fiscal quarter organization ✅
+- Stage 1 (Daily Sync): Production-ready with enhanced folder structure and comprehensive error logging ✅
+- Stage 2 (Database Sync): Production-ready with transcript consolidation and change detection ✅
+- Stage 3 (Content Extraction): Production-ready with XML content extraction and paragraph-level breakdown ✅
+- Stage 4 (Structure Validation): Production-ready with robust structure validation ✅
+- Stage 5 (Q&A Pairing): Production-ready with Q&A conversation boundary detection ✅
+- Stage 6 (LLM Classification): Production-ready with LLM-based section classification ✅
+- Stage 7 (LLM Summarization): Production-ready with content summarization capabilities ✅
+- All stages feature robust error handling and comprehensive logging ✅
 
 ## Testing from Work Environment
 
@@ -181,7 +175,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 1. **Validate Configuration**:
    ```bash
    # Test script syntax
-   python -m py_compile stage_0_bulk_refresh/0_transcript_bulk_sync.py
+   python -m py_compile database_refresh/00_download_historical/main_historical_sync.py
    ```
 
 2. **Dry Run Check**:
@@ -191,7 +185,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 3. **Execute Full Sync**:
    ```bash
-   python database_refresh/stage_0_bulk_refresh/0_transcript_bulk_sync.py
+   python database_refresh/00_download_historical/main_historical_sync.py
    ```
 
 4. **Monitor Progress**:
@@ -217,7 +211,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 2. **Execute Consolidation**:
    ```bash
-   python database_refresh/stage_2_processing/2_transcript_consolidation.py
+   python database_refresh/02_database_sync/main_sync_updates.py
    ```
 
 3. **Expected Outputs**:
@@ -234,7 +228,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 2. **Execute Content Extraction**:
    ```bash
-   python database_refresh/stage_3_content_processing/3_transcript_content_extraction.py
+   python database_refresh/03_extract_content/main_content_extraction.py
    ```
 
 3. **Expected Outputs**:
@@ -258,9 +252,9 @@ LLM_CLIENT_SECRET=your_llm_client_secret
    - NAS config.json must include `stage_4` section with LLM configuration
    - LLM API credentials configured in .env file
 
-2. **Execute LLM Classification**:
+2. **Execute Structure Validation**:
    ```bash
-   python database_refresh/stage_4_llm_classification/4_transcript_llm_classification.py
+   python database_refresh/04_validate_structure/main_structure_validation.py
    ```
 
 3. **Expected Outputs**:
@@ -305,7 +299,7 @@ LLM_CLIENT_SECRET=your_llm_client_secret
 
 2. **Execute Q&A Pairing**:
    ```bash
-   python database_refresh/stage_5_qa_pairing/5_transcript_qa_pairing.py
+   python database_refresh/05_qa_pairing/main_qa_pairing.py
    ```
 
 3. **Expected Outputs**:
@@ -357,9 +351,9 @@ LLM_CLIENT_SECRET=your_llm_client_secret
    - NAS config.json must include `stage_6` section with LLM configuration
    - LLM API credentials configured in .env file (same as Stage 4/5)
 
-2. **Execute Detailed Classification**:
+2. **Execute LLM Classification**:
    ```bash
-   python database_refresh/stage_6_detailed_classification/6_transcript_detailed_classification.py
+   python database_refresh/06_llm_classification/main_classification.py
    ```
 
 3. **Expected Outputs**:
@@ -640,13 +634,41 @@ Provides detailed summary including:
   - **Cost Tracking**: Real-time token usage and comprehensive cost monitoring with detailed summaries
   - **Development Mode**: Process only 2 transcripts for testing
   - **Enhanced Error Logging**: Separate categories for LLM, authentication, classification, and processing errors
-- **Usage**: `python database_refresh/stage_6_detailed_classification/6_transcript_detailed_classification.py`
+- **Usage**: `python database_refresh/06_llm_classification/main_classification.py`
 - **Development**: Set `"dev_mode": true` in config.json to process limited transcripts during testing
 - **Authentication**: Uses same LLM credentials as Stage 4/5 (LLM_CLIENT_ID and LLM_CLIENT_SECRET)
 - **Classification Categories**:
   - Financial Performance & Results, Credit Quality & Risk Management, Capital & Regulatory Management
   - Strategic Initiatives & Transformation, Market Environment & Outlook, Operating Efficiency & Expenses
   - Asset & Liability Management, Non-Interest Revenue & Segments, ESG & Sustainability, Insurance Operations
+
+### Testing Stage 7
+
+1. **Prerequisites**:
+   - Stage 6 must have run successfully (creates classified transcript data)
+   - NAS config.yaml must include `stage_7` section with LLM configuration
+   - LLM API credentials configured in .env file (same as previous stages)
+
+2. **Execute LLM Summarization**:
+   ```bash
+   python database_refresh/07_llm_summarization/main_summarization.py
+   ```
+
+3. **Expected Outputs**:
+   - Summarized content with enhanced readability and key insights extraction
+   - Structured summaries with executive overviews and detailed breakdowns
+   - Development mode processes only limited content for testing
+
+4. **Development Mode Settings**:
+   ```yaml
+   stage_7:
+     dev_mode: true
+     dev_max_transcripts: 2
+     llm_config:
+       model: "gpt-4-turbo"
+       temperature: 0.3
+       max_tokens: 2000
+   ```
 
 ## Configuration
 
