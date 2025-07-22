@@ -1091,62 +1091,94 @@ def analyze_speaker_block_boundary(current_block_index: int,
                                  qa_state: Dict = None,
                                  enhanced_error_logger: EnhancedErrorLogger = None) -> Optional[Dict]:
     """
-    Analyze a single speaker block for Q&A boundary decisions using LLM.
+    Analyze a single speaker block for Q&A boundary decisions using LLM with retry logic.
     Handles operator blocks with special exclusion logic.
     """
     global llm_client
     
-    try:
-        current_block = speaker_blocks[current_block_index]
-        current_block_id = current_block["speaker_block_id"]
-        
-        # Check if this is an operator/moderator block - exclude from Q&A assignments
-        if is_operator_block(current_block):
-            log_execution(f"Block {current_block_id} identified as operator/moderator block - excluding from Q&A groups")
-            return {
-                "current_block_id": current_block_id,
-                "qa_group_id": None,  # No Q&A group assignment
-                "qa_group_start_block": None,
-                "qa_group_end_block": None,
-                "group_status": "standalone",  # Operator blocks are standalone
-                "confidence_score": 1.0,  # High confidence in operator detection
-                "reasoning": f"Operator/moderator content detected - excluded from Q&A assignments"
-            }
-        
-        # Create context window for non-operator blocks
-        window_blocks = create_speaker_block_window(current_block_index, speaker_blocks, qa_state)
-        
-        # Format context for LLM
-        formatted_context = format_speaker_block_context(window_blocks, 
-                                                       next(i for i, b in enumerate(window_blocks) 
-                                                           if b["speaker_block_id"] == current_block_id))
-        
-        # Create prompt with state awareness
-        prompt = create_qa_boundary_prompt(formatted_context, current_block_id, qa_state)
-        
-        # Make LLM API call with dynamic tools
-        response = llm_client.chat.completions.create(
-            model=config["stage_05_qa_pairing"]["llm_config"]["model"],
-            messages=[{"role": "user", "content": prompt}],
-            tools=create_qa_boundary_detection_tools(qa_state),
-            tool_choice="required",
-            temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
-            max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
-        )
-        
-        # Parse and validate response
-        if response.choices[0].message.tool_calls:
-            tool_call = response.choices[0].message.tool_calls[0]
-            result = json.loads(tool_call.function.arguments)
-            decision = result["qa_group_decision"]
+    current_block = speaker_blocks[current_block_index]
+    current_block_id = current_block["speaker_block_id"]
+    
+    # Check if this is an operator/moderator block - exclude from Q&A assignments
+    if is_operator_block(current_block):
+        log_execution(f"Block {current_block_id} identified as operator/moderator block - excluding from Q&A groups")
+        return {
+            "current_block_id": current_block_id,
+            "qa_group_id": None,  # No Q&A group assignment
+            "qa_group_start_block": None,
+            "qa_group_end_block": None,
+            "group_status": "standalone",  # Operator blocks are standalone
+            "confidence_score": 1.0,  # High confidence in operator detection
+            "reasoning": f"Operator/moderator content detected - excluded from Q&A assignments"
+        }
+    
+    # Prepare LLM analysis context (done once, reused for retries)
+    window_blocks = create_speaker_block_window(current_block_index, speaker_blocks, qa_state)
+    formatted_context = format_speaker_block_context(window_blocks, 
+                                                   next(i for i, b in enumerate(window_blocks) 
+                                                       if b["speaker_block_id"] == current_block_id))
+    prompt = create_qa_boundary_prompt(formatted_context, current_block_id, qa_state)
+    
+    # Retry logic for LLM calls
+    max_retries = 3
+    retry_delay = 1  # seconds
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            log_execution(f"Block {current_block_id} LLM analysis attempt {attempt}/{max_retries}")
+            
+            # Make LLM API call with dynamic tools
+            response = llm_client.chat.completions.create(
+                model=config["stage_05_qa_pairing"]["llm_config"]["model"],
+                messages=[{"role": "user", "content": prompt}],
+                tools=create_qa_boundary_detection_tools(qa_state),
+                tool_choice="required",
+                temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
+                max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
+            )
+            
+            # Parse and validate response
+            if not response.choices[0].message.tool_calls:
+                error_msg = f"No tool call response for block {current_block_id}"
+                if attempt == max_retries:
+                    log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
+                    enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                    return None
+                else:
+                    log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    continue
+            
+            # Parse JSON response
+            try:
+                tool_call = response.choices[0].message.tool_calls[0]
+                result = json.loads(tool_call.function.arguments)
+                decision = result["qa_group_decision"]
+            except (json.JSONDecodeError, KeyError) as e:
+                error_msg = f"Failed to parse LLM response for block {current_block_id}: {e}"
+                if attempt == max_retries:
+                    log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
+                    enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                    return None
+                else:
+                    log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    continue
             
             # Validate decision against current state
             validation_error = validate_llm_decision(decision, qa_state, current_block_id)
             if validation_error:
-                log_error(f"Block {current_block_id}: Invalid LLM decision - {validation_error}", "boundary_detection", {})
-                enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"Invalid LLM decision: {validation_error}")
-                return None
+                error_msg = f"Invalid LLM decision for block {current_block_id}: {validation_error}"
+                if attempt == max_retries:
+                    log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
+                    enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                    return None
+                else:
+                    log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    continue
             
+            # Success! Process the valid decision
             # Automatically assign appropriate group ID
             decision = assign_group_id_to_decision(decision, qa_state, current_block_id)
             
@@ -1164,20 +1196,24 @@ def analyze_speaker_block_boundary(current_block_index: int,
                 # Accumulate costs for final summary
                 enhanced_error_logger.accumulate_costs(token_usage)
             
-            log_execution(f"Block {current_block_id} boundary decision: {decision['group_status']} (group: {decision.get('qa_group_id')}, confidence: {decision['confidence_score']:.2f}) | Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
+            # Log successful decision (include attempt number if retried)
+            attempt_info = f" (attempt {attempt})" if attempt > 1 else ""
+            log_execution(f"Block {current_block_id} boundary decision{attempt_info}: {decision['group_status']} (group: {decision.get('qa_group_id')}, confidence: {decision['confidence_score']:.2f}) | Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
             
             return decision
-        else:
-            error_msg = f"No tool call response for block {current_block_id}"
-            log_error(error_msg, "boundary_detection", {})
-            enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, error_msg)
-            return None
             
-    except Exception as e:
-        error_msg = f"LLM boundary analysis failed for block {current_block_id}: {e}"
-        log_error(error_msg, "boundary_detection", {})
-        enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, error_msg)
-        return None
+        except Exception as e:
+            error_msg = f"LLM boundary analysis failed for block {current_block_id}: {e}"
+            if attempt == max_retries:
+                log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
+                enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                return None
+            else:
+                log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+    
+    # Should never reach here, but safety fallback
+    return None
 
 
 def calculate_qa_group_confidence(block_decisions: List[Dict]) -> float:
