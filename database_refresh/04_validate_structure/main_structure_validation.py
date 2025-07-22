@@ -652,18 +652,8 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
                 if f"{record.get('ticker', 'unknown')}_{record.get('fiscal_year', 'unknown')}_{record.get('fiscal_quarter', 'unknown')}" in valid_transcript_keys
             ]
             
-            valid_output_content = {
-                "schema_version": "1.0",
-                "processing_timestamp": datetime.now().isoformat(),
-                "validation_summary": {
-                    "total_transcripts_validated": len(valid_transcripts) + len(invalid_transcripts),
-                    "valid_transcripts": len(valid_transcripts),
-                    "invalid_transcripts": len(invalid_transcripts)
-                },
-                "valid_transcript_keys": list(valid_transcript_keys),
-                "total_records": len(valid_records),
-                "records": valid_records
-            }
+            # Output valid records in Stage 3 format (direct list)
+            valid_output_content = valid_records
             
             valid_filename = "stage_04_validated_content.json"
             valid_file_path = nas_path_join(output_path, valid_filename)
@@ -674,9 +664,10 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
                 log_execution("Valid transcript content saved successfully", {
                     "output_path": valid_file_path,
                     "valid_transcripts": len(valid_transcripts),
-                    "total_records": len(valid_records)
+                    "total_records": len(valid_records),
+                    "format": "Stage 3 format (direct records list)"
                 })
-                log_console(f"✅ Valid content saved: {valid_filename}")
+                log_console(f"✅ Valid content saved: {valid_filename} ({len(valid_records)} records)")
                 valid_success = True
             else:
                 log_error("Failed to save valid transcript content", "output_save", {"path": valid_file_path})
@@ -684,15 +675,18 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
             log_console("No valid transcripts found - no valid content file created", "WARNING")
             valid_success = True  # Not an error if no valid content
         
-        # Save invalid transcript details (if any)
+        # Save invalid transcript records (if any) in Stage 3 format
         invalid_success = False
         if invalid_transcripts:
-            invalid_output_content = {
-                "schema_version": "1.0",
-                "processing_timestamp": datetime.now().isoformat(),
-                "total_invalid_transcripts": len(invalid_transcripts),
-                "validation_failures": invalid_transcripts
-            }
+            # Get records for invalid transcripts  
+            invalid_transcript_keys = {result["transcript_key"] for result in invalid_transcripts}
+            invalid_records = [
+                record for record in original_records 
+                if f"{record.get('ticker', 'unknown')}_{record.get('fiscal_year', 'unknown')}_{record.get('fiscal_quarter', 'unknown')}" in invalid_transcript_keys
+            ]
+            
+            # Output invalid records in Stage 3 format (direct list)
+            invalid_output_content = invalid_records
             
             invalid_filename = "stage_04_invalid_content.json"
             invalid_file_path = nas_path_join(output_path, invalid_filename)
@@ -700,11 +694,13 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
             invalid_file_obj = io.BytesIO(invalid_json.encode("utf-8"))
             
             if nas_upload_file(nas_conn, invalid_file_obj, invalid_file_path):
-                log_execution("Invalid transcript details saved successfully", {
+                log_execution("Invalid transcript records saved successfully", {
                     "output_path": invalid_file_path,
-                    "invalid_transcripts": len(invalid_transcripts)
+                    "invalid_transcripts": len(invalid_transcripts),
+                    "total_records": len(invalid_records),
+                    "format": "Stage 3 format (direct records list)"
                 })
-                log_console(f"⚠️ Invalid content review file saved: {invalid_filename}", "WARNING")
+                log_console(f"⚠️ Invalid content saved: {invalid_filename} ({len(invalid_records)} records)", "WARNING")
                 invalid_success = True
             else:
                 log_error("Failed to save invalid transcript details", "output_save", {"path": invalid_file_path})
