@@ -363,9 +363,9 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     stage_05_qa_pairing_config = config["stage_05_qa_pairing"]
     required_stage_05_qa_pairing_params = [
         "description", 
-        "input_source",
-        "output_path",
-        "output_file",
+        "input_data_path",
+        "output_data_path",
+        "output_logs_path",
         "dev_mode",
         "dev_max_transcripts",
         "llm_config",
@@ -715,15 +715,14 @@ def load_stage_4_content(nas_conn: SMBConnection) -> Dict[str, Any]:
     """Load Stage 4 validated content from NAS."""
     
     try:
-        input_source = config["stage_05_qa_pairing"]["input_source"]
-        # input_source already contains the full NAS path, don't add NAS_BASE_PATH again
+        input_path = config["stage_05_qa_pairing"]["input_data_path"]
         
-        log_execution("Loading Stage 4 validated content from NAS", {"input_path": input_source})
+        log_execution("Loading Stage 4 validated content from NAS", {"input_path": input_path})
         
-        content_data = nas_download_file(nas_conn, input_source)
+        content_data = nas_download_file(nas_conn, input_path)
         if not content_data:
-            error_msg = f"Stage 4 content file not found at {input_source}"
-            log_error(error_msg, "content_load", {"path": input_source})
+            error_msg = f"Stage 4 content file not found at {input_path}"
+            log_error(error_msg, "content_load", {"path": input_path})
             raise FileNotFoundError(error_msg)
         
         content = json.loads(content_data.decode("utf-8"))
@@ -979,20 +978,21 @@ def main() -> None:
             "records": all_enhanced_records
         }
 
-        # Save to NAS
-        output_filename = config["stage_05_qa_pairing"]["output_file"]
-        output_path = nas_path_join(
-            os.getenv("NAS_BASE_PATH"), 
-            config["stage_05_qa_pairing"]["output_path"], 
-            output_filename
-        )
+        # Save to NAS following Stage 4 pattern
+        output_path = config["stage_05_qa_pairing"]["output_data_path"]
+        output_filename = "stage_05_qa_paired_content.json"
+        output_file_path = nas_path_join(output_path, output_filename)
 
-        nas_create_directory_recursive(nas_conn, nas_path_join(os.getenv("NAS_BASE_PATH"), config["stage_05_qa_pairing"]["output_path"]))
+        nas_create_directory_recursive(nas_conn, output_path)
 
         output_json = json.dumps(output_data, indent=2)
         output_bytes = io.BytesIO(output_json.encode("utf-8"))
 
-        if nas_upload_file(nas_conn, output_bytes, output_path):
+        if nas_upload_file(nas_conn, output_bytes, output_file_path):
+            log_execution("Q&A paired content saved successfully", {
+                "output_path": output_file_path,
+                "total_records": len(all_enhanced_records)
+            })
             log_console(f"✅ Output saved successfully: {output_filename}")
         else:
             stage_summary["status"] = "failed"

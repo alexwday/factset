@@ -97,9 +97,9 @@ stage_5_qa_pairing/
 # NAS configuration structure for Stage 5
 stage_05_qa_pairing:
   description: "Q&A boundary detection and conversation pairing"
-  input_source: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_04_validated_content.json"
-  output_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
-  output_file: "stage_05_qa_paired_content.json"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_04_validated_content.json"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 2
   
