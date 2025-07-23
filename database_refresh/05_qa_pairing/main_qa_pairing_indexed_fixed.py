@@ -1141,23 +1141,20 @@ def make_indexed_boundary_decision(context_data: Dict,
     Make LLM decision for indexed boundary detection with improved error handling.
     Returns dict with decision type and details.
     """
+    # FIX: Properly declare global variables at function start
     global llm_client, config
     
-    # DIAGNOSTIC: Check if global variables are accessible
-    try:
-        if llm_client is None:
-            log_error(f"CRITICAL: llm_client is None in make_indexed_boundary_decision - cannot make API calls", "boundary_detection", {"qa_id": current_qa_id})
-            enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, "LLM client is None - OAuth or setup failed")
-            return None
-        if config is None:
-            log_error(f"CRITICAL: config is None in make_indexed_boundary_decision", "boundary_detection", {"qa_id": current_qa_id})
-            enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, "Config is None")
-            return None
-        log_execution(f"DIAGNOSTIC: Global variables accessible for QA ID {current_qa_id}")
-    except NameError as ne:
-        log_error(f"CRITICAL NameError accessing globals: {ne}", "boundary_detection", {"qa_id": current_qa_id})
-        enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"NameError: {ne}")
+    # DIAGNOSTIC: Check if global variables are accessible - simplified validation
+    if llm_client is None:
+        log_error(f"CRITICAL: llm_client is None in make_indexed_boundary_decision - cannot make API calls", "boundary_detection", {"qa_id": current_qa_id})
+        enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, "LLM client is None - OAuth or setup failed")
         return None
+    if config is None:
+        log_error(f"CRITICAL: config is None in make_indexed_boundary_decision", "boundary_detection", {"qa_id": current_qa_id})
+        enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, "Config is None")
+        return None
+    
+    log_execution(f"DIAGNOSTIC: Global variables accessible for QA ID {current_qa_id}")
     
     try:
         # IMPROVEMENT: Check token count before sending to LLM
@@ -1239,17 +1236,13 @@ def make_indexed_boundary_decision(context_data: Dict,
                     tool_call = response.choices[0].message.tool_calls[0]
                     function_name = tool_call.function.name
                     
-                    # IMPROVEMENT: Enhanced JSON parsing with validation
+                    # FIX: Simplified JSON parsing - remove complex cleaning logic
                     try:
                         result = json.loads(tool_call.function.arguments)
                     except json.JSONDecodeError as json_err:
-                        # Try to clean the JSON string
-                        cleaned_args = tool_call.function.arguments.strip()
-                        if not cleaned_args.startswith('{'):
-                            cleaned_args = '{' + cleaned_args
-                        if not cleaned_args.endswith('}'):
-                            cleaned_args = cleaned_args + '}'
+                        # Only try basic cleanup once
                         try:
+                            cleaned_args = tool_call.function.arguments.strip()
                             result = json.loads(cleaned_args)
                         except json.JSONDecodeError:
                             raise ValueError(f"LLM returned invalid JSON: {json_err}")
@@ -1261,24 +1254,27 @@ def make_indexed_boundary_decision(context_data: Dict,
                         if "reasoning" not in result:
                             raise ValueError("Missing 'reasoning' field in LLM response")
                         
-                        # IMPROVEMENT: Type coercion with validation
+                        # FIX: Simplified index validation - more robust type handling
                         raw_index = result["next_analyst_index"]
-                        try:
-                            if isinstance(raw_index, str) and raw_index.isdigit():
-                                next_analyst_index = int(raw_index)
-                            elif isinstance(raw_index, (int, float)):
+                        
+                        # Ensure it's an integer
+                        if isinstance(raw_index, str):
+                            if raw_index.isdigit():
                                 next_analyst_index = int(raw_index)
                             else:
-                                raise ValueError(f"Cannot convert index to integer: {raw_index}")
-                        except (ValueError, TypeError):
-                            raise ValueError(f"Invalid boundary index format: {raw_index}")
+                                raise ValueError(f"Invalid string index: {raw_index}")
+                        elif isinstance(raw_index, (int, float)):
+                            next_analyst_index = int(raw_index)
+                        else:
+                            raise ValueError(f"Cannot convert index to integer: {type(raw_index)} {raw_index}")
                         
-                        # IMPROVEMENT: Range validation with context awareness
+                        # FIX: More forgiving range validation
                         window_size = context_data.get("window_size", 10)
                         if next_analyst_index < 1:
                             raise ValueError(f"Boundary index must be >= 1, got: {next_analyst_index}")
-                        if next_analyst_index > window_size + 5:  # Allow some buffer for edge cases
-                            raise ValueError(f"Boundary index {next_analyst_index} exceeds reasonable range (window size: {window_size})")
+                        if next_analyst_index > window_size:
+                            # Allow indices at window boundary - don't add arbitrary buffer
+                            raise ValueError(f"Boundary index {next_analyst_index} exceeds window size {window_size}")
                         
                         # Validate reasoning field
                         reasoning = result.get("reasoning", "").strip()
@@ -1424,13 +1420,13 @@ def process_qa_boundaries_indexed(speaker_blocks: List[Dict],
         max_window_size = indexed_config["max_window_size"]
         window_expansion_step = indexed_config["window_expansion_step"]
         
-        # Safety check to prevent infinite loops
-        max_iterations = len(qa_speaker_blocks) * 2
+        # FIX: More reasonable iteration limits to prevent infinite loops
+        max_iterations = len(qa_speaker_blocks) + 10   # More conservative limit
         iteration_count = 0
         
         while current_index < len(qa_speaker_blocks) and iteration_count < max_iterations:
             iteration_count += 1
-            log_execution(f"Processing QA ID {current_qa_id} starting at block index {current_index} (iteration {iteration_count})")
+            log_execution(f"Processing QA ID {current_qa_id} starting at block index {current_index} (iteration {iteration_count}/{max_iterations})")
             
             # Start with initial window size
             window_size = initial_window_size
@@ -1485,13 +1481,14 @@ def process_qa_boundaries_indexed(speaker_blocks: List[Dict],
                     # ALGORITHM FIX: Proper index conversion
                     llm_next_index = decision["next_analyst_index"]  # 1-based from LLM
                     
-                    # VALIDATION FIX: Comprehensive boundary validation
+                    # FIX: Streamlined boundary validation - keep core algorithm but fix edge cases
                     if not isinstance(llm_next_index, int) or llm_next_index < 1:
                         log_execution(f"Invalid LLM index {llm_next_index}, using fallback")
-                        llm_next_index = min(2, effective_window_size)  # Safe fallback
+                        llm_next_index = 2  # Always advance by at least 1
                     
+                    # FIX: More precise window size handling
                     if llm_next_index > effective_window_size:
-                        log_execution(f"LLM index {llm_next_index} exceeds window size {effective_window_size}, using fallback")
+                        log_execution(f"LLM index {llm_next_index} exceeds window size {effective_window_size}, clamping to window")
                         llm_next_index = effective_window_size
                     
                     # Convert to 0-based array index relative to current_index
@@ -1499,13 +1496,14 @@ def process_qa_boundaries_indexed(speaker_blocks: List[Dict],
                     # Convert to absolute 0-based array index
                     next_analyst_array_index = current_index + (llm_next_index - 1)
                     
-                    # VALIDATION FIX: Ensure forward progress
+                    # FIX: Ensure forward progress - but don't force if at boundary
                     if next_analyst_array_index <= current_index:
-                        log_execution(f"Boundary would not advance, forcing progress")
+                        log_execution(f"Boundary would not advance from {current_index}, forcing minimal progress")
                         next_analyst_array_index = current_index + 1
                     
-                    # VALIDATION FIX: Ensure within bounds
-                    next_analyst_array_index = min(next_analyst_array_index, len(qa_speaker_blocks))
+                    # FIX: Ensure within bounds
+                    if next_analyst_array_index > len(qa_speaker_blocks):
+                        next_analyst_array_index = len(qa_speaker_blocks)
                     
                     # ALGORITHM FIX: Assign specific blocks (not ranges) to current QA ID
                     for i in range(current_index, next_analyst_array_index):
@@ -1533,39 +1531,61 @@ def process_qa_boundaries_indexed(speaker_blocks: List[Dict],
                     if window_size > max_window_size:
                         # Reached max window size, assign reasonable number of blocks
                         log_execution(f"Reached max window size for QA ID {current_qa_id}, using fallback assignment")
+                        # FIX: Ensure fallback_blocks assignment doesn't exceed available blocks
                         fallback_blocks = min(initial_window_size, len(qa_speaker_blocks) - current_index)
-                        for i in range(current_index, current_index + fallback_blocks):
-                            if i < len(qa_speaker_blocks):
-                                block = qa_speaker_blocks[i]
-                                block_assignments.append({
-                                    "speaker_block_id": block["speaker_block_id"],
-                                    "qa_group_id": current_qa_id,
-                                    "method": "max_window_fallback"
-                                })
-                        current_index += fallback_blocks
+                        if fallback_blocks > 0:
+                            for i in range(current_index, current_index + fallback_blocks):
+                                if i < len(qa_speaker_blocks):
+                                    block = qa_speaker_blocks[i]
+                                    block_assignments.append({
+                                        "speaker_block_id": block["speaker_block_id"],
+                                        "qa_group_id": current_qa_id,
+                                        "method": "max_window_fallback"
+                                    })
+                            current_index += fallback_blocks
+                        else:
+                            # FIX: If no blocks available, break the loop
+                            log_execution(f"No blocks available for fallback assignment at QA ID {current_qa_id}")
+                            break
                         current_qa_id += 1
                         boundary_found = True
                         
                 elif decision["type"] == "context_too_large":
                     # Context too large, use smaller window
                     log_execution(f"Context too large for QA ID {current_qa_id}, using reduced window")
+                    # FIX: Ensure context size fallback doesn't exceed available blocks
                     fallback_blocks = min(5, len(qa_speaker_blocks) - current_index)  # Smaller fallback
-                    for i in range(current_index, current_index + fallback_blocks):
-                        if i < len(qa_speaker_blocks):
-                            block = qa_speaker_blocks[i]
-                            block_assignments.append({
-                                "speaker_block_id": block["speaker_block_id"],
-                                "qa_group_id": current_qa_id,
-                                "method": "context_size_fallback"
-                            })
-                    current_index += fallback_blocks
+                    if fallback_blocks > 0:
+                        for i in range(current_index, current_index + fallback_blocks):
+                            if i < len(qa_speaker_blocks):
+                                block = qa_speaker_blocks[i]
+                                block_assignments.append({
+                                    "speaker_block_id": block["speaker_block_id"],
+                                    "qa_group_id": current_qa_id,
+                                    "method": "context_size_fallback"
+                                })
+                        current_index += fallback_blocks
+                    else:
+                        # FIX: If no blocks available, break the loop
+                        log_execution(f"No blocks available for context size fallback at QA ID {current_qa_id}")
+                        break
                     current_qa_id += 1
                     boundary_found = True
         
-        # Safety check for infinite loop
+        # FIX: Handle remaining blocks if we hit iteration limit
         if iteration_count >= max_iterations:
-            log_error(f"Maximum iterations reached, may indicate infinite loop", "processing", 
-                     {"transcript_id": transcript_id, "iterations": iteration_count})
+            log_error(f"Maximum iterations reached, processing remaining blocks", "processing", 
+                     {"transcript_id": transcript_id, "iterations": iteration_count, "remaining_blocks": len(qa_speaker_blocks) - current_index})
+            
+            # Assign any remaining blocks to final group
+            if current_index < len(qa_speaker_blocks):
+                for i in range(current_index, len(qa_speaker_blocks)):
+                    block = qa_speaker_blocks[i]
+                    block_assignments.append({
+                        "speaker_block_id": block["speaker_block_id"],
+                        "qa_group_id": current_qa_id,
+                        "method": "iteration_limit_fallback"
+                    })
         
         # ALGORITHM FIX: Convert explicit assignments to QA groups
         qa_groups = convert_explicit_assignments_to_qa_groups(block_assignments)
@@ -1718,6 +1738,8 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
     """
     Process a single transcript for Q&A pairing using corrected indexed approach.
     """
+    # FIX: Declare global variables to prevent NameError
+    global llm_client, oauth_token
     
     try:
         # Refresh OAuth token for each transcript (but only if needed)
@@ -1763,7 +1785,8 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
 
 def main() -> None:
     """Main function to orchestrate Stage 5 Q&A pairing using corrected indexed approach."""
-    global config, logger, llm_client, ssl_cert_path
+    # FIX: Declare ALL global variables at start to prevent NameError
+    global config, logger, llm_client, ssl_cert_path, execution_log, error_log, oauth_token
 
     # Initialize logging
     logger = setup_logging()
