@@ -145,7 +145,7 @@ class EnhancedErrorLogger:
 
     def save_error_logs(self, nas_conn: SMBConnection):
         """Save error logs to separate JSON files on NAS."""
-        global logger
+        global logger, config
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         logs_path = config["stage_05_qa_pairing"]["output_logs_path"]
         
@@ -463,7 +463,8 @@ def validate_api_response_structure(response: Any) -> bool:
 
 def setup_ssl_certificate(nas_conn: SMBConnection) -> str:
     """Download SSL certificate from NAS to temporary file."""
-
+    global config
+    
     try:
         log_execution("Setting up SSL certificate", {})  # SECURITY FIX: Removed path
         
@@ -524,7 +525,7 @@ def setup_proxy_configuration() -> str:
 
 def get_oauth_token() -> Optional[str]:
     """Get OAuth token using client credentials flow with enhanced security."""
-    global ssl_cert_path
+    global ssl_cert_path, config
     
     try:
         token_endpoint = config["stage_05_qa_pairing"]["llm_config"]["token_endpoint"]
@@ -584,7 +585,7 @@ def get_oauth_token() -> Optional[str]:
 
 def setup_llm_client() -> Optional[OpenAI]:
     """Setup OpenAI client with custom base URL and OAuth token."""
-    global oauth_token
+    global oauth_token, config
     
     try:
         # Get OAuth token
@@ -613,7 +614,7 @@ def setup_llm_client() -> Optional[OpenAI]:
 
 def refresh_oauth_token_for_transcript() -> bool:
     """Refresh OAuth token for each new transcript."""
-    global oauth_token, llm_client
+    global oauth_token, llm_client, config
     
     # Get fresh token for each transcript
     new_token = get_oauth_token()
@@ -769,6 +770,7 @@ def sanitize_url_for_logging(url: str) -> str:
 
 def load_stage_4_content(nas_conn: SMBConnection) -> Dict[str, Any]:
     """Load Stage 4 validated content from NAS."""
+    global config
     
     try:
         input_path = config["stage_05_qa_pairing"]["input_data_path"]
@@ -1114,6 +1116,8 @@ def create_indexed_boundary_tools():
 
 def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     """Calculate cost based on token usage and configured rates."""
+    global config
+    
     prompt_cost_per_1k = config["stage_05_qa_pairing"]["llm_config"]["cost_per_1k_prompt_tokens"]
     completion_cost_per_1k = config["stage_05_qa_pairing"]["llm_config"]["cost_per_1k_completion_tokens"]
     
@@ -1136,7 +1140,7 @@ def make_indexed_boundary_decision(context_data: Dict,
     Make LLM decision for indexed boundary detection with improved error handling.
     Returns dict with decision type and details.
     """
-    global llm_client
+    global llm_client, config
     
     try:
         # IMPROVEMENT: Check token count before sending to LLM
@@ -1155,6 +1159,7 @@ def make_indexed_boundary_decision(context_data: Dict,
         # Retry logic for LLM calls with improved error handling
         max_retries = 3 
         retry_delay = 1  # seconds
+        decision = None  # Initialize decision variable to prevent NameError
         
         for attempt in range(1, max_retries + 1):
             try:
@@ -1291,7 +1296,7 @@ def make_indexed_boundary_decision(context_data: Dict,
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                         "function_name": function_name,
-                        "has_tool_calls": bool(response.choices[0].message.tool_calls) if response.choices else False,
+                        "has_tool_calls": bool(getattr(response, 'choices', [{}])[0].message.tool_calls if hasattr(response, 'choices') and response.choices else False),
                         "attempt": attempt,
                         "qa_id": current_qa_id
                     }
@@ -1354,7 +1359,10 @@ def make_indexed_boundary_decision(context_data: Dict,
                     time.sleep(retry_delay)
         
         # Should never reach here, but safety fallback
-        return None
+        if decision is None:
+            log_error(f"Decision variable remained None for QA ID {current_qa_id}", "boundary_detection", {})
+            enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, "Decision variable was None after all retry attempts")
+        return decision
         
     except Exception as e:
         error_msg = f"Context preparation failed for QA ID {current_qa_id}: {type(e).__name__}"
@@ -1376,6 +1384,8 @@ def process_qa_boundaries_indexed(speaker_blocks: List[Dict],
     3. Explicit block assignment tracking (no range-based assignments)
     4. Improved error handling and fallback strategies
     """
+    global config
+    
     try:
         # Filter to only Q&A sections
         qa_speaker_blocks = [block for block in speaker_blocks 
