@@ -1144,7 +1144,11 @@ def make_indexed_boundary_decision(context_data: Dict,
     # FIX: Properly declare global variables at function start
     global llm_client, config
     
-    # DIAGNOSTIC: Check if global variables are accessible - simplified validation
+    # DIAGNOSTIC: Let NameError bubble up naturally - don't hide it
+    # Just directly access the globals - if there's a NameError, it will show the real cause
+    print(f"DEBUG: About to access llm_client: {type(llm_client)}")
+    print(f"DEBUG: About to access config: {type(config)}")
+    
     if llm_client is None:
         log_error(f"CRITICAL: llm_client is None in make_indexed_boundary_decision - cannot make API calls", "boundary_detection", {"qa_id": current_qa_id})
         enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, "LLM client is None - OAuth or setup failed")
