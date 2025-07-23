@@ -1211,6 +1211,8 @@ def make_indexed_boundary_decision(context_data: Dict,
                         continue
                 
                 # Extract decision with robust validation
+                tool_call = None
+                function_name = "unknown"
                 try:
                     tool_call = response.choices[0].message.tool_calls[0]
                     function_name = tool_call.function.name
@@ -1288,14 +1290,14 @@ def make_indexed_boundary_decision(context_data: Dict,
                     error_details = {
                         "error_type": type(e).__name__,
                         "error_message": str(e),
-                        "function_name": tool_call.function.name if 'tool_call' in locals() else "unknown",
-                        "has_tool_calls": bool(response.choices[0].message.tool_calls),
+                        "function_name": function_name,
+                        "has_tool_calls": bool(response.choices[0].message.tool_calls) if response.choices else False,
                         "attempt": attempt,
                         "qa_id": current_qa_id
                     }
                     
                     # Log the raw arguments for debugging (sanitized)
-                    if 'tool_call' in locals() and hasattr(tool_call, 'function'):
+                    if tool_call and hasattr(tool_call, 'function'):
                         raw_args = tool_call.function.arguments[:200] + "..." if len(tool_call.function.arguments) > 200 else tool_call.function.arguments
                         error_details["raw_arguments_preview"] = raw_args
                     
