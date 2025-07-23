@@ -369,7 +369,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
         "dev_mode",
         "dev_max_transcripts",
         "llm_config",
-        "window_config"
+        "state_config"
     ]
 
     for param in required_stage_05_qa_pairing_params:
@@ -392,14 +392,14 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             log_error(error_msg, "config_validation", {"missing_parameter": f"llm_config.{param}"})
             raise ValueError(error_msg)
 
-    # Validate window config structure
-    window_config = stage_05_qa_pairing_config["window_config"]
-    required_window_params = ["context_blocks_before", "context_blocks_after"]
+    # Validate state config structure
+    state_config = stage_05_qa_pairing_config["state_config"]
+    required_state_params = ["lookahead_blocks", "default_decision"]
 
-    for param in required_window_params:
-        if param not in window_config:
-            error_msg = f"Missing required window config parameter: {param}"
-            log_error(error_msg, "config_validation", {"missing_parameter": f"window_config.{param}"})
+    for param in required_state_params:
+        if param not in state_config:
+            error_msg = f"Missing required state config parameter: {param}"
+            log_error(error_msg, "config_validation", {"missing_parameter": f"state_config.{param}"})
             raise ValueError(error_msg)
 
     # Validate monitored institutions
@@ -411,7 +411,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     log_execution("Configuration validation successful", {
         "total_institutions": len(config["monitored_institutions"]),
         "llm_model": llm_config["model"],
-        "window_config": window_config
+        "state_config": state_config
     })
 
 
@@ -796,185 +796,187 @@ def group_records_by_speaker_block(records: List[Dict]) -> List[Dict]:
 # This is a simplified version - the full implementation would include all the
 # LLM boundary detection, speaker block analysis, etc. from the original
 
-def create_speaker_block_window(current_block_index: int, 
-                               speaker_blocks: List[Dict],
-                               qa_state: Dict = None) -> List[Dict]:
+def create_analyst_session_context(qa_speaker_blocks: List[Dict], 
+                                  current_block_index: int,
+                                  qa_start_index: int,
+                                  transcript_metadata: Dict) -> Dict:
     """
-    Create optimized context window for Q&A boundary detection.
+    Create focused context window for analyst session boundary detection.
     
-    Expands window strategically to capture complete question-answer exchanges.
+    Returns structured context with:
+    1. All previous speaker blocks of current QA ID (in full)
+    2. Current speaker block being examined
+    3. Next 4 speaker blocks as lookahead context
     """
-    window_config = config["stage_05_qa_pairing"]["window_config"]
-    base_context_before = window_config["context_blocks_before"]
-    base_context_after = window_config["context_blocks_after"]
+    current_block = qa_speaker_blocks[current_block_index]
     
-    # For active Q&A groups, expand context to see full exchange
-    if qa_state and qa_state.get("group_active"):
-        question_start_index = qa_state.get("question_start_index", 0)
-        # Always include from question start for better context
-        start_index = max(0, question_start_index - 1)  # Include one block before question start
-        
-        # Expand forward context to see potential exchange continuation
-        context_after = base_context_after + 1  # Look ahead for exchange completion
-    else:
-        # Standard window for new exchange detection
-        start_index = max(0, current_block_index - base_context_before)
-        context_after = base_context_after
+    # 1. All previous blocks of current QA ID (from qa_start_index to current_block_index - 1)
+    previous_blocks = qa_speaker_blocks[qa_start_index:current_block_index]
     
-    end_index = min(len(speaker_blocks), current_block_index + context_after + 1)
+    # 2. Next blocks for lookahead context (configurable)
+    lookahead_count = config["stage_05_qa_pairing"]["state_config"]["lookahead_blocks"]
+    next_blocks = qa_speaker_blocks[current_block_index + 1:current_block_index + 1 + lookahead_count]
     
-    return speaker_blocks[start_index:end_index]
+    return {
+        "transcript_metadata": transcript_metadata,
+        "previous_qa_blocks": previous_blocks,
+        "current_block": current_block,
+        "next_blocks": next_blocks,
+        "current_block_index": current_block_index,
+        "qa_start_index": qa_start_index
+    }
 
 
-def format_speaker_block_context(window_blocks: List[Dict], current_block_index: int) -> str:
+def format_analyst_session_context(context_data: Dict) -> str:
     """
-    Format speaker blocks with enhanced focus on Q&A exchange flow.
+    Format structured context for analyst session boundary detection.
+    Creates numbered speaker blocks with full content for LLM analysis.
     """
     context_sections = []
-    current_block_id = window_blocks[current_block_index]["speaker_block_id"]
+    block_counter = 1
     
-    # 1. CONVERSATION HISTORY
-    prior_blocks = [b for b in window_blocks if b["speaker_block_id"] < current_block_id]
-    if prior_blocks:
-        context_sections.append("=== CONVERSATION HISTORY ===")
-        for block in prior_blocks:
-            context_sections.append(format_single_speaker_block(block))
+    # Company and transcript context
+    transcript_metadata = context_data.get("transcript_metadata", {})
+    company_name = transcript_metadata.get("company_name", "Unknown Company")
+    transcript_title = transcript_metadata.get("transcript_title", "Earnings Call Transcript")
     
-    # 2. CURRENT DECISION POINT
-    current_block = next(b for b in window_blocks if b["speaker_block_id"] == current_block_id)
-    context_sections.append("=== 🎯 DECISION POINT: CURRENT SPEAKER BLOCK ===")
-    context_sections.append("**MAKE BOUNDARY DECISION FOR THIS BLOCK:**")
-    context_sections.append(format_single_speaker_block(current_block))
+    context_sections.append(f"<company>{company_name}</company>")
+    context_sections.append(f"<transcript_title>{transcript_title}</transcript_title>")
+    context_sections.append("")
     
-    # 3. UPCOMING SPEAKERS (for context)
-    future_blocks = [b for b in window_blocks if b["speaker_block_id"] > current_block_id]
-    if future_blocks:
-        context_sections.append("=== UPCOMING SPEAKERS (for context) ===")
-        for block in future_blocks:
-            context_sections.append(format_single_speaker_block(block))
+    # 1. Previous blocks of current QA ID (if any)
+    previous_blocks = context_data.get("previous_qa_blocks", [])
+    if previous_blocks:
+        context_sections.append("<previous_qa_blocks>")
+        context_sections.append("All previous speaker blocks of the current analyst session:")
+        for block in previous_blocks:
+            context_sections.append(format_numbered_speaker_block(block, block_counter))
+            block_counter += 1
+        context_sections.append("</previous_qa_blocks>")
+        context_sections.append("")
     
-    return "\n\n".join(context_sections)
+    # 2. Current block being examined
+    current_block = context_data["current_block"]
+    context_sections.append("<current_decision_block>")
+    context_sections.append("🎯 CURRENT BLOCK - Make decision for this block:")
+    context_sections.append(format_numbered_speaker_block(current_block, block_counter))
+    context_sections.append("</current_decision_block>")
+    block_counter += 1
+    context_sections.append("")
+    
+    # 3. Next blocks for lookahead context (configurable count)
+    next_blocks = context_data.get("next_blocks", [])
+    if next_blocks:
+        context_sections.append("<lookahead_context>")
+        context_sections.append("Next speaker blocks for context (to help determine boundaries):")
+        for block in next_blocks:
+            context_sections.append(format_numbered_speaker_block(block, block_counter))
+            block_counter += 1
+        context_sections.append("</lookahead_context>")
+    
+    return "\n".join(context_sections)
 
 
-def format_single_speaker_block(block: Dict) -> str:
-    """Format a single speaker block using actual speaker information from the data."""
+def format_numbered_speaker_block(block: Dict, block_number: int) -> str:
+    """Format a speaker block with clear numbering and full content for LLM analysis."""
     paragraphs_text = []
     
     for para in block["paragraphs"]:
-        # Clean formatting with clear paragraph separation
+        # Include full paragraph content without modification
         content = para['paragraph_content'].strip()
-        paragraphs_text.append(f"    • {content}")
+        paragraphs_text.append(content)
     
     # Use the actual speaker field as provided in the data
     speaker = block['speaker']
     
-    return f"""
-SPEAKER BLOCK {block['speaker_block_id']}:
-  Speaker: {speaker}
-  Content:
-{chr(10).join(paragraphs_text)}"""
-
-
-def create_qa_boundary_prompt(formatted_context: str, current_block_id: int, qa_state: Dict = None) -> str:
-    """
-    Create focused prompt for Q&A boundary detection: analyst questions → complete executive responses.
-    """
-    # Extract state information
-    current_group_active = qa_state.get("group_active", False) if qa_state else False
-    current_group_id = qa_state.get("current_qa_group_id") if qa_state else None
+    # Join paragraphs with clear separation
+    full_content = "\n".join(paragraphs_text)
     
-    # Determine current objective
-    if current_group_active:
-        objective = f"Determine if current block CONTINUES or ENDS Q&A group {current_group_id}"
-        your_options = "CONTINUE (same Q&A exchange) or END (Q&A exchange complete)"
-    else:
-        objective = "Determine if current block STARTS a new Q&A exchange"  
-        your_options = "START (analyst begins question) or STANDALONE (operator/filler)"
-    
-    return f"""**PURPOSE**: Group sequential Q&A exchanges where analyst questions get complete executive responses.
+    return f"""Speaker Block {block_number}:
+Speaker: {speaker}
+Content: {full_content}"""
 
-**CURRENT STATE**: Group {"ACTIVE" if current_group_active else "INACTIVE"} | Group ID: {current_group_id or "None"}
-**YOUR TASK**: {objective}
-**YOUR OPTIONS**: {your_options}
+
+def create_analyst_session_prompt(formatted_context: str, current_qa_id: int) -> str:
+    """
+    Create research-backed system prompt for analyst session boundary detection using XML structure.
+    Based on Anthropic 2024 best practices for Claude prompting.
+    """
+    return f"""<task>
+You are analyzing an earnings call Q&A transcript to determine when analyst sessions end. Each analyst session (QA ID) captures one analyst's complete interaction from start to finish.
+</task>
+
+<context>
+You are examining Speaker Block in position "🎯 CURRENT BLOCK" within the transcript context below. This block is currently part of QA ID {current_qa_id}.
+</context>
+
+<objective>
+Determine whether the current speaker block should CONTINUE the current analyst session (QA ID {current_qa_id}) or END it.
+
+When you choose END:
+- The current block becomes the final block of QA ID {current_qa_id}
+- The very next speaker block will automatically start QA ID {current_qa_id + 1}
+</objective>
+
+<instructions>
+Analyze the conversation flow to identify when one analyst's complete session ends and a new analyst's session should begin.
+
+<decision_criteria>
+CONTINUE if:
+- Same analyst is still speaking/asking follow-up questions
+- Executive is still responding to the current analyst's questions
+- There's ongoing back-and-forth between current analyst and executives
+- Operator comments are brief transitions within the same analyst session
+
+END if:
+- Current analyst's questions are completely answered
+- Next speaker block clearly introduces a NEW analyst
+- Operator transitions to "next question from [different analyst]"
+- Current exchange has naturally concluded before new topic/analyst
+</decision_criteria>
+
+<key_principles>
+1. **Analyst Session Focus**: Each QA ID represents ONE analyst's complete interaction
+2. **Sequential Order**: Analysts take turns - one finishes completely before next begins  
+3. **Content Over Names**: Focus on conversation patterns, not just speaker names
+4. **Operator Integration**: Operators introducing new analysts signal session transitions
+5. **Complete Exchanges**: Ensure current analyst's questions are fully addressed before ending
+</key_principles>
+
+<critical_reminder>
+Review the lookahead context carefully. When you choose END:
+- Verify the current block truly concludes the analyst's session
+- Verify the next block appropriately starts a new analyst's session
+- Remember that operators often introduce new analysts with phrases like "next question from..."
+</critical_reminder>
+</instructions>
 
 {formatted_context}
 
-**CORE LOGIC** (Priority Order):
-
-1. **OPERATORS/MODERATORS** → Always STANDALONE (ignore call management)
-   - Content like: "Next question comes from...", "Our next caller is...", "Thank you, next question..."
-
-2. **Q&A GROUP STARTS** → When someone begins asking a question:
-   - Question content: "Can you walk us through...", "What's your outlook on...", "My question is about..."
-   - Multiple speakers can contribute to same question
-   - START even if operator transitions occurred just before
-
-3. **Q&A GROUP CONTINUES** → When the same exchange is ongoing:
-   - Response content: "Absolutely. Let me break this down...", "To answer your question..."
-   - Follow-up content: "And also...", "Just to clarify...", "Let me add to that..."
-   - Multiple speakers can contribute to same response
-   - Same exchange continues until fully answered
-
-4. **Q&A GROUP ENDS** → When the exchange is complete:
-   - Response concludes AND next speaker starts different question
-   - Response concludes AND operator transitions to next question
-   - Brief closing: "Thank you", "Got it", "That's helpful"
-
-**EXAMPLES**:
-- Block 10: "Could you provide more color on margins?" → START (question begins)
-- Block 11: "Absolutely. Let me break this down..." → CONTINUE (response begins)  
-- Block 12: "First quarter margins expanded 200bp..." → CONTINUE (response continues)
-- Block 13: "And we expect this trend to persist..." → CONTINUE (response continues)
-- Block 14: "Thank you" → END (question fully answered)
-- Block 15: "Next question comes from John at Bank ABC..." → STANDALONE (ignore operator)
-- Block 16: "My question is about revenue guidance..." → START (new question)
-
-**KEY INSIGHT**: Each Q&A group = ONE complete question-answer cycle. Focus on CONTENT patterns, not speaker titles."""
+<output_format>
+Make your decision by calling the boundary_decision function with either "continue" or "end".
+</output_format>"""
 
 
-def create_qa_boundary_detection_tools(qa_state: Dict = None):
-    """Create focused function calling tools for Q&A boundary detection."""
-    
-    # Extract state information
-    current_group_active = qa_state.get("group_active", False) if qa_state else False
-    current_group_id = qa_state.get("current_qa_group_id") if qa_state else None
-    
-    # Create dynamic enum and description based on current state
-    if current_group_active:
-        status_enum = ["group_continue", "group_end", "standalone"]
-        description = f"Q&A Group {current_group_id} is ACTIVE. Decide: CONTINUE (same exchange), END (exchange complete), or STANDALONE (operator)"
-    else:
-        status_enum = ["group_start", "standalone"]
-        description = "No active Q&A group. Decide: START (analyst begins question) or STANDALONE (operator/filler)"
+def create_analyst_session_boundary_tool():
+    """Create simplified function calling tool for analyst session boundary detection."""
     
     return [
         {
-            "type": "function",
+            "type": "function",  
             "function": {
-                "name": "determine_qa_group_boundary",
-                "description": description,
+                "name": "boundary_decision",
+                "description": "Decide whether the current speaker block continues or ends the current analyst session",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "qa_group_decision": {
-                            "type": "object",
-                            "properties": {
-                                "current_block_id": {"type": "integer"},
-                                "group_status": {
-                                    "type": "string",
-                                    "enum": status_enum
-                                },
-                                "confidence_score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                                "reasoning": {
-                                    "type": "string", 
-                                    "maxLength": 150,
-                                    "description": "Concise reasoning focusing on: speaker role, question/answer pattern, exchange status"
-                                }
-                            },
-                            "required": ["current_block_id", "group_status", "confidence_score", "reasoning"]
+                        "decision": {
+                            "type": "string",
+                            "enum": ["continue", "end"],
+                            "description": "continue: Current speaker block continues the current analyst session. end: Current speaker block ends the current analyst session and next block starts new session."
                         }
                     },
-                    "required": ["qa_group_decision"]
+                    "required": ["decision"]
                 }
             }
         }
@@ -997,270 +999,127 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     }
 
 
-def is_operator_block(speaker_block: Dict) -> bool:
-    """
-    Detect if a speaker block contains operator/moderator content that should be excluded from Q&A assignments.
-    Focuses on content patterns rather than speaker name inference.
-    """
-    # Get all content from the speaker block
-    all_content = ""
-    for para in speaker_block.get("paragraphs", []):
-        content = para.get("paragraph_content", "")
-        all_content += " " + content.lower()
-    
-    # Operator/moderator content patterns - these indicate call management rather than Q&A content
-    operator_content_patterns = [
-        "next question", "our next question", "next caller", "next participant",
-        "question comes from", "question is from", "caller is from",
-        "please hold", "please stand by", "one moment please",
-        "we have no further questions", "no more questions", "end of q&a",
-        "concludes our question", "concludes the q&a", "end of our q&a",
-        "thank you for joining", "this concludes", "that concludes",
-        "we will now take", "we'll take the next"
-    ]
-    
-    # If content contains operator patterns, mark as operator
-    for pattern in operator_content_patterns:
-        if pattern in all_content:
-            return True
-    
-    # Special case: "thank you" + transition patterns indicate operator
-    if "thank you" in all_content and any(transition in all_content for transition in ["next question", "next caller", "question comes from", "question is from"]):
-        return True
-    
-    return False
+# Removed old validation and state management functions - replaced with simplified state-based approach
 
 
-def assign_group_id_to_decision(decision: Dict, qa_state: Dict, current_block_id: int) -> Dict:
+def make_qa_boundary_decision(context_data: Dict,
+                            current_block_id: int,
+                            current_qa_id: int,
+                            transcript_id: str,
+                            enhanced_error_logger: EnhancedErrorLogger) -> Optional[str]:
     """
-    Automatically assign appropriate group ID based on decision status and current state.
-    """
-    status = decision.get("group_status")
-    current_group_active = qa_state.get("group_active", False)
-    current_group_id = qa_state.get("current_qa_group_id")
-    next_group_id = qa_state.get("next_group_id", 1)
-    
-    # Create enhanced decision with proper group ID
-    enhanced_decision = decision.copy()
-    
-    if status == "group_start":
-        # Assign next available group ID
-        enhanced_decision["qa_group_id"] = next_group_id
-        qa_state["next_group_id"] = next_group_id + 1
-        qa_state["assigned_group_ids"].add(next_group_id)
-        
-    elif status in ["group_continue", "group_end"]:
-        # Use current active group ID
-        if current_group_active and current_group_id:
-            enhanced_decision["qa_group_id"] = current_group_id
-        else:
-            # This shouldn't happen with proper validation, but handle gracefully
-            enhanced_decision["qa_group_id"] = None
-            
-    elif status == "standalone":
-        # Operator/non-Q&A blocks get null ID
-        enhanced_decision["qa_group_id"] = None
-    
-    return enhanced_decision
-
-
-def validate_llm_decision(decision: Dict, qa_state: Dict, current_block_id: int) -> str:
-    """
-    Validate LLM decision against current state. Returns error message if invalid, None if valid.
-    Note: We no longer validate group IDs since they're auto-assigned.
-    """
-    current_group_active = qa_state.get("group_active", False)
-    status = decision.get("group_status")
-    
-    # Validate status based on current state
-    if current_group_active:
-        # Active group: can only continue, end, or standalone
-        if status not in ["group_continue", "group_end", "standalone"]:
-            return f"Invalid status '{status}' for active group state"
-    else:
-        # No active group: can only start or standalone
-        if status not in ["group_start", "standalone"]:
-            return f"Invalid status '{status}' for no active group state"
-    
-    return None  # Valid decision
-
-
-def analyze_speaker_block_boundary(current_block_index: int, 
-                                 speaker_blocks: List[Dict],
-                                 transcript_id: str,
-                                 qa_state: Dict = None,
-                                 enhanced_error_logger: EnhancedErrorLogger = None) -> Optional[Dict]:
-    """
-    Analyze a single speaker block for Q&A boundary decisions using LLM with retry logic.
-    Handles operator blocks with special exclusion logic.
+    Make simplified LLM decision for analyst session boundary detection.
+    Returns "continue" or "end" based on context analysis.
     """
     global llm_client
     
-    current_block = speaker_blocks[current_block_index]
-    current_block_id = current_block["speaker_block_id"]
-    
-    # Check if this is an operator/moderator block - exclude from Q&A assignments
-    if is_operator_block(current_block):
-        log_execution(f"Block {current_block_id} identified as operator/moderator block - excluding from Q&A groups")
-        return {
-            "current_block_id": current_block_id,
-            "qa_group_id": None,  # No Q&A group assignment
-            "qa_group_start_block": None,
-            "qa_group_end_block": None,
-            "group_status": "standalone",  # Operator blocks are standalone
-            "confidence_score": 1.0,  # High confidence in operator detection
-            "reasoning": f"Operator/moderator content detected - excluded from Q&A assignments"
-        }
-    
-    # Prepare LLM analysis context (done once, reused for retries)
-    window_blocks = create_speaker_block_window(current_block_index, speaker_blocks, qa_state)
-    formatted_context = format_speaker_block_context(window_blocks, 
-                                                   next(i for i, b in enumerate(window_blocks) 
-                                                       if b["speaker_block_id"] == current_block_id))
-    prompt = create_qa_boundary_prompt(formatted_context, current_block_id, qa_state)
-    
-    # Retry logic for LLM calls
-    max_retries = 3
-    retry_delay = 1  # seconds
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            log_execution(f"Block {current_block_id} LLM analysis attempt {attempt}/{max_retries}")
-            
-            # Make LLM API call with dynamic tools
-            response = llm_client.chat.completions.create(
-                model=config["stage_05_qa_pairing"]["llm_config"]["model"],
-                messages=[{"role": "user", "content": prompt}],
-                tools=create_qa_boundary_detection_tools(qa_state),
-                tool_choice="required",
-                temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
-                max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
-            )
-            
-            # Parse and validate response
-            if not response.choices[0].message.tool_calls:
-                error_msg = f"No tool call response for block {current_block_id}"
-                if attempt == max_retries:
-                    log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
-                    enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
-                    return None
-                else:
-                    log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    continue
-            
-            # Parse JSON response
-            try:
-                tool_call = response.choices[0].message.tool_calls[0]
-                result = json.loads(tool_call.function.arguments)
-                decision = result["qa_group_decision"]
-            except (json.JSONDecodeError, KeyError) as e:
-                error_msg = f"Failed to parse LLM response for block {current_block_id}: {e}"
-                if attempt == max_retries:
-                    log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
-                    enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
-                    return None
-                else:
-                    log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    continue
-            
-            # Validate decision against current state
-            validation_error = validate_llm_decision(decision, qa_state, current_block_id)
-            if validation_error:
-                error_msg = f"Invalid LLM decision for block {current_block_id}: {validation_error}"
-                if attempt == max_retries:
-                    log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
-                    enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
-                    return None
-                else:
-                    log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    continue
-            
-            # Success! Process the valid decision
-            # Automatically assign appropriate group ID
-            decision = assign_group_id_to_decision(decision, qa_state, current_block_id)
-            
-            # Log token usage and cost
-            if hasattr(response, 'usage') and response.usage:
-                cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
-                token_usage = {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                    "cost": cost_info
-                }
-                log_execution(f"Block {current_block_id} tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}, cost: ${cost_info['total_cost']:.4f}")
-                
-                # Accumulate costs for final summary
-                enhanced_error_logger.accumulate_costs(token_usage)
-            
-            # Log successful decision (include attempt number if retried)
-            attempt_info = f" (attempt {attempt})" if attempt > 1 else ""
-            log_execution(f"Block {current_block_id} boundary decision{attempt_info}: {decision['group_status']} (group: {decision.get('qa_group_id')}, confidence: {decision['confidence_score']:.2f}) | Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
-            
-            return decision
-            
-        except Exception as e:
-            error_msg = f"LLM boundary analysis failed for block {current_block_id}: {e}"
-            if attempt == max_retries:
-                log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
-                enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
-                return None
-            else:
-                log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
-                time.sleep(retry_delay)
-    
-    # Should never reach here, but safety fallback
-    return None
-
-
-def calculate_qa_group_confidence(block_decisions: List[Dict]) -> float:
-    """
-    Calculate aggregated confidence for Q&A group spanning multiple blocks.
-    
-    Strategy: Use weighted average based on decision criticality
-    - Group start/end decisions: Higher weight (0.4 each)
-    - Group continuation decisions: Lower weight (0.2 / num_continuations)
-    """
-    if len(block_decisions) == 1:
-        return block_decisions[0]["confidence_score"]
-    
-    weighted_confidence = 0.0
-    total_weight = 0.0
-    
-    continuation_count = len([d for d in block_decisions if d["group_status"] == "group_continue"])
-    
-    for decision in block_decisions:
-        if decision["group_status"] in ["group_start", "group_end"]:
-            weight = 0.4  # Critical boundary decisions
-        else:
-            weight = 0.2 / max(1, continuation_count)  # Distribute continuation weight
+    try:
+        # Format context for LLM analysis
+        formatted_context = format_analyst_session_context(context_data)
+        prompt = create_analyst_session_prompt(formatted_context, current_qa_id)
         
-        weighted_confidence += decision["confidence_score"] * weight
-        total_weight += weight
-    
-    return round(weighted_confidence / total_weight, 3)
+        # Retry logic for LLM calls
+        max_retries = 3 
+        retry_delay = 1  # seconds
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                log_execution(f"Block {current_block_id} LLM analysis attempt {attempt}/{max_retries}")
+                
+                # Make LLM API call
+                response = llm_client.chat.completions.create(
+                    model=config["stage_05_qa_pairing"]["llm_config"]["model"],
+                    messages=[{"role": "user", "content": prompt}],
+                    tools=create_analyst_session_boundary_tool(),
+                    tool_choice="required", 
+                    temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
+                    max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
+                )
+                
+                # Parse response
+                if not response.choices[0].message.tool_calls:
+                    error_msg = f"No tool call response for block {current_block_id}"
+                    if attempt == max_retries:
+                        log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
+                        enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                        return None
+                    else:
+                        log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        continue
+                
+                # Extract decision
+                try:
+                    tool_call = response.choices[0].message.tool_calls[0]
+                    result = json.loads(tool_call.function.arguments)
+                    decision = result["decision"]
+                    
+                    if decision not in ["continue", "end"]:
+                        raise ValueError(f"Invalid decision: {decision}")
+                        
+                except (json.JSONDecodeError, KeyError, ValueError) as e:
+                    error_msg = f"Failed to parse LLM response for block {current_block_id}: {e}"
+                    if attempt == max_retries:
+                        log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
+                        enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                        return None
+                    else:
+                        log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        continue
+                
+                # Log token usage and cost
+                if hasattr(response, 'usage') and response.usage:
+                    cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
+                    token_usage = {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens,
+                        "cost": cost_info
+                    }
+                    log_execution(f"Block {current_block_id} tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}, cost: ${cost_info['total_cost']:.4f}")
+                    
+                    # Accumulate costs for final summary
+                    enhanced_error_logger.accumulate_costs(token_usage)
+                
+                # Log successful decision
+                attempt_info = f" (attempt {attempt})" if attempt > 1 else ""
+                log_execution(f"Block {current_block_id} decision{attempt_info}: {decision} for QA ID {current_qa_id}")
+                
+                return decision
+                
+            except Exception as e:
+                error_msg = f"LLM analysis failed for block {current_block_id}: {e}"
+                if attempt == max_retries:
+                    log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
+                    enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                    return None
+                else:
+                    log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+        
+        # Should never reach here, but safety fallback
+        return None
+        
+    except Exception as e:
+        error_msg = f"Context preparation failed for block {current_block_id}: {e}"
+        log_error(error_msg, "boundary_detection", {})
+        enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, error_msg)
+        return None
 
 
-def determine_qa_group_method(block_decisions: List[Dict]) -> str:
-    """Determine method based on decision quality and confidence."""
-    avg_confidence = calculate_qa_group_confidence(block_decisions)
-    
-    if avg_confidence >= 0.8:
-        return "llm_detection_high_confidence"
-    elif avg_confidence >= 0.6:
-        return "llm_detection_medium_confidence"
-    else:
-        return "llm_detection_low_confidence"
+# Removed old confidence calculation functions - replaced with state-based approach
 
 
 
 
-def process_qa_boundaries_llm_only(speaker_blocks: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
+def process_qa_boundaries_state_based(speaker_blocks: List[Dict], transcript_id: str, transcript_metadata: Dict, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
     """
-    Q&A boundary processing using LLM detection only - no fallbacks.
+    State-based Q&A boundary processing focused on analyst sessions.
+    
+    State 1: Auto-assign first block to QA ID 1
+    State 2: LLM decides continue vs end current QA ID  
+    State 3: Auto-assign next block to next QA ID, return to State 2
     """
     try:
         # Filter to only Q&A sections
@@ -1271,128 +1130,201 @@ def process_qa_boundaries_llm_only(speaker_blocks: List[Dict], transcript_id: st
             log_execution(f"No Q&A sections found in transcript {transcript_id}")
             return []
         
-        log_execution(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks")
+        log_execution(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks using state-based approach")
         
-        # Process each speaker block for boundary decisions with enhanced state tracking
-        all_decisions = []
+        # Initialize state machine
         qa_state = {
-            "current_qa_group_id": None,
-            "group_active": False,
-            "last_decision_status": None,
-            "last_block_id": None,
-            "question_start_index": None,
-            "extends_question_start": False,
-            "next_group_id": 1,  # Auto-increment group ID counter
-            "assigned_group_ids": set()  # Track used IDs for validation
+            "current_qa_id": 1,
+            "current_qa_start_index": 0,  # Index where current QA ID started
+            "state": "auto_assign_start",  # States: auto_assign_start, llm_decision, auto_assign_next
+            "all_decisions": []
         }
         
-        for i, block in enumerate(qa_speaker_blocks):
-            # Add look-ahead context for better end decisions
-            next_block = qa_speaker_blocks[i + 1] if i + 1 < len(qa_speaker_blocks) else None
-            qa_state["next_block"] = next_block
-            qa_state["current_block_index"] = i
+        # State 1: Auto-assign first block
+        first_block = qa_speaker_blocks[0]
+        first_decision = {
+            "current_block_id": first_block["speaker_block_id"],
+            "qa_group_id": qa_state["current_qa_id"],
+            "decision_type": "auto_assigned_start",
+            "state": "auto_assign_start"
+        }
+        qa_state["all_decisions"].append(first_decision)
+        log_execution(f"State 1: Auto-assigned block {first_block['speaker_block_id']} to QA ID {qa_state['current_qa_id']}")
+        
+        # Process remaining blocks using while loop to handle skipped iterations
+        i = 1
+        while i < len(qa_speaker_blocks):
+            current_block = qa_speaker_blocks[i]
+            current_block_id = current_block["speaker_block_id"]
             
-            decision = analyze_speaker_block_boundary(i, qa_speaker_blocks, transcript_id, qa_state, enhanced_error_logger)
+            # State 2: LLM Decision (continue vs end current QA ID)
+            qa_state["state"] = "llm_decision"
             
-            if decision:
-                all_decisions.append(decision)
+            # Create focused context window for LLM
+            context_data = create_analyst_session_context(
+                qa_speaker_blocks, 
+                i, 
+                qa_state["current_qa_start_index"],
+                transcript_metadata
+            )
+            
+            # Make LLM decision
+            llm_decision = make_qa_boundary_decision(
+                context_data, 
+                current_block_id, 
+                qa_state["current_qa_id"],
+                transcript_id,
+                enhanced_error_logger
+            )
+            
+            if llm_decision == "continue":
+                # Continue current QA ID
+                decision = {
+                    "current_block_id": current_block_id,
+                    "qa_group_id": qa_state["current_qa_id"],
+                    "decision_type": "llm_continue",
+                    "state": "llm_decision"
+                }
+                qa_state["all_decisions"].append(decision)
+                log_execution(f"State 2: Block {current_block_id} continues QA ID {qa_state['current_qa_id']}")
+                i += 1  # Move to next block
                 
-                # Update comprehensive QA state tracking
-                block_id = decision["current_block_id"]
-                status = decision["group_status"]
-                group_id = decision.get("qa_group_id")
+            elif llm_decision == "end":
+                # End current QA ID and auto-assign next block to next QA ID
                 
-                # Real-time state validation and updates
-                if status == "group_start":
-                    # Validate: can't start if group already active
-                    if qa_state["group_active"]:
-                        log_error(f"Block {block_id}: Cannot start group {group_id} - group {qa_state['current_qa_group_id']} already active", "boundary_detection", {})
-                        # Force end previous group first
-                        qa_state["group_active"] = False
-                        log_execution(f"Block {block_id}: Force-ended previous group {qa_state['current_qa_group_id']}")
-                    
-                    qa_state["current_qa_group_id"] = group_id
-                    qa_state["group_active"] = True
-                    qa_state["question_start_index"] = i
-                    qa_state["extends_question_start"] = True
-                    log_execution(f"Block {block_id}: Started Q&A group {group_id}")
-                    
-                elif status == "group_continue":
-                    # Validate: must have active group
-                    if not qa_state["group_active"]:
-                        log_error(f"Block {block_id}: Cannot continue group {group_id} - no active group", "boundary_detection", {})
-                        # Convert to group start
-                        qa_state["current_qa_group_id"] = group_id
-                        qa_state["group_active"] = True
-                        log_execution(f"Block {block_id}: Converted continue to start for group {group_id}")
-                    elif qa_state["current_qa_group_id"] != group_id:
-                        log_error(f"Block {block_id}: Group ID mismatch - continuing {group_id} but active is {qa_state['current_qa_group_id']}", "boundary_detection", {})
-                    
-                elif status == "group_end":
-                    # Validate: must have active group to end
-                    if not qa_state["group_active"]:
-                        log_execution(f"Block {block_id}: Cannot end group {group_id} - no active group")
-                    elif qa_state["current_qa_group_id"] != group_id:
-                        log_execution(f"Block {block_id}: Ending group {group_id} but active is {qa_state['current_qa_group_id']}")
-                    
-                    qa_state["group_active"] = False
-                    qa_state["extends_question_start"] = False
-                    log_execution(f"Block {block_id}: Ended Q&A group {group_id}")
-                    
-                elif status == "standalone":
-                    # Operator blocks don't change group state
-                    log_execution(f"Block {block_id}: Standalone block (operator/non-Q&A)")
+                # First, add the current block as the end of current QA ID
+                end_decision = {
+                    "current_block_id": current_block_id,
+                    "qa_group_id": qa_state["current_qa_id"],
+                    "decision_type": "llm_end",
+                    "state": "llm_decision"
+                }
+                qa_state["all_decisions"].append(end_decision)
+                log_execution(f"State 2: Block {current_block_id} ends QA ID {qa_state['current_qa_id']}")
                 
-                # Update last decision tracking
-                qa_state["last_decision_status"] = status
-                qa_state["last_block_id"] = block_id
-                
+                # State 3: Auto-assign next block (if exists) to next QA ID
+                if i + 1 < len(qa_speaker_blocks):
+                    qa_state["current_qa_id"] += 1
+                    qa_state["current_qa_start_index"] = i + 1
+                    qa_state["state"] = "auto_assign_next"
+                    
+                    next_block = qa_speaker_blocks[i + 1]
+                    next_decision = {
+                        "current_block_id": next_block["speaker_block_id"],
+                        "qa_group_id": qa_state["current_qa_id"],
+                        "decision_type": "auto_assigned_next",
+                        "state": "auto_assign_next"
+                    }
+                    qa_state["all_decisions"].append(next_decision)
+                    log_execution(f"State 3: Auto-assigned block {next_block['speaker_block_id']} to QA ID {qa_state['current_qa_id']}")
+                    
+                    # Skip the next block since we've already processed it, move to i+2
+                    i += 2
+                else:
+                    # No more blocks, end processing
+                    i += 1
+                    
             else:
-                # LLM analysis failed - skip this block and continue
-                log_execution(f"LLM analysis failed for block {block['speaker_block_id']}, skipping block")
-                enhanced_error_logger.log_boundary_error(transcript_id, block['speaker_block_id'], "LLM analysis failed - block skipped")
+                # LLM decision failed - treat as continue to be conservative
+                log_execution(f"LLM decision failed for block {current_block_id}, defaulting to continue")
+                decision = {
+                    "current_block_id": current_block_id,
+                    "qa_group_id": qa_state["current_qa_id"],
+                    "decision_type": "default_continue",
+                    "state": "llm_decision_failed"
+                }
+                qa_state["all_decisions"].append(decision)
+                i += 1  # Move to next block
         
-        # Group decisions into Q&A groups
-        qa_groups = []
-        current_group_decisions = []
-        current_group_id = None
+        # Convert decisions to QA groups
+        qa_groups = convert_decisions_to_qa_groups(qa_state["all_decisions"])
         
-        for decision in all_decisions:
-            if decision["group_status"] == "group_start":
-                # Finalize previous group
-                if current_group_decisions:
-                    qa_groups.append(finalize_qa_group(current_group_decisions, qa_speaker_blocks))
-                
-                # Start new group
-                current_group_decisions = [decision]
-                current_group_id = decision["qa_group_id"]
-                
-            elif decision["group_status"] == "standalone":
-                # Skip standalone blocks (operators) - they don't belong to any group
-                continue
-                
-            elif decision["qa_group_id"] == current_group_id:
-                current_group_decisions.append(decision)
-            
-            else:
-                # Handle group ID mismatch (real issues only)
-                decision_group_id = decision.get("qa_group_id")
-                decision_status = decision.get("group_status")
-                log_execution(f"Group ID mismatch in decision sequence: decision has group {decision_group_id} (status: {decision_status}) but current group is {current_group_id}")
-                current_group_decisions.append(decision)
-        
-        # Finalize last group
-        if current_group_decisions:
-            qa_groups.append(finalize_qa_group(current_group_decisions, qa_speaker_blocks))
-        
-        log_execution(f"Successfully identified {len(qa_groups)} Q&A groups")
+        log_execution(f"Successfully identified {len(qa_groups)} Q&A groups using state-based approach")
         return qa_groups
         
     except Exception as e:
-        error_msg = f"Q&A boundary processing failed: {e}"
+        error_msg = f"State-based Q&A boundary processing failed: {e}"
         log_error(error_msg, "processing", {})
         enhanced_error_logger.log_processing_error(transcript_id, error_msg)
-        return []  # Return empty list - no fallback, LLM-only approach
+        return []
+
+
+def convert_decisions_to_qa_groups(all_decisions: List[Dict]) -> List[Dict]:
+    """Convert state machine decisions to QA groups for final output."""
+    qa_groups = []
+    current_group_decisions = []
+    current_qa_id = None
+    
+    for decision in all_decisions:
+        qa_id = decision["qa_group_id"]
+        
+        if qa_id != current_qa_id:
+            # Finalize previous group
+            if current_group_decisions:
+                qa_groups.append(create_qa_group_from_decisions(current_group_decisions))
+            
+            # Start new group
+            current_group_decisions = [decision]
+            current_qa_id = qa_id
+        else:
+            # Continue current group
+            current_group_decisions.append(decision)
+    
+    # Finalize last group
+    if current_group_decisions:
+        qa_groups.append(create_qa_group_from_decisions(current_group_decisions))
+    
+    return qa_groups
+
+
+def create_qa_group_from_decisions(decisions: List[Dict]) -> Dict:
+    """Create QA group object from list of decisions."""
+    block_ids = [d["current_block_id"] for d in decisions]
+    qa_id = decisions[0]["qa_group_id"]
+    
+    # Determine method based on decision types
+    decision_types = [d["decision_type"] for d in decisions]
+    if any("auto_assigned" in dt for dt in decision_types):
+        method = "state_based_auto_assignment"
+    else:
+        method = "state_based_llm_decision"
+    
+    return {
+        "qa_group_id": qa_id,
+        "start_block_id": min(block_ids),
+        "end_block_id": max(block_ids),
+        "confidence": 1.0,  # High confidence in state-based approach
+        "method": method,
+        "block_decisions": decisions
+    }
+
+
+def extract_transcript_metadata(transcript_records: List[Dict]) -> Dict:
+    """Extract company name and transcript title from records."""
+    if not transcript_records:
+        return {"company_name": "Unknown Company", "transcript_title": "Earnings Call Transcript"}
+    
+    # Try to extract from first record
+    first_record = transcript_records[0]
+    
+    # Extract company name (try multiple fields)
+    company_name = (
+        first_record.get("company_name") or 
+        first_record.get("ticker", "").replace("-", " ") or
+        "Unknown Company"
+    )
+    
+    # Extract transcript title (try multiple fields)
+    transcript_title = (
+        first_record.get("transcript_title") or
+        first_record.get("event_title") or
+        "Earnings Call Transcript"
+    )
+    
+    return {
+        "company_name": company_name,
+        "transcript_title": transcript_title
+    }
 
 
 def finalize_qa_group(group_decisions: List[Dict], speaker_blocks: List[Dict]) -> Dict:
@@ -1472,7 +1404,7 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
 
 def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> Tuple[List[Dict], int]:
     """
-    Process a single transcript for Q&A pairing with per-transcript OAuth refresh.
+    Process a single transcript for Q&A pairing using state-based approach with per-transcript OAuth refresh.
     """
     
     try:
@@ -1484,11 +1416,19 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
         
         log_execution(f"Processing Q&A pairing for transcript: {transcript_id}")
         
+        # Extract transcript metadata for context
+        transcript_metadata = extract_transcript_metadata(transcript_records)
+        
         # Group records by speaker blocks
         speaker_blocks = group_records_by_speaker_block(transcript_records)
         
-        # Process Q&A boundaries
-        qa_groups = process_qa_boundaries_llm_only(speaker_blocks, transcript_id, enhanced_error_logger)
+        # Process Q&A boundaries using state-based approach
+        qa_groups = process_qa_boundaries_state_based(
+            speaker_blocks, 
+            transcript_id, 
+            transcript_metadata, 
+            enhanced_error_logger
+        )
         
         # Apply Q&A assignments to records
         enhanced_records = apply_qa_assignments_to_records(transcript_records, qa_groups)

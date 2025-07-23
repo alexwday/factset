@@ -75,9 +75,9 @@ stage_04_validate_structure:
     - "MANAGEMENT DISCUSSION SECTION"
     - "Q&A"
 
-# Stage 05 specific settings
+# Stage 05 specific settings (State-Based Q&A Pairing)
 stage_05_qa_pairing:
-  description: "Q&A boundary detection and conversation pairing"
+  description: "State-based Q&A boundary detection and analyst session pairing"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_04_validated_content.json"
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
@@ -89,17 +89,19 @@ stage_05_qa_pairing:
     base_url: "https://api.openai.com/v1"
     model: "gpt-4o-mini"
     temperature: 0.1
-    max_tokens: 500
+    max_tokens: 300  # Reduced for simpler binary decisions
     timeout: 60
     max_retries: 3
     token_endpoint: "https://auth.example.com/oauth/token"  # Replace with actual OAuth endpoint
     cost_per_1k_prompt_tokens: 0.00015
     cost_per_1k_completion_tokens: 0.0006
   
-  # Window Configuration for Speaker Block Context
-  window_config:
-    context_blocks_before: 2
-    context_blocks_after: 1
+  # State-Based Processing Configuration
+  state_config:
+    # Context window size: number of lookahead blocks to include
+    lookahead_blocks: 4
+    # Fallback behavior when LLM decision fails
+    default_decision: "continue"  # Options: "continue" or "end"
 
 # Monitored Financial Institutions
 # Format: ticker: {name, type}
