@@ -528,6 +528,7 @@ def get_oauth_token() -> Optional[str]:
     global ssl_cert_path, config
     
     try:
+        log_execution("DIAGNOSTIC: Starting OAuth token acquisition")
         token_endpoint = config["stage_05_qa_pairing"]["llm_config"]["token_endpoint"]
         
         # SECURITY FIX: Validate endpoint before use
@@ -560,15 +561,15 @@ def get_oauth_token() -> Optional[str]:
             token_data = response.json()
             access_token = token_data.get('access_token')
             if access_token:
-                log_execution("Successfully obtained OAuth token")
+                log_execution("DIAGNOSTIC: Successfully obtained OAuth token")
                 return access_token
             else:
-                error_msg = "No access token in OAuth response"
+                error_msg = "DIAGNOSTIC: No access token in OAuth response"
                 log_error(error_msg, "authentication", {})
                 return None
         else:
             # SECURITY FIX: Sanitize error message
-            error_msg = f"OAuth token request failed: {response.status_code}"
+            error_msg = f"DIAGNOSTIC: OAuth token request failed: {response.status_code}"
             log_error(error_msg, "authentication", {})
             return None
             
@@ -1145,14 +1146,17 @@ def make_indexed_boundary_decision(context_data: Dict,
     # DIAGNOSTIC: Check if global variables are accessible
     try:
         if llm_client is None:
-            log_error(f"llm_client is None in make_indexed_boundary_decision", "diagnostic", {"qa_id": current_qa_id})
+            log_error(f"CRITICAL: llm_client is None in make_indexed_boundary_decision - cannot make API calls", "boundary_detection", {"qa_id": current_qa_id})
+            enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, "LLM client is None - OAuth or setup failed")
             return None
         if config is None:
-            log_error(f"config is None in make_indexed_boundary_decision", "diagnostic", {"qa_id": current_qa_id})
+            log_error(f"CRITICAL: config is None in make_indexed_boundary_decision", "boundary_detection", {"qa_id": current_qa_id})
+            enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, "Config is None")
             return None
         log_execution(f"DIAGNOSTIC: Global variables accessible for QA ID {current_qa_id}")
     except NameError as ne:
-        log_error(f"DIAGNOSTIC NameError accessing globals: {ne}", "diagnostic", {"qa_id": current_qa_id})
+        log_error(f"CRITICAL NameError accessing globals: {ne}", "boundary_detection", {"qa_id": current_qa_id})
+        enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"NameError: {ne}")
         return None
     
     try:
