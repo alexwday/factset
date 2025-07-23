@@ -1142,6 +1142,19 @@ def make_indexed_boundary_decision(context_data: Dict,
     """
     global llm_client, config
     
+    # DIAGNOSTIC: Check if global variables are accessible
+    try:
+        if llm_client is None:
+            log_error(f"llm_client is None in make_indexed_boundary_decision", "diagnostic", {"qa_id": current_qa_id})
+            return None
+        if config is None:
+            log_error(f"config is None in make_indexed_boundary_decision", "diagnostic", {"qa_id": current_qa_id})
+            return None
+        log_execution(f"DIAGNOSTIC: Global variables accessible for QA ID {current_qa_id}")
+    except NameError as ne:
+        log_error(f"DIAGNOSTIC NameError accessing globals: {ne}", "diagnostic", {"qa_id": current_qa_id})
+        return None
+    
     try:
         # IMPROVEMENT: Check token count before sending to LLM
         estimated_tokens = context_data.get("estimated_tokens", 0)
@@ -1793,6 +1806,7 @@ def main() -> None:
         # Step 3: Configuration loading
         log_console("Step 3: Loading configuration...")
         config = load_config_from_nas(nas_conn)
+        log_console(f"DIAGNOSTIC: Config loaded successfully - type: {type(config)}")
         log_console(f"Loaded corrected indexed Q&A pairing configuration - Model: {config['stage_05_qa_pairing']['llm_config']['model']}")
 
         # Step 4: SSL certificate setup
@@ -1806,6 +1820,7 @@ def main() -> None:
         # Step 6: Setup LLM client
         log_console("Step 6: Setting up LLM client...")
         llm_client = setup_llm_client()
+        log_console(f"DIAGNOSTIC: LLM client setup result - type: {type(llm_client)}, is_none: {llm_client is None}")
         if not llm_client:
             stage_summary["status"] = "failed"
             log_console("Failed to setup LLM client", "ERROR")
