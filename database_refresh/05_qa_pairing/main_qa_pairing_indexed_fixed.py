@@ -1073,18 +1073,19 @@ def create_indexed_boundary_tools():
                     "properties": {
                         "next_analyst_index": {
                             "type": "integer",
-                            "minimum": 1,  # SECURITY FIX: Add validation constraints
-                            "maximum": 50,  # Reasonable upper bound
-                            "description": "The speaker block index number (1-based) where the next analyst session should begin"
+                            "minimum": 1,
+                            "maximum": 50,
+                            "description": "The speaker block index number (1-based) where the next analyst session should begin. Must be a positive integer."
                         },
                         "reasoning": {
                             "type": "string",
-                            "minLength": 10,  # IMPROVEMENT: Require reasoning
+                            "minLength": 5,  # IMPROVEMENT: Reduced minimum for flexibility
                             "maxLength": 500,
                             "description": "Brief explanation of why this index marks the start of a new analyst session"
                         }
                     },
-                    "required": ["next_analyst_index", "reasoning"]
+                    "required": ["next_analyst_index", "reasoning"],
+                    "additionalProperties": false  # IMPROVEMENT: Prevent unexpected fields
                 }
             }
         },
@@ -1098,12 +1099,13 @@ def create_indexed_boundary_tools():
                     "properties": {
                         "reason": {
                             "type": "string",
-                            "minLength": 10,  # IMPROVEMENT: Require reasoning
+                            "minLength": 5,  # IMPROVEMENT: Reduced minimum for flexibility
                             "maxLength": 200,
                             "description": "Explanation of why more blocks are needed to determine the boundary"
                         }
                     },
-                    "required": ["reason"]
+                    "required": ["reason"],
+                    "additionalProperties": false  # IMPROVEMENT: Prevent unexpected fields
                 }
             }
         }
@@ -1158,15 +1160,31 @@ def make_indexed_boundary_decision(context_data: Dict,
             try:
                 log_execution(f"QA ID {current_qa_id} indexed boundary analysis attempt {attempt}/{max_retries}")
                 
-                # Make LLM API call
-                response = llm_client.chat.completions.create(
-                    model=config["stage_05_qa_pairing"]["llm_config"]["model"],
-                    messages=[{"role": "user", "content": prompt}],
-                    tools=create_indexed_boundary_tools(),
-                    tool_choice="required", 
-                    temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
-                    max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
-                )
+                # Make LLM API call with enhanced configuration
+                try:
+                    response = llm_client.chat.completions.create(
+                        model=config["stage_05_qa_pairing"]["llm_config"]["model"],
+                        messages=[{"role": "user", "content": prompt}],
+                        tools=create_indexed_boundary_tools(),
+                        tool_choice="required", 
+                        temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
+                        max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"],
+                        timeout=config["stage_05_qa_pairing"]["llm_config"].get("timeout", 60)
+                    )
+                except Exception as llm_api_error:
+                    error_msg = f"LLM API call failed for QA ID {current_qa_id}: {type(llm_api_error).__name__}"
+                    if attempt == max_retries:
+                        log_error(f"{error_msg} (final attempt)", "boundary_detection", {
+                            "error_type": type(llm_api_error).__name__,
+                            "attempt": attempt,
+                            "qa_id": current_qa_id
+                        })
+                        enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
+                        return None
+                    else:
+                        log_execution(f"QA ID {current_qa_id}: {error_msg}, retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        continue
                 
                 # SECURITY FIX: Validate response structure
                 if not validate_api_response_structure(response):
@@ -1192,36 +1210,99 @@ def make_indexed_boundary_decision(context_data: Dict,
                         time.sleep(retry_delay)
                         continue
                 
-                # Extract decision with improved validation
+                # Extract decision with robust validation
                 try:
                     tool_call = response.choices[0].message.tool_calls[0]
                     function_name = tool_call.function.name
-                    result = json.loads(tool_call.function.arguments)
+                    
+                    # IMPROVEMENT: Enhanced JSON parsing with validation
+                    try:
+                        result = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError as json_err:
+                        # Try to clean the JSON string
+                        cleaned_args = tool_call.function.arguments.strip()
+                        if not cleaned_args.startswith('{'):
+                            cleaned_args = '{' + cleaned_args
+                        if not cleaned_args.endswith('}'):
+                            cleaned_args = cleaned_args + '}'
+                        try:
+                            result = json.loads(cleaned_args)
+                        except json.JSONDecodeError:
+                            raise ValueError(f"LLM returned invalid JSON: {json_err}")
                     
                     if function_name == "boundary_decision":
-                        # VALIDATION FIX: Validate boundary index is reasonable
-                        next_analyst_index = result["next_analyst_index"]
-                        if not isinstance(next_analyst_index, int) or next_analyst_index < 1:
-                            raise ValueError(f"Invalid boundary index: {next_analyst_index}")
+                        # ROBUST VALIDATION: Check field existence and type coercion
+                        if "next_analyst_index" not in result:
+                            raise ValueError("Missing 'next_analyst_index' field in LLM response")
+                        if "reasoning" not in result:
+                            raise ValueError("Missing 'reasoning' field in LLM response")
+                        
+                        # IMPROVEMENT: Type coercion with validation
+                        raw_index = result["next_analyst_index"]
+                        try:
+                            if isinstance(raw_index, str) and raw_index.isdigit():
+                                next_analyst_index = int(raw_index)
+                            elif isinstance(raw_index, (int, float)):
+                                next_analyst_index = int(raw_index)
+                            else:
+                                raise ValueError(f"Cannot convert index to integer: {raw_index}")
+                        except (ValueError, TypeError):
+                            raise ValueError(f"Invalid boundary index format: {raw_index}")
+                        
+                        # IMPROVEMENT: Range validation with context awareness
+                        window_size = context_data.get("window_size", 10)
+                        if next_analyst_index < 1:
+                            raise ValueError(f"Boundary index must be >= 1, got: {next_analyst_index}")
+                        if next_analyst_index > window_size + 5:  # Allow some buffer for edge cases
+                            raise ValueError(f"Boundary index {next_analyst_index} exceeds reasonable range (window size: {window_size})")
+                        
+                        # Validate reasoning field
+                        reasoning = result.get("reasoning", "").strip()
+                        if not reasoning or len(reasoning) < 5:
+                            reasoning = f"LLM boundary decision for index {next_analyst_index}"
                         
                         decision = {
                             "type": "boundary_found",
                             "next_analyst_index": next_analyst_index,
-                            "reasoning": result["reasoning"]
+                            "reasoning": reasoning
                         }
+                        
                     elif function_name == "request_more_blocks":
+                        # ROBUST VALIDATION: Check reason field
+                        if "reason" not in result:
+                            raise ValueError("Missing 'reason' field in LLM response")
+                        
+                        reason = result.get("reason", "").strip()
+                        if not reason or len(reason) < 5:
+                            reason = "LLM requested more context blocks"
+                        
                         decision = {
                             "type": "request_expansion",
-                            "reason": result["reason"]
+                            "reason": reason
                         }
                     else:
-                        raise ValueError(f"Unknown function: {function_name}")
+                        raise ValueError(f"Unknown function name: {function_name}")
                         
-                except (json.JSONDecodeError, KeyError, ValueError) as e:
-                    # SECURITY FIX: Sanitize error message
-                    error_msg = f"Failed to parse LLM response for QA ID {current_qa_id}: {type(e).__name__}"
+                except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                    # IMPROVEMENT: Enhanced error logging with debugging info
+                    error_details = {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                        "function_name": tool_call.function.name if 'tool_call' in locals() else "unknown",
+                        "has_tool_calls": bool(response.choices[0].message.tool_calls),
+                        "attempt": attempt,
+                        "qa_id": current_qa_id
+                    }
+                    
+                    # Log the raw arguments for debugging (sanitized)
+                    if 'tool_call' in locals() and hasattr(tool_call, 'function'):
+                        raw_args = tool_call.function.arguments[:200] + "..." if len(tool_call.function.arguments) > 200 else tool_call.function.arguments
+                        error_details["raw_arguments_preview"] = raw_args
+                    
+                    error_msg = f"Failed to parse LLM response for QA ID {current_qa_id}: {type(e).__name__} - {str(e)}"
+                    
                     if attempt == max_retries:
-                        log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
+                        log_error(f"{error_msg} (final attempt)", "boundary_detection", error_details)
                         enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
                         return None
                     else:
