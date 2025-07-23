@@ -102,6 +102,15 @@ stage_05_qa_pairing:
     lookahead_blocks: 4
     # Fallback behavior when LLM decision fails
     default_decision: "continue"  # Options: "continue" or "end"
+  
+  # Index-Based Processing Configuration (for indexed approach)
+  indexed_config:
+    # Initial window size for LLM analysis
+    initial_window_size: 10
+    # Maximum window size before fallback
+    max_window_size: 20
+    # Step size for window expansion
+    window_expansion_step: 5
 
 # Monitored Financial Institutions
 # Format: ticker: {name, type}
