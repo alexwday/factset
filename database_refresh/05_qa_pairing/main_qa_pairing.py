@@ -1703,6 +1703,25 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     
     log_execution(f"🔍 DEBUG: Applying QA assignments from {len(qa_groups)} groups to {len(records)} records")
     
+    # CRITICAL DEBUG: Show the actual structure of qa_groups
+    for i, group in enumerate(qa_groups):
+        log_execution(f"🔍 DEBUG: qa_groups[{i}] structure:")
+        log_execution(f"  - qa_group_id: {group.get('qa_group_id')}")
+        log_execution(f"  - confidence: {group.get('confidence')}")
+        log_execution(f"  - method: {group.get('method')}")
+        log_execution(f"  - speaker_blocks type: {type(group.get('speaker_blocks', []))}")
+        log_execution(f"  - speaker_blocks length: {len(group.get('speaker_blocks', []))}")
+        
+        # Check first speaker block structure
+        speaker_blocks = group.get("speaker_blocks", [])
+        if speaker_blocks:
+            first_block = speaker_blocks[0]
+            log_execution(f"  - first speaker_block type: {type(first_block)}")
+            log_execution(f"  - first speaker_block keys: {list(first_block.keys()) if isinstance(first_block, dict) else 'Not a dict'}")
+            log_execution(f"  - first speaker_block has speaker_block_id: {'speaker_block_id' in first_block if isinstance(first_block, dict) else 'N/A'}")
+            if isinstance(first_block, dict) and 'speaker_block_id' in first_block:
+                log_execution(f"  - first speaker_block_id value: {first_block['speaker_block_id']}")
+    
     for group in qa_groups:
         # Get all speaker block IDs from the group's speaker_blocks
         speaker_blocks = group.get("speaker_blocks", [])
@@ -1721,7 +1740,7 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
                 }
                 block_ids_in_group.append(block_id)
             else:
-                log_execution(f"⚠️ DEBUG: Speaker block missing speaker_block_id in QA Group {qa_id}")
+                log_execution(f"⚠️ DEBUG: Speaker block missing speaker_block_id in QA Group {qa_id}: {list(speaker_block.keys()) if isinstance(speaker_block, dict) else type(speaker_block)}")
         
         log_execution(f"🔍 DEBUG: QA Group {qa_id} mapped speaker block IDs: {block_ids_in_group[:10]}{'...' if len(block_ids_in_group) > 10 else ''}")
     
@@ -1732,6 +1751,16 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     enhanced_records = []
     qa_records_count = 0
     assigned_records_count = 0
+    unassigned_speaker_block_ids = []
+    
+    # CRITICAL DEBUG: Show sample records structure
+    log_execution(f"🔍 DEBUG: Sample input records structure:")
+    for i, record in enumerate(records[:3]):
+        log_execution(f"  records[{i}]:")
+        log_execution(f"    - section_name: {record.get('section_name')}")
+        log_execution(f"    - speaker_block_id: {record.get('speaker_block_id')}")  
+        log_execution(f"    - paragraph_id: {record.get('paragraph_id')}")
+        log_execution(f"    - keys: {list(record.keys())}")
     
     for record in records:
         enhanced_record = record.copy()
@@ -1754,6 +1783,8 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
                 })
                 if speaker_block_id is None:
                     log_execution(f"⚠️ DEBUG: Q&A record missing speaker_block_id: {record.get('paragraph_id', 'unknown')}")
+                elif speaker_block_id not in block_to_qa_map:
+                    unassigned_speaker_block_ids.append(speaker_block_id)
         else:
             # Non-Q&A sections don't get Q&A assignments
             enhanced_record.update({
@@ -1765,6 +1796,22 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
         enhanced_records.append(enhanced_record)
     
     log_execution(f"🔍 DEBUG: Assignment results - Q&A records: {qa_records_count}, Assigned: {assigned_records_count}, Unassigned: {qa_records_count - assigned_records_count}")
+    
+    if unassigned_speaker_block_ids:
+        unique_unassigned = list(set(unassigned_speaker_block_ids))
+        log_execution(f"🔍 DEBUG: Unassigned speaker block IDs: {unique_unassigned[:20]}{'...' if len(unique_unassigned) > 20 else ''}")
+    
+    # CRITICAL DEBUG: Show sample enhanced records
+    log_execution(f"🔍 DEBUG: Sample enhanced records (Q&A only):")
+    qa_sample_count = 0
+    for i, record in enumerate(enhanced_records):
+        if record.get("section_name") == "Q&A" and qa_sample_count < 3:
+            log_execution(f"  enhanced_records[{i}] (Q&A):")
+            log_execution(f"    - qa_group_id: {record.get('qa_group_id')}")
+            log_execution(f"    - qa_group_confidence: {record.get('qa_group_confidence')}")
+            log_execution(f"    - qa_group_method: {record.get('qa_group_method')}")
+            log_execution(f"    - speaker_block_id: {record.get('speaker_block_id')}")
+            qa_sample_count += 1
     
     return enhanced_records
 
