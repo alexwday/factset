@@ -83,7 +83,7 @@ stage_05_qa_pairing:
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 2
-  window_size: 20  # Number of speaker blocks per sliding window
+  window_size: 5  # Number of speaker blocks per sliding window
   
   # LLM Configuration (OAuth client credentials come from environment variables)
   llm_config:

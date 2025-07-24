@@ -1192,19 +1192,11 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                     # Accumulate costs for final summary
                     enhanced_error_logger.accumulate_costs(token_usage)
                 
-                # Log successful decision with detailed context
+                # Log successful decision concisely
                 attempt_info = f" (attempt {attempt})" if attempt > 1 else ""
                 if parsed_result["action"] == "breakpoint":
                     breakpoint_index = parsed_result['index']
                     log_execution(f"🎯 BREAKPOINT DETECTED{attempt_info}: INDEX {breakpoint_index} for QA ID {current_qa_id}")
-                    
-                    # Show what's at the breakpoint for context
-                    if breakpoint_index <= len(indexed_blocks):
-                        breakpoint_block = indexed_blocks[breakpoint_index-1]["block"]  # Convert to 0-based
-                        first_para = breakpoint_block['paragraphs'][0] if breakpoint_block['paragraphs'] else {}
-                        breakpoint_content = first_para.get('paragraph_content', '')[:200] + "..." if first_para.get('paragraph_content', '') else "[No content]"
-                        log_execution(f"🎯 Breakpoint at Index {breakpoint_index}: {breakpoint_block['speaker']} - {breakpoint_content}")
-                    
                     log_execution(f"✅ QA ID {current_qa_id} will include indices 1-{breakpoint_index-1} ({breakpoint_index-1} blocks)")
                     log_execution(f"🔄 Next QA ID {current_qa_id+1} will start at index {breakpoint_index}")
                 else:
@@ -1254,19 +1246,11 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
         try:
             log_execution(f"🔍 VALIDATION ATTEMPT {validation_attempt}/{max_validation_attempts} for QA ID {qa_id}")
             
-            # Log what we're validating
-            log_execution(f"📋 Proposed QA ID {qa_id}: {len(proposed_qa_blocks)} blocks")
-            for i, block in enumerate(proposed_qa_blocks, 1):
-                first_para = block['paragraphs'][0] if block['paragraphs'] else {}
-                content_preview = first_para.get('paragraph_content', '')[:100] + "..." if first_para.get('paragraph_content', '') else "[No content]"
-                log_execution(f"  Block {i}: {block['speaker']} - {content_preview}")
-            
-            log_execution(f"📋 Remaining blocks for context: {len(remaining_blocks[:5])}")
-            for i, block_data in enumerate(remaining_blocks[:3], 1):  # Show first 3 for context
-                block = block_data["block"] if isinstance(block_data, dict) and "block" in block_data else block_data
-                first_para = block['paragraphs'][0] if block['paragraphs'] else {}
-                content_preview = first_para.get('paragraph_content', '')[:100] + "..." if first_para.get('paragraph_content', '') else "[No content]"
-                log_execution(f"  Remaining {i}: {block['speaker']} - {content_preview}")
+            # Log validation summary only
+            proposed_speaker_ids = [b.get('speaker_block_id') for b in proposed_qa_blocks]
+            remaining_speaker_ids = [b.get('speaker_block_id') if isinstance(b, dict) and 'speaker_block_id' in b else b.get('speaker_block_id') for b in remaining_blocks[:3]]
+            log_execution(f"📋 Validating QA ID {qa_id}: {len(proposed_qa_blocks)} blocks (speaker IDs: {proposed_speaker_ids[:5]}{'...' if len(proposed_speaker_ids) > 5 else ''})")
+            log_execution(f"📋 Remaining for context: {len(remaining_blocks)} blocks (speaker IDs: {remaining_speaker_ids})")
             
             # Create validation prompt
             prompt = create_validation_prompt(proposed_qa_blocks, remaining_blocks, company_name, transcript_title, qa_id)
@@ -1476,9 +1460,13 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             )
             
             if breakpoint_result is None:
-                # LLM call failed - treat as skip to be conservative
+                # LLM call failed - treat as skip to be conservative with consistent structure
                 log_execution(f"⚠️ BREAKPOINT DETECTION FAILED: Treating as skip for QA ID {sliding_state['current_qa_id']}")
-                sliding_state["held_blocks"].extend([block_data["block"] for block_data in current_window])
+                
+                # Get actual blocks using same method as breakpoint logic for consistency
+                current_failed_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_window_block_ids)
+                sliding_state["held_blocks"].extend(current_failed_blocks)
+                
                 new_held_count = len(sliding_state["held_blocks"])
                 new_block_id_index = sliding_state["current_block_id_index"] + len(current_window_block_ids)
                 sliding_state["current_block_id_index"] = new_block_id_index
@@ -1490,15 +1478,20 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 continue
             
             if breakpoint_result["action"] == "skip":
-                # Hold current blocks and advance window
+                # Hold current blocks and advance window - use same structure as breakpoint logic
                 log_execution(f"⏭️ SKIP ACTION: Holding {len(current_window)} blocks from speaker blocks {current_window_block_ids[0]} to {current_window_block_ids[-1]} for QA ID {sliding_state['current_qa_id']}")
-                sliding_state["held_blocks"].extend([block_data["block"] for block_data in current_window])
+                
+                # Get actual blocks using same method as breakpoint logic for consistency
+                current_skip_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_window_block_ids)
+                sliding_state["held_blocks"].extend(current_skip_blocks)
+                
                 new_held_count = len(sliding_state["held_blocks"])
                 new_block_id_index = sliding_state["current_block_id_index"] + len(current_window_block_ids)
                 sliding_state["current_block_id_index"] = new_block_id_index
                 
                 next_block_id = speaker_block_id_sequence[new_block_id_index] if new_block_id_index < len(speaker_block_id_sequence) else "END"
-                log_execution(f"📝 Total held blocks now: {new_held_count}")
+                held_speaker_ids = [b.get('speaker_block_id') for b in sliding_state['held_blocks']]
+                log_execution(f"📝 Total held blocks now: {new_held_count} (speaker block IDs: {held_speaker_ids[-5:] if len(held_speaker_ids) > 5 else held_speaker_ids})")
                 log_execution(f"📍 Next window will start at speaker block ID: {next_block_id} (index {new_block_id_index})")
                 log_execution("⏭️" + "="*79)
                 continue
@@ -1703,24 +1696,11 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     
     log_execution(f"🔍 DEBUG: Applying QA assignments from {len(qa_groups)} groups to {len(records)} records")
     
-    # CRITICAL DEBUG: Show the actual structure of qa_groups
+    # DEBUG: Show qa_groups summary
     for i, group in enumerate(qa_groups):
-        log_execution(f"🔍 DEBUG: qa_groups[{i}] structure:")
-        log_execution(f"  - qa_group_id: {group.get('qa_group_id')}")
-        log_execution(f"  - confidence: {group.get('confidence')}")
-        log_execution(f"  - method: {group.get('method')}")
-        log_execution(f"  - speaker_blocks type: {type(group.get('speaker_blocks', []))}")
-        log_execution(f"  - speaker_blocks length: {len(group.get('speaker_blocks', []))}")
-        
-        # Check first speaker block structure
         speaker_blocks = group.get("speaker_blocks", [])
-        if speaker_blocks:
-            first_block = speaker_blocks[0]
-            log_execution(f"  - first speaker_block type: {type(first_block)}")
-            log_execution(f"  - first speaker_block keys: {list(first_block.keys()) if isinstance(first_block, dict) else 'Not a dict'}")
-            log_execution(f"  - first speaker_block has speaker_block_id: {'speaker_block_id' in first_block if isinstance(first_block, dict) else 'N/A'}")
-            if isinstance(first_block, dict) and 'speaker_block_id' in first_block:
-                log_execution(f"  - first speaker_block_id value: {first_block['speaker_block_id']}")
+        speaker_ids = [b.get('speaker_block_id') for b in speaker_blocks[:5]]
+        log_execution(f"🔍 qa_groups[{i}]: ID={group.get('qa_group_id')}, blocks={len(speaker_blocks)}, speaker_ids={speaker_ids}{'...' if len(speaker_blocks) > 5 else ''}")
     
     for group in qa_groups:
         # Get all speaker block IDs from the group's speaker_blocks
@@ -1753,14 +1733,9 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     assigned_records_count = 0
     unassigned_speaker_block_ids = []
     
-    # CRITICAL DEBUG: Show sample records structure
-    log_execution(f"🔍 DEBUG: Sample input records structure:")
-    for i, record in enumerate(records[:3]):
-        log_execution(f"  records[{i}]:")
-        log_execution(f"    - section_name: {record.get('section_name')}")
-        log_execution(f"    - speaker_block_id: {record.get('speaker_block_id')}")  
-        log_execution(f"    - paragraph_id: {record.get('paragraph_id')}")
-        log_execution(f"    - keys: {list(record.keys())}")
+    # DEBUG: Show sample records structure
+    qa_record_sample = [r for r in records[:10] if r.get('section_name') == 'Q&A'][:3]
+    log_execution(f"🔍 Sample Q&A records: {[(r.get('speaker_block_id'), r.get('paragraph_id')) for r in qa_record_sample]}")
     
     for record in records:
         enhanced_record = record.copy()
@@ -1801,17 +1776,9 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
         unique_unassigned = list(set(unassigned_speaker_block_ids))
         log_execution(f"🔍 DEBUG: Unassigned speaker block IDs: {unique_unassigned[:20]}{'...' if len(unique_unassigned) > 20 else ''}")
     
-    # CRITICAL DEBUG: Show sample enhanced records
-    log_execution(f"🔍 DEBUG: Sample enhanced records (Q&A only):")
-    qa_sample_count = 0
-    for i, record in enumerate(enhanced_records):
-        if record.get("section_name") == "Q&A" and qa_sample_count < 3:
-            log_execution(f"  enhanced_records[{i}] (Q&A):")
-            log_execution(f"    - qa_group_id: {record.get('qa_group_id')}")
-            log_execution(f"    - qa_group_confidence: {record.get('qa_group_confidence')}")
-            log_execution(f"    - qa_group_method: {record.get('qa_group_method')}")
-            log_execution(f"    - speaker_block_id: {record.get('speaker_block_id')}")
-            qa_sample_count += 1
+    # DEBUG: Show sample enhanced records with assignments
+    qa_assigned_sample = [(r.get('speaker_block_id'), r.get('qa_group_id')) for r in enhanced_records if r.get('section_name') == 'Q&A' and r.get('qa_group_id') is not None][:5]
+    log_execution(f"🔍 Sample assigned Q&A records (speaker_block_id, qa_group_id): {qa_assigned_sample}")
     
     return enhanced_records
 
