@@ -1644,7 +1644,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
         log_execution(f"🎉 SLIDING WINDOW PROCESSING COMPLETE")
         log_execution(f"📊 Total iterations: {iteration_count}")
         log_execution(f"📋 Q&A groups created: {len(sliding_state['all_qa_groups'])}")
-        log_execution(f"📍 Final window position: {sliding_state['current_window_start']} of {len(qa_speaker_blocks)} blocks")
+        log_execution(f"📍 Final window position: speaker block index {sliding_state['current_block_id_index']} of {len(sliding_state['speaker_block_id_sequence'])} speaker blocks")
         log_execution(f"💼 Final held blocks: {len(sliding_state['held_blocks'])}")
         
         if iteration_count > max_iterations:
