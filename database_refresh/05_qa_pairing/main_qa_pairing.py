@@ -1015,21 +1015,48 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     }
 
 
-def create_indexed_speaker_blocks(speaker_blocks: List[Dict], start_index: int, window_size: int) -> List[Dict]:
+def get_blocks_for_speaker_block_ids(qa_speaker_blocks: List[Dict], speaker_block_ids: List[int]) -> List[Dict]:
     """
-    Create 1-based indexed speaker blocks for sliding window processing.
-    Returns list of dicts with 'index' (1-based) and 'block' (speaker block data).
+    Get all speaker blocks that match the specified speaker_block_ids.
+    Returns blocks in the order they appear in qa_speaker_blocks.
     """
-    indexed_blocks = []
-    end_index = min(start_index + window_size, len(speaker_blocks))
+    matching_blocks = []
+    target_ids = set(speaker_block_ids)
     
-    for i in range(start_index, end_index):
-        indexed_block = {
-            "index": len(indexed_blocks) + 1,  # 1-based indexing
-            "absolute_index": i,  # Original position in full speaker_blocks array
-            "block": speaker_blocks[i]
-        }
-        indexed_blocks.append(indexed_block)
+    for block in qa_speaker_blocks:
+        if block.get("speaker_block_id") in target_ids:
+            matching_blocks.append(block)
+    
+    return matching_blocks
+
+
+def create_indexed_speaker_blocks_from_ids(qa_speaker_blocks: List[Dict], speaker_block_ids: List[int]) -> List[Dict]:
+    """
+    Create 1-based indexed speaker blocks for LLM processing from speaker_block_ids.
+    Maps speaker_block_ids to 1-based indices for LLM comprehension.
+    Returns list of dicts with 'index' (1-based), 'speaker_block_id', and 'block' data.
+    """
+    # Get all blocks for the specified speaker_block_ids
+    matching_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, speaker_block_ids)
+    
+    # Group blocks by speaker_block_id to maintain speaker block boundaries
+    blocks_by_speaker_id = defaultdict(list)
+    for block in matching_blocks:
+        speaker_id = block.get("speaker_block_id")
+        blocks_by_speaker_id[speaker_id].append(block)
+    
+    # Create indexed blocks maintaining 1-based indexing for LLM
+    indexed_blocks = []
+    for i, speaker_block_id in enumerate(speaker_block_ids, 1):
+        if speaker_block_id in blocks_by_speaker_id:
+            # All paragraphs for this speaker block get the same index
+            for block in blocks_by_speaker_id[speaker_block_id]:
+                indexed_block = {
+                    "index": i,  # 1-based indexing for LLM
+                    "speaker_block_id": speaker_block_id,  # Original speaker block ID
+                    "block": block
+                }
+                indexed_blocks.append(indexed_block)
     
     return indexed_blocks
 
@@ -1351,7 +1378,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
     4. If skip: hold blocks, advance window, combine with next batch
     """
     try:
-        # Filter to only Q&A sections
+        # Filter to only Q&A sections and sort by speaker_block_id, then paragraph_id
         qa_speaker_blocks = [block for block in speaker_blocks 
                            if block.get("section_name") == "Q&A"]
         
@@ -1359,60 +1386,80 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             log_execution(f"No Q&A sections found in transcript {transcript_id}")
             return []
         
-        log_execution(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks using sliding window approach")
+        # Sort by speaker_block_id first, then by paragraph_id within each speaker block
+        qa_speaker_blocks.sort(key=lambda x: (x.get("speaker_block_id", 0), x.get("paragraph_id", 0)))
         
-        # Initialize sliding window state
+        # Extract unique speaker_block_ids for tracking (maintains original transcript order)
+        speaker_block_id_sequence = []
+        seen_block_ids = set()
+        for block in qa_speaker_blocks:
+            block_id = block.get("speaker_block_id")
+            if block_id not in seen_block_ids:
+                speaker_block_id_sequence.append(block_id)
+                seen_block_ids.add(block_id)
+        
+        log_execution(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks using sliding window approach")
+        log_execution(f"Speaker block ID range: {min(speaker_block_id_sequence)} to {max(speaker_block_id_sequence)} ({len(speaker_block_id_sequence)} unique blocks)")
+        
+        # Initialize sliding window state using speaker_block_ids
         sliding_state = {
             "current_qa_id": 1,
-            "current_window_start": 0,  # Absolute index in qa_speaker_blocks
+            "current_block_id_index": 0,  # Index in speaker_block_id_sequence
             "held_blocks": [],  # Accumulated blocks from "skip" decisions
             "processing_complete": False,
-            "all_qa_groups": []
+            "all_qa_groups": [],
+            "speaker_block_id_sequence": speaker_block_id_sequence  # For tracking
         }
         
         # Extract metadata for prompts
         company_name = transcript_metadata.get("company_name", "Unknown Company")
         transcript_title = transcript_metadata.get("transcript_title", "Earnings Call Transcript")
         
-        # Main processing loop with infinite loop protection
-        max_iterations = len(qa_speaker_blocks) * 2  # Should never need more than 2x the total blocks
+        # Main processing loop with infinite loop protection using speaker_block_ids
+        max_iterations = len(speaker_block_id_sequence) * 2  # Should never need more than 2x the total speaker blocks
         iteration_count = 0
         
-        while not sliding_state["processing_complete"] and sliding_state["current_window_start"] < len(qa_speaker_blocks):
+        while not sliding_state["processing_complete"] and sliding_state["current_block_id_index"] < len(speaker_block_id_sequence):
             iteration_count += 1
             
             # Infinite loop protection
             if iteration_count > max_iterations:
+                current_block_id = speaker_block_id_sequence[sliding_state["current_block_id_index"]] if sliding_state["current_block_id_index"] < len(speaker_block_id_sequence) else "END"
                 log_execution(f"🚨 INFINITE LOOP DETECTED! Breaking after {iteration_count} iterations")
-                log_execution(f"📊 Current state: window_start={sliding_state['current_window_start']}, total_blocks={len(qa_speaker_blocks)}")
+                log_execution(f"📊 Current state: block_id_index={sliding_state['current_block_id_index']}, current_block_id={current_block_id}")
                 log_execution(f"💼 Held blocks: {len(sliding_state['held_blocks'])}, current_qa_id={sliding_state['current_qa_id']}")
                 enhanced_error_logger.log_processing_error(transcript_id, f"Infinite loop detected after {iteration_count} iterations")
                 break
             
-            # Create current window (configurable size)
+            # Create current window using speaker_block_ids
             window_size = config["stage_05_qa_pairing"]["window_size"]
-            current_window = create_indexed_speaker_blocks(
-                qa_speaker_blocks, 
-                sliding_state["current_window_start"], 
-                window_size
-            )
+            end_block_index = min(sliding_state["current_block_id_index"] + window_size, len(speaker_block_id_sequence))
+            current_window_block_ids = speaker_block_id_sequence[sliding_state["current_block_id_index"]:end_block_index]
+            
+            if not current_window_block_ids:
+                # No more blocks to process
+                sliding_state["processing_complete"] = True
+                break
+            
+            # Create indexed blocks for LLM (maps speaker_block_ids to 1-based indices)
+            current_window = create_indexed_speaker_blocks_from_ids(qa_speaker_blocks, current_window_block_ids)
             
             if not current_window:
-                # No more blocks to process
+                # No blocks found for these IDs
                 sliding_state["processing_complete"] = True
                 break
             
             log_execution("🔄" + "="*79)
             log_execution(f"🎯 PROCESSING WINDOW for QA ID {sliding_state['current_qa_id']} (Iteration {iteration_count}/{max_iterations})")
-            log_execution(f"📍 Window start: block {sliding_state['current_window_start']} of {len(qa_speaker_blocks)} total blocks")
-            log_execution(f"📊 Current window: {len(current_window)} blocks")
-            log_execution(f"💼 Held blocks: {len(sliding_state['held_blocks'])} blocks")
+            log_execution(f"📍 Speaker block IDs in scope: {current_window_block_ids[0]} to {current_window_block_ids[-1]} ({len(current_window_block_ids)} speaker blocks)")
+            log_execution(f"📊 Current window: {len(current_window)} paragraph blocks across {len(current_window_block_ids)} speaker blocks")
+            log_execution(f"💼 Held blocks: {len(sliding_state['held_blocks'])} paragraph blocks")
             
             if sliding_state['held_blocks']:
-                log_execution(f"📝 Total context if skip: {len(sliding_state['held_blocks']) + len(current_window)} blocks")
+                log_execution(f"📝 Total context if skip: {len(sliding_state['held_blocks']) + len(current_window)} paragraph blocks")
             
             # Track window advancement to detect infinite loops
-            previous_window_start = sliding_state['current_window_start']
+            previous_block_id_index = sliding_state['current_block_id_index']
             
             log_execution("🔄" + "="*79)
             
@@ -1431,24 +1478,26 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 log_execution(f"⚠️ BREAKPOINT DETECTION FAILED: Treating as skip for QA ID {sliding_state['current_qa_id']}")
                 sliding_state["held_blocks"].extend([block_data["block"] for block_data in current_window])
                 new_held_count = len(sliding_state["held_blocks"])
-                new_window_start = sliding_state["current_window_start"] + len(current_window)
-                sliding_state["current_window_start"] = new_window_start
+                new_block_id_index = sliding_state["current_block_id_index"] + len(current_window_block_ids)
+                sliding_state["current_block_id_index"] = new_block_id_index
                 
+                next_block_id = speaker_block_id_sequence[new_block_id_index] if new_block_id_index < len(speaker_block_id_sequence) else "END"
                 log_execution(f"📝 Total held blocks now: {new_held_count}")
-                log_execution(f"📍 Next window will start at: {new_window_start}")
+                log_execution(f"📍 Next window will start at speaker block ID: {next_block_id} (index {new_block_id_index})")
                 log_execution("⚠️" + "="*79)
                 continue
             
             if breakpoint_result["action"] == "skip":
                 # Hold current blocks and advance window
-                log_execution(f"⏭️ SKIP ACTION: Holding {len(current_window)} blocks for QA ID {sliding_state['current_qa_id']}")
+                log_execution(f"⏭️ SKIP ACTION: Holding {len(current_window)} blocks from speaker blocks {current_window_block_ids[0]} to {current_window_block_ids[-1]} for QA ID {sliding_state['current_qa_id']}")
                 sliding_state["held_blocks"].extend([block_data["block"] for block_data in current_window])
                 new_held_count = len(sliding_state["held_blocks"])
-                new_window_start = sliding_state["current_window_start"] + len(current_window)
-                sliding_state["current_window_start"] = new_window_start
+                new_block_id_index = sliding_state["current_block_id_index"] + len(current_window_block_ids)
+                sliding_state["current_block_id_index"] = new_block_id_index
                 
+                next_block_id = speaker_block_id_sequence[new_block_id_index] if new_block_id_index < len(speaker_block_id_sequence) else "END"
                 log_execution(f"📝 Total held blocks now: {new_held_count}")
-                log_execution(f"📍 Next window will start at: {new_window_start}")
+                log_execution(f"📍 Next window will start at speaker block ID: {next_block_id} (index {new_block_id_index})")
                 log_execution("⏭️" + "="*79)
                 continue
                 
@@ -1456,14 +1505,30 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 # Found breakpoint - create qa_id assignment
                 breakpoint_index = breakpoint_result["index"]  # 1-based index within current window
                 
-                log_execution(f"Breakpoint detected at index {breakpoint_index} for QA ID {sliding_state['current_qa_id']}")
+                # Map breakpoint index to speaker_block_id
+                if breakpoint_index <= len(current_window_block_ids):
+                    breakpoint_speaker_block_id = current_window_block_ids[breakpoint_index - 1]
+                    breakpoint_block_id_index = sliding_state["current_block_id_index"] + breakpoint_index - 1
+                else:
+                    # Invalid breakpoint index
+                    log_execution(f"⚠️ Invalid breakpoint index {breakpoint_index} > window size {len(current_window_block_ids)}")
+                    enhanced_error_logger.log_boundary_error(transcript_id, current_window_block_ids[0], f"Invalid breakpoint index {breakpoint_index}")
+                    sliding_state["processing_complete"] = True
+                    continue
                 
-                # Blocks for current qa_id: held_blocks + blocks up to (but not including) breakpoint
-                current_window_blocks = [block_data["block"] for block_data in current_window[:breakpoint_index-1]]
+                log_execution(f"✅ BREAKPOINT DETECTED: Index {breakpoint_index} → Speaker Block ID {breakpoint_speaker_block_id} for QA ID {sliding_state['current_qa_id']}")
+                
+                # Get speaker_block_ids up to (but not including) breakpoint for current qa_id
+                current_qa_block_ids = current_window_block_ids[:breakpoint_index-1]
+                current_window_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_qa_block_ids)
                 proposed_qa_blocks = sliding_state["held_blocks"] + current_window_blocks
                 
-                # Remaining blocks in window (for validation context)
-                remaining_window_blocks = current_window[breakpoint_index-1:]
+                # Remaining speaker_block_ids in window (for validation context)
+                remaining_block_ids = current_window_block_ids[breakpoint_index-1:]
+                remaining_window_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, remaining_block_ids)
+                
+                log_execution(f"📋 QA ID {sliding_state['current_qa_id']} proposed assignment: speaker blocks {[b.get('speaker_block_id') for b in proposed_qa_blocks[:5]]}{'...' if len(proposed_qa_blocks) > 5 else ''}")
+                log_execution(f"📋 Remaining for validation: speaker blocks {remaining_block_ids[:5]}{'...' if len(remaining_block_ids) > 5 else ''}")
                 
                 if not proposed_qa_blocks:
                     # Edge case: no blocks for this qa_id (shouldn't happen with proper logic)
@@ -1499,9 +1564,10 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     sliding_state["current_qa_id"] += 1
                     sliding_state["held_blocks"] = []  # Clear held blocks
                     
-                    # Advance window to breakpoint (where next analyst starts)
-                    breakpoint_absolute_index = sliding_state["current_window_start"] + breakpoint_index - 1
-                    sliding_state["current_window_start"] = breakpoint_absolute_index
+                    # Advance window to breakpoint speaker_block_id (where next analyst starts)
+                    sliding_state["current_block_id_index"] = breakpoint_block_id_index
+                    
+                    log_execution(f"📍 Window advanced to speaker block ID {breakpoint_speaker_block_id} (index {breakpoint_block_id_index}) for next QA ID {sliding_state['current_qa_id']}")
                     
                 else:
                     # Validation failed - retry breakpoint detection on same window
@@ -1514,17 +1580,20 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 sliding_state["processing_complete"] = True
             
             # Check for window advancement - critical for preventing infinite loops
-            if sliding_state['current_window_start'] == previous_window_start and not sliding_state["processing_complete"]:
-                log_execution(f"🚨 WARNING: Window did not advance from position {previous_window_start}")
+            if sliding_state['current_block_id_index'] == previous_block_id_index and not sliding_state["processing_complete"]:
+                current_block_id = speaker_block_id_sequence[previous_block_id_index] if previous_block_id_index < len(speaker_block_id_sequence) else "END"
+                log_execution(f"🚨 WARNING: Window did not advance from speaker block ID {current_block_id} (index {previous_block_id_index})")
                 log_execution(f"📊 This could indicate an infinite loop condition")
                 
                 # Force advancement to prevent infinite loop
-                if sliding_state['current_window_start'] + len(current_window) >= len(qa_speaker_blocks):
-                    log_execution(f"🛑 Reached end of blocks, marking processing complete")
+                if sliding_state['current_block_id_index'] + len(current_window_block_ids) >= len(speaker_block_id_sequence):
+                    log_execution(f"🛑 Reached end of speaker blocks, marking processing complete")
                     sliding_state["processing_complete"] = True
                 else:
-                    log_execution(f"🔧 Force advancing window by {len(current_window)} blocks")
-                    sliding_state['current_window_start'] += len(current_window)
+                    force_advance_index = sliding_state['current_block_id_index'] + len(current_window_block_ids)
+                    next_block_id = speaker_block_id_sequence[force_advance_index] if force_advance_index < len(speaker_block_id_sequence) else "END"
+                    log_execution(f"🔧 Force advancing window by {len(current_window_block_ids)} speaker blocks to ID {next_block_id}")
+                    sliding_state['current_block_id_index'] = force_advance_index
         
         # Handle any remaining held blocks as final qa_id
         if sliding_state["held_blocks"]:
