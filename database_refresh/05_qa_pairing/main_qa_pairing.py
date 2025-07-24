@@ -1668,30 +1668,50 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     # Create mapping from speaker block ID to Q&A group info
     block_to_qa_map = {}
     
+    log_execution(f"🔍 DEBUG: Applying QA assignments from {len(qa_groups)} groups to {len(records)} records")
+    
     for group in qa_groups:
         # Get all speaker block IDs from the group's speaker_blocks
         speaker_blocks = group.get("speaker_blocks", [])
+        qa_id = group["qa_group_id"]
+        
+        log_execution(f"🔍 DEBUG: QA Group {qa_id} has {len(speaker_blocks)} speaker blocks")
+        
+        block_ids_in_group = []
         for speaker_block in speaker_blocks:
-            block_id = speaker_block["speaker_block_id"]
-            block_to_qa_map[block_id] = {
-                "qa_group_id": group["qa_group_id"],
-                "qa_group_confidence": group["confidence"],
-                "qa_group_method": group["method"]
-            }
+            block_id = speaker_block.get("speaker_block_id")
+            if block_id is not None:
+                block_to_qa_map[block_id] = {
+                    "qa_group_id": group["qa_group_id"],
+                    "qa_group_confidence": group["confidence"],
+                    "qa_group_method": group["method"]
+                }
+                block_ids_in_group.append(block_id)
+            else:
+                log_execution(f"⚠️ DEBUG: Speaker block missing speaker_block_id in QA Group {qa_id}")
+        
+        log_execution(f"🔍 DEBUG: QA Group {qa_id} mapped speaker block IDs: {block_ids_in_group[:10]}{'...' if len(block_ids_in_group) > 10 else ''}")
+    
+    log_execution(f"🔍 DEBUG: Total speaker block IDs mapped: {len(block_to_qa_map)}")
+    log_execution(f"🔍 DEBUG: Sample mapped IDs: {list(block_to_qa_map.keys())[:10]}{'...' if len(block_to_qa_map) > 10 else ''}")
     
     # Apply to records
     enhanced_records = []
+    qa_records_count = 0
+    assigned_records_count = 0
     
     for record in records:
         enhanced_record = record.copy()
         
         # Only apply Q&A assignments to Q&A section records
         if record.get("section_name") == "Q&A":
-            speaker_block_id = record["speaker_block_id"]
+            qa_records_count += 1
+            speaker_block_id = record.get("speaker_block_id")
             
-            if speaker_block_id in block_to_qa_map:
+            if speaker_block_id is not None and speaker_block_id in block_to_qa_map:
                 qa_info = block_to_qa_map[speaker_block_id]
                 enhanced_record.update(qa_info)
+                assigned_records_count += 1
             else:
                 # No Q&A group assignment
                 enhanced_record.update({
@@ -1699,6 +1719,8 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
                     "qa_group_confidence": None,
                     "qa_group_method": None
                 })
+                if speaker_block_id is None:
+                    log_execution(f"⚠️ DEBUG: Q&A record missing speaker_block_id: {record.get('paragraph_id', 'unknown')}")
         else:
             # Non-Q&A sections don't get Q&A assignments
             enhanced_record.update({
@@ -1708,6 +1730,8 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
             })
         
         enhanced_records.append(enhanced_record)
+    
+    log_execution(f"🔍 DEBUG: Assignment results - Q&A records: {qa_records_count}, Assigned: {assigned_records_count}, Unassigned: {qa_records_count - assigned_records_count}")
     
     return enhanced_records
 
@@ -1865,22 +1889,8 @@ def main() -> None:
         stage_summary["total_llm_cost"] = enhanced_error_logger.total_cost
         stage_summary["total_tokens_used"] = enhanced_error_logger.total_tokens
 
-        # Step 11: Save output
+        # Step 11: Save output (just records array, no metadata wrapper)
         log_console("Step 11: Saving Q&A paired content...")
-        output_data = {
-            "schema_version": "1.0",
-            "processing_timestamp": datetime.now().isoformat(),
-            "total_records": len(all_enhanced_records),
-            "total_transcripts_processed": len(transcripts),
-            "qa_pairing_summary": {
-                "transcripts_with_qa_groups": len([t for t in transcripts.keys() 
-                                                 if any(r.get("qa_group_id") is not None 
-                                                       for r in all_enhanced_records
-                                                       if r.get("filename", "").startswith(t.split("_")[0]))]),
-                "total_qa_groups": total_qa_groups_count
-            },
-            "records": all_enhanced_records
-        }
 
         # Save to NAS following Stage 4 pattern
         output_path = config["stage_05_qa_pairing"]["output_data_path"]
@@ -1889,7 +1899,8 @@ def main() -> None:
 
         nas_create_directory_recursive(nas_conn, output_path)
 
-        output_json = json.dumps(output_data, indent=2)
+        # Output just the records array, no metadata wrapper
+        output_json = json.dumps(all_enhanced_records, indent=2)
         output_bytes = io.BytesIO(output_json.encode("utf-8"))
 
         if nas_upload_file(nas_conn, output_bytes, output_file_path):
