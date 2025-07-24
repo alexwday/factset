@@ -792,191 +792,205 @@ def group_records_by_speaker_block(records: List[Dict]) -> List[Dict]:
     return speaker_block_list
 
 
-# Placeholder for all the Q&A processing functions from original script
-# This is a simplified version - the full implementation would include all the
-# LLM boundary detection, speaker block analysis, etc. from the original
-
-def create_analyst_session_context(qa_speaker_blocks: List[Dict], 
-                                  current_block_index: int,
-                                  qa_start_index: int,
-                                  transcript_metadata: Dict) -> Dict:
+def create_breakpoint_detection_prompt(indexed_blocks: List[Dict], company_name: str, transcript_title: str, current_qa_id: int) -> str:
     """
-    Create focused context window for analyst session boundary detection.
-    
-    Returns structured context with:
-    1. All previous speaker blocks of current QA ID (in full)
-    2. Current speaker block being examined
-    3. Next 4 speaker blocks as lookahead context
+    Create prompt for analyst breakpoint detection in 15-block sliding windows.
+    Instructs LLM to find where the next analyst turn begins or skip to next batch.
     """
-    current_block = qa_speaker_blocks[current_block_index]
     
-    # 1. All previous blocks of current QA ID (from qa_start_index to current_block_index - 1)
-    previous_blocks = qa_speaker_blocks[qa_start_index:current_block_index]
+    # Format the indexed blocks for the prompt
+    formatted_blocks = []
+    for i, block_data in enumerate(indexed_blocks, 1):
+        block = block_data["block"]
+        formatted_blocks.append(f"""Index {i}:
+Speaker: {block['speaker']}
+Content: {format_speaker_block_content(block['paragraphs'])}""")
     
-    # 2. Next blocks for lookahead context (configurable)
-    lookahead_count = config["stage_05_qa_pairing"]["state_config"]["lookahead_blocks"]
-    next_blocks = qa_speaker_blocks[current_block_index + 1:current_block_index + 1 + lookahead_count]
+    blocks_text = "\n\n".join(formatted_blocks)
     
-    return {
-        "transcript_metadata": transcript_metadata,
-        "previous_qa_blocks": previous_blocks,
-        "current_block": current_block,
-        "next_blocks": next_blocks,
-        "current_block_index": current_block_index,
-        "qa_start_index": qa_start_index
-    }
-
-
-def format_analyst_session_context(context_data: Dict) -> str:
-    """
-    Format structured context for analyst session boundary detection.
-    Creates numbered speaker blocks with full content for LLM analysis.
-    """
-    context_sections = []
-    block_counter = 1
-    
-    # Company and transcript context
-    transcript_metadata = context_data.get("transcript_metadata", {})
-    company_name = transcript_metadata.get("company_name", "Unknown Company")
-    transcript_title = transcript_metadata.get("transcript_title", "Earnings Call Transcript")
-    
-    context_sections.append(f"<company>{company_name}</company>")
-    context_sections.append(f"<transcript_title>{transcript_title}</transcript_title>")
-    context_sections.append("")
-    
-    # 1. Previous blocks of current QA ID (if any)
-    previous_blocks = context_data.get("previous_qa_blocks", [])
-    if previous_blocks:
-        context_sections.append("<previous_qa_blocks>")
-        context_sections.append("All previous speaker blocks of the current analyst session:")
-        for block in previous_blocks:
-            context_sections.append(format_numbered_speaker_block(block, block_counter))
-            block_counter += 1
-        context_sections.append("</previous_qa_blocks>")
-        context_sections.append("")
-    
-    # 2. Current block being examined
-    current_block = context_data["current_block"]
-    context_sections.append("<current_decision_block>")
-    context_sections.append("🎯 CURRENT BLOCK - Make decision for this block:")
-    context_sections.append(format_numbered_speaker_block(current_block, block_counter))
-    context_sections.append("</current_decision_block>")
-    block_counter += 1
-    context_sections.append("")
-    
-    # 3. Next blocks for lookahead context (configurable count)
-    next_blocks = context_data.get("next_blocks", [])
-    if next_blocks:
-        context_sections.append("<lookahead_context>")
-        context_sections.append("Next speaker blocks for context (to help determine boundaries):")
-        for block in next_blocks:
-            context_sections.append(format_numbered_speaker_block(block, block_counter))
-            block_counter += 1
-        context_sections.append("</lookahead_context>")
-    
-    return "\n".join(context_sections)
-
-
-def format_numbered_speaker_block(block: Dict, block_number: int) -> str:
-    """Format a speaker block with clear numbering and full content for LLM analysis."""
-    paragraphs_text = []
-    
-    for para in block["paragraphs"]:
-        # Include full paragraph content without modification
-        content = para['paragraph_content'].strip()
-        paragraphs_text.append(content)
-    
-    # Use the actual speaker field as provided in the data
-    speaker = block['speaker']
-    
-    # Join paragraphs with clear separation
-    full_content = "\n".join(paragraphs_text)
-    
-    return f"""Speaker Block {block_number}:
-Speaker: {speaker}
-Content: {full_content}"""
-
-
-def create_analyst_session_prompt(formatted_context: str, current_qa_id: int) -> str:
-    """
-    Create research-backed system prompt for analyst session boundary detection using XML structure.
-    Based on Anthropic 2024 best practices for Claude prompting.
-    """
     return f"""<task>
-You are analyzing an earnings call Q&A transcript to determine when analyst sessions end. Each analyst session (QA ID) captures one analyst's complete interaction from start to finish.
+You are analyzing a {company_name} earnings call Q&A transcript titled "{transcript_title}".
+Your task is to identify where the NEXT analyst's turn begins in these indexed speaker blocks.
 </task>
 
 <context>
-You are examining Speaker Block in position "🎯 CURRENT BLOCK" within the transcript context below. This block is currently part of QA ID {current_qa_id}.
+You are currently processing QA ID {current_qa_id}. You need to find where this analyst's turn ends and the next analyst's turn begins.
 </context>
 
 <objective>
-Determine whether the current speaker block should CONTINUE the current analyst session (QA ID {current_qa_id}) or END it.
+Examine the {len(indexed_blocks)} indexed speaker blocks below and determine:
+1. SKIP: If the current analyst's turn continues beyond these blocks (breakpoint not found)
+2. BREAKPOINT: If you find where the next analyst's turn begins (provide the index 1-{len(indexed_blocks)})
 
-When you choose END:
-- The current block becomes the final block of QA ID {current_qa_id}
-- The very next speaker block will automatically start QA ID {current_qa_id + 1}
+When you choose SKIP: These {len(indexed_blocks)} blocks will be held and combined with the next batch of blocks to find the true breakpoint.
+When you choose BREAKPOINT: The blocks up to (but not including) your chosen index belong to the current analyst.
 </objective>
 
 <instructions>
-Analyze the conversation flow to identify when one analyst's complete session ends and a new analyst's session should begin.
+Look for clear signals that indicate when one analyst's complete session ends and a new analyst begins:
 
-<decision_criteria>
-CONTINUE if:
-- Same analyst is still speaking/asking follow-up questions
-- Executive is still responding to the current analyst's questions
-- There's ongoing back-and-forth between current analyst and executives
-- Operator comments are brief transitions within the same analyst session
+<breakpoint_indicators>
+STRONG breakpoint signals:
+- Operator: "Next question from [New Analyst Name], [Firm]"
+- New speaker introduction after analyst questions are fully answered
+- Clear topic shift with new analyst acknowledgment
+- Operator transitioning to different analyst
 
-END if:
-- Current analyst's questions are completely answered
-- Next speaker block clearly introduces a NEW analyst
-- Operator transitions to "next question from [different analyst]"
-- Current exchange has naturally concluded before new topic/analyst
-</decision_criteria>
+CONTINUE signals (choose SKIP):
+- Same analyst asking follow-up questions
+- Executive still responding to current analyst's questions
+- Ongoing back-and-forth within same analyst session
+- Brief operator comments within same analyst conversation
+</breakpoint_indicators>
 
-<key_principles>
-1. **Analyst Session Focus**: Each QA ID represents ONE analyst's complete interaction
-2. **Sequential Order**: Analysts take turns - one finishes completely before next begins  
-3. **Content Over Names**: Focus on conversation patterns, not just speaker names
-4. **Operator Integration**: Operators introducing new analysts signal session transitions
-5. **Complete Exchanges**: Ensure current analyst's questions are fully addressed before ending
-</key_principles>
-
-<critical_reminder>
-Review the lookahead context carefully. When you choose END:
-- Verify the current block truly concludes the analyst's session
-- Verify the next block appropriately starts a new analyst's session
-- Remember that operators often introduce new analysts with phrases like "next question from..."
-</critical_reminder>
+<decision_logic>
+1. **Analyst Session Focus**: Each QA ID should capture ONE analyst's complete interaction
+2. **Complete Conversations**: Ensure current analyst's questions are fully addressed before breakpoint
+3. **Clear Transitions**: Look for explicit operator transitions or new analyst introductions
+4. **Natural Boundaries**: Breakpoints should feel natural, not mid-conversation
+</decision_logic>
 </instructions>
 
-{formatted_context}
+<indexed_speaker_blocks>
+{blocks_text}
+</indexed_speaker_blocks>
 
 <output_format>
-Make your decision by calling the boundary_decision function with either "continue" or "end".
+Call the analyst_breakpoint function with:
+- "skip" if the breakpoint is not in these {len(indexed_blocks)} blocks
+- "breakpoint" with the index (1-{len(indexed_blocks)}) where the next analyst turn begins
 </output_format>"""
 
 
-def create_analyst_session_boundary_tool():
-    """Create simplified function calling tool for analyst session boundary detection."""
+def create_validation_prompt(proposed_qa_blocks: List[Dict], remaining_blocks: List[Dict], company_name: str, transcript_title: str, qa_id: int) -> str:
+    """
+    Create prompt for validating analyst qa_id assignments.
+    Shows proposed assignment and asks for accept/reject decision.
+    """
+    
+    # Format proposed blocks
+    proposed_text = []
+    for i, block in enumerate(proposed_qa_blocks, 1):
+        proposed_text.append(f"""Block {i}:
+Speaker: {block['speaker']}
+Content: {format_speaker_block_content(block['paragraphs'])}""")
+    
+    # Format remaining blocks (up to 5 for context)
+    remaining_text = []
+    for i, block_data in enumerate(remaining_blocks[:5], 1):
+        block = block_data["block"] if isinstance(block_data, dict) and "block" in block_data else block_data
+        remaining_text.append(f"""Remaining Block {i}:
+Speaker: {block['speaker']}
+Content: {format_speaker_block_content(block['paragraphs'])}""")
+    
+    proposed_blocks_text = "\n\n".join(proposed_text)
+    remaining_blocks_text = "\n\n".join(remaining_text) if remaining_text else "No remaining blocks shown."
+    
+    return f"""<task>
+You are validating analyst turn boundaries for {company_name} earnings call "{transcript_title}".
+Validate whether the proposed QA ID {qa_id} correctly captures ONE analyst's complete turn.
+</task>
+
+<context>
+A breakpoint was detected and these speaker blocks have been proposed as QA ID {qa_id}.
+You need to validate whether this grouping correctly captures one analyst's complete conversation.
+</context>
+
+<objective>
+Review the proposed QA ID assignment and determine:
+- ACCEPT: The assignment correctly captures one analyst's complete turn from start to finish
+- REJECT: The assignment is incorrect (too much, too little, or wrong boundaries)
+</objective>
+
+<validation_criteria>
+ACCEPT if:
+- Contains one analyst's complete question-answer session
+- Includes all follow-up questions and responses for this analyst
+- Ends at a natural conversation boundary
+- Next blocks clearly belong to a different analyst or conversation
+
+REJECT if:
+- Cuts off mid-conversation (analyst questions not fully addressed)
+- Includes parts of different analysts' sessions
+- Stops too early (more questions from same analyst follow)
+- Breakpoint seems arbitrary or unnatural
+</validation_criteria>
+
+<proposed_qa_id_{qa_id}>
+{proposed_blocks_text}
+</proposed_qa_id_{qa_id}>
+
+<remaining_context>
+{remaining_blocks_text}
+</remaining_context>
+
+<output_format>
+Call the validate_assignment function with:
+- "accept" if QA ID {qa_id} correctly captures the analyst's complete turn
+- "reject" if the assignment needs to be reconsidered
+</output_format>"""
+
+
+def format_speaker_block_content(paragraphs: List[Dict]) -> str:
+    """Format paragraph content from a speaker block for prompt display."""
+    content_parts = []
+    for paragraph in paragraphs:
+        content = paragraph.get('paragraph_content', '').strip()
+        if content:
+            content_parts.append(content)
+    return "\n".join(content_parts)
+
+
+def create_breakpoint_detection_tool():
+    """Create function calling tool for analyst breakpoint detection in 15-block windows."""
     
     return [
         {
             "type": "function",  
             "function": {
-                "name": "boundary_decision",
-                "description": "Decide whether the current speaker block continues or ends the current analyst session",
+                "name": "analyst_breakpoint",
+                "description": "Identify where the next analyst turn begins in the indexed speaker blocks, or skip to examine the next batch. When you skip, the current 15 blocks will be held and combined with blocks from the next window to find the true breakpoint.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "decision": {
+                        "action": {
                             "type": "string",
-                            "enum": ["continue", "end"],
-                            "description": "continue: Current speaker block continues the current analyst session. end: Current speaker block ends the current analyst session and next block starts new session."
+                            "enum": ["skip", "breakpoint"],
+                            "description": "skip: The end of current analyst turn is not in these 15 blocks, examine next batch and combine with current blocks. breakpoint: Found where next analyst turn begins."
+                        },
+                        "index": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 15,
+                            "description": "Required when action is 'breakpoint'. The 1-based index (1-15) where the next analyst turn begins."
                         }
                     },
-                    "required": ["decision"]
+                    "required": ["action"]
+                }
+            }
+        }
+    ]
+
+
+def create_validation_tool():
+    """Create function calling tool for validating analyst qa_id assignments."""
+    
+    return [
+        {
+            "type": "function",  
+            "function": {
+                "name": "validate_assignment",
+                "description": "Validate whether the proposed qa_id assignment correctly captures one analyst's complete turn from start to finish",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "validation": {
+                            "type": "string",
+                            "enum": ["accept", "reject"],
+                            "description": "accept: The qa_id assignment correctly captures the analyst's complete turn. reject: The assignment is incorrect and breakpoint detection should be repeated."
+                        }
+                    },
+                    "required": ["validation"]
                 }
             }
         }
@@ -999,38 +1013,54 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     }
 
 
-# Removed old validation and state management functions - replaced with simplified state-based approach
+def create_indexed_speaker_blocks(speaker_blocks: List[Dict], start_index: int, window_size: int = 15) -> List[Dict]:
+    """
+    Create 1-based indexed speaker blocks for sliding window processing.
+    Returns list of dicts with 'index' (1-based) and 'block' (speaker block data).
+    """
+    indexed_blocks = []
+    end_index = min(start_index + window_size, len(speaker_blocks))
+    
+    for i in range(start_index, end_index):
+        indexed_block = {
+            "index": len(indexed_blocks) + 1,  # 1-based indexing
+            "absolute_index": i,  # Original position in full speaker_blocks array
+            "block": speaker_blocks[i]
+        }
+        indexed_blocks.append(indexed_block)
+    
+    return indexed_blocks
 
 
-def make_qa_boundary_decision(context_data: Dict,
-                            current_block_id: int,
+def detect_analyst_breakpoint(indexed_blocks: List[Dict], 
+                            company_name: str, 
+                            transcript_title: str, 
                             current_qa_id: int,
                             transcript_id: str,
-                            enhanced_error_logger: EnhancedErrorLogger) -> Optional[str]:
+                            enhanced_error_logger: EnhancedErrorLogger) -> Optional[Dict]:
     """
-    Make simplified LLM decision for analyst session boundary detection.
-    Returns "continue" or "end" based on context analysis.
+    Use LLM to detect analyst breakpoint in 15-block window.
+    Returns dict with action ("skip" or "breakpoint") and optional index.
     """
     global llm_client
     
     try:
-        # Format context for LLM analysis
-        formatted_context = format_analyst_session_context(context_data)
-        prompt = create_analyst_session_prompt(formatted_context, current_qa_id)
+        # Create breakpoint detection prompt
+        prompt = create_breakpoint_detection_prompt(indexed_blocks, company_name, transcript_title, current_qa_id)
         
         # Retry logic for LLM calls
-        max_retries = 3 
+        max_retries = 3
         retry_delay = 1  # seconds
         
         for attempt in range(1, max_retries + 1):
             try:
-                log_execution(f"Block {current_block_id} LLM analysis attempt {attempt}/{max_retries}")
+                log_execution(f"Breakpoint detection attempt {attempt}/{max_retries} for QA ID {current_qa_id}")
                 
                 # Make LLM API call
                 response = llm_client.chat.completions.create(
                     model=config["stage_05_qa_pairing"]["llm_config"]["model"],
                     messages=[{"role": "user", "content": prompt}],
-                    tools=create_analyst_session_boundary_tool(),
+                    tools=create_breakpoint_detection_tool(),
                     tool_choice="required", 
                     temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
                     max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
@@ -1038,13 +1068,13 @@ def make_qa_boundary_decision(context_data: Dict,
                 
                 # Parse response
                 if not response.choices[0].message.tool_calls:
-                    error_msg = f"No tool call response for block {current_block_id}"
+                    error_msg = f"No tool call response for breakpoint detection (QA ID {current_qa_id})"
                     if attempt == max_retries:
                         log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
-                        enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                        enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
                         return None
                     else:
-                        log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                        log_execution(f"{error_msg}, retrying in {retry_delay}s...")
                         time.sleep(retry_delay)
                         continue
                 
@@ -1052,19 +1082,37 @@ def make_qa_boundary_decision(context_data: Dict,
                 try:
                     tool_call = response.choices[0].message.tool_calls[0]
                     result = json.loads(tool_call.function.arguments)
-                    decision = result["decision"]
+                    action = result["action"]
                     
-                    if decision not in ["continue", "end"]:
-                        raise ValueError(f"Invalid decision: {decision}")
+                    if action not in ["skip", "breakpoint"]:
+                        raise ValueError(f"Invalid action: {action}")
+                    
+                    # Validate breakpoint index if provided
+                    if action == "breakpoint":
+                        if "index" not in result:
+                            raise ValueError("Breakpoint action requires index")
+                        
+                        breakpoint_index = result["index"]
+                        if not (1 <= breakpoint_index <= len(indexed_blocks)):
+                            raise ValueError(f"Invalid breakpoint index: {breakpoint_index} (must be 1-{len(indexed_blocks)})")
+                        
+                        parsed_result = {
+                            "action": "breakpoint",
+                            "index": breakpoint_index
+                        }
+                    else:
+                        parsed_result = {
+                            "action": "skip"
+                        }
                         
                 except (json.JSONDecodeError, KeyError, ValueError) as e:
-                    error_msg = f"Failed to parse LLM response for block {current_block_id}: {e}"
+                    error_msg = f"Failed to parse breakpoint detection response: {e}"
                     if attempt == max_retries:
                         log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
-                        enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                        enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
                         return None
                     else:
-                        log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                        log_execution(f"{error_msg}, retrying in {retry_delay}s...")
                         time.sleep(retry_delay)
                         continue
                 
@@ -1077,49 +1125,146 @@ def make_qa_boundary_decision(context_data: Dict,
                         "total_tokens": response.usage.total_tokens,
                         "cost": cost_info
                     }
-                    log_execution(f"Block {current_block_id} tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, total: {response.usage.total_tokens}, cost: ${cost_info['total_cost']:.4f}")
+                    log_execution(f"Breakpoint detection tokens - input: {response.usage.prompt_tokens}, output: {response.usage.completion_tokens}, cost: ${cost_info['total_cost']:.4f}")
                     
                     # Accumulate costs for final summary
                     enhanced_error_logger.accumulate_costs(token_usage)
                 
                 # Log successful decision
                 attempt_info = f" (attempt {attempt})" if attempt > 1 else ""
-                log_execution(f"Block {current_block_id} decision{attempt_info}: {decision} for QA ID {current_qa_id}")
+                if parsed_result["action"] == "breakpoint":
+                    log_execution(f"Breakpoint detected{attempt_info}: index {parsed_result['index']} for QA ID {current_qa_id}")
+                else:
+                    log_execution(f"Skip decision{attempt_info} for QA ID {current_qa_id}")
                 
-                return decision
+                return parsed_result
                 
             except Exception as e:
-                error_msg = f"LLM analysis failed for block {current_block_id}: {e}"
+                error_msg = f"Breakpoint detection failed: {e}"
                 if attempt == max_retries:
                     log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
-                    enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, f"{error_msg} after {max_retries} attempts")
+                    enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
                     return None
                 else:
-                    log_execution(f"Block {current_block_id}: {error_msg}, retrying in {retry_delay}s...")
+                    log_execution(f"{error_msg}, retrying in {retry_delay}s...")
                     time.sleep(retry_delay)
         
         # Should never reach here, but safety fallback
         return None
         
     except Exception as e:
-        error_msg = f"Context preparation failed for block {current_block_id}: {e}"
+        error_msg = f"Context preparation failed for breakpoint detection: {e}"
         log_error(error_msg, "boundary_detection", {})
-        enhanced_error_logger.log_boundary_error(transcript_id, current_block_id, error_msg)
+        enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, error_msg)
         return None
 
 
-# Removed old confidence calculation functions - replaced with state-based approach
-
-
-
-
-def process_qa_boundaries_state_based(speaker_blocks: List[Dict], transcript_id: str, transcript_metadata: Dict, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
+def validate_analyst_assignment(proposed_qa_blocks: List[Dict], 
+                              remaining_blocks: List[Dict],
+                              company_name: str, 
+                              transcript_title: str, 
+                              qa_id: int,
+                              transcript_id: str,
+                              enhanced_error_logger: EnhancedErrorLogger) -> bool:
     """
-    State-based Q&A boundary processing focused on analyst sessions.
+    Use LLM to validate analyst qa_id assignment with 3-attempt cycle.
+    Returns True if validated, False if rejected after all attempts.
+    """
+    global llm_client
     
-    State 1: Auto-assign first block to QA ID 1
-    State 2: LLM decides continue vs end current QA ID  
-    State 3: Auto-assign next block to next QA ID, return to State 2
+    max_validation_attempts = 3
+    
+    for validation_attempt in range(1, max_validation_attempts + 1):
+        try:
+            log_execution(f"Validation attempt {validation_attempt}/{max_validation_attempts} for QA ID {qa_id}")
+            
+            # Create validation prompt
+            prompt = create_validation_prompt(proposed_qa_blocks, remaining_blocks, company_name, transcript_title, qa_id)
+            
+            # Make LLM API call
+            response = llm_client.chat.completions.create(
+                model=config["stage_05_qa_pairing"]["llm_config"]["model"],
+                messages=[{"role": "user", "content": prompt}],
+                tools=create_validation_tool(),
+                tool_choice="required", 
+                temperature=config["stage_05_qa_pairing"]["llm_config"]["temperature"],
+                max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
+            )
+            
+            # Parse response
+            if not response.choices[0].message.tool_calls:
+                error_msg = f"No tool call response for validation (QA ID {qa_id})"
+                log_execution(f"{error_msg}, attempt {validation_attempt}/{max_validation_attempts}")
+                if validation_attempt == max_validation_attempts:
+                    log_execution(f"Validation failed after {max_validation_attempts} attempts, accepting assignment")
+                    return True  # Accept on final failure
+                continue
+            
+            # Extract validation decision
+            try:
+                tool_call = response.choices[0].message.tool_calls[0]
+                result = json.loads(tool_call.function.arguments)
+                validation = result["validation"]
+                
+                if validation not in ["accept", "reject"]:
+                    raise ValueError(f"Invalid validation: {validation}")
+                
+                # Log token usage
+                if hasattr(response, 'usage') and response.usage:
+                    cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
+                    token_usage = {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens,
+                        "cost": cost_info
+                    }
+                    enhanced_error_logger.accumulate_costs(token_usage)
+                
+                # Log and return validation result
+                attempt_info = f" (attempt {validation_attempt})" if validation_attempt > 1 else ""
+                log_execution(f"Validation{attempt_info}: {validation} for QA ID {qa_id}")
+                
+                if validation == "accept":
+                    return True
+                else:
+                    # Reject - try again if attempts remaining
+                    if validation_attempt == max_validation_attempts:
+                        log_execution(f"Validation rejected after {max_validation_attempts} attempts, accepting assignment anyway")
+                        return True  # Accept on final failure
+                    else:
+                        log_execution(f"Validation rejected, will retry breakpoint detection")
+                        return False
+                
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                error_msg = f"Failed to parse validation response: {e}"
+                log_execution(f"{error_msg}, attempt {validation_attempt}/{max_validation_attempts}")
+                if validation_attempt == max_validation_attempts:
+                    log_execution(f"Validation parsing failed after {max_validation_attempts} attempts, accepting assignment")
+                    return True  # Accept on final failure
+                continue
+                
+        except Exception as e:
+            error_msg = f"Validation failed: {e}"
+            log_execution(f"{error_msg}, attempt {validation_attempt}/{max_validation_attempts}")
+            if validation_attempt == max_validation_attempts:
+                log_execution(f"Validation error after {max_validation_attempts} attempts, accepting assignment")
+                enhanced_error_logger.log_validation_error(transcript_id, f"QA ID {qa_id} validation failed: {error_msg}")
+                return True  # Accept on final failure
+            continue
+    
+    # Fallback - should not reach here
+    return True
+
+
+def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_id: str, transcript_metadata: Dict, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
+    """
+    Sliding window Q&A boundary processing with 15-block windows and skip/hold logic.
+    
+    Process:
+    1. Create 15-block sliding windows (1-based indexing)
+    2. LLM decides "skip" (hold blocks) or "breakpoint" (create qa_id)
+    3. If breakpoint: validate assignment, advance window from breakpoint
+    4. If skip: hold blocks, advance window, combine with next batch
     """
     try:
         # Filter to only Q&A sections
@@ -1130,173 +1275,144 @@ def process_qa_boundaries_state_based(speaker_blocks: List[Dict], transcript_id:
             log_execution(f"No Q&A sections found in transcript {transcript_id}")
             return []
         
-        log_execution(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks using state-based approach")
+        log_execution(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks using sliding window approach")
         
-        # Initialize state machine
-        qa_state = {
+        # Initialize sliding window state
+        sliding_state = {
             "current_qa_id": 1,
-            "current_qa_start_index": 0,  # Index where current QA ID started
-            "state": "auto_assign_start",  # States: auto_assign_start, llm_decision, auto_assign_next
-            "all_decisions": []
+            "current_window_start": 0,  # Absolute index in qa_speaker_blocks
+            "held_blocks": [],  # Accumulated blocks from "skip" decisions
+            "processing_complete": False,
+            "all_qa_groups": []
         }
         
-        # State 1: Auto-assign first block
-        first_block = qa_speaker_blocks[0]
-        first_decision = {
-            "current_block_id": first_block["speaker_block_id"],
-            "qa_group_id": qa_state["current_qa_id"],
-            "decision_type": "auto_assigned_start",
-            "state": "auto_assign_start"
-        }
-        qa_state["all_decisions"].append(first_decision)
-        log_execution(f"State 1: Auto-assigned block {first_block['speaker_block_id']} to QA ID {qa_state['current_qa_id']}")
+        # Extract metadata for prompts
+        company_name = transcript_metadata.get("company_name", "Unknown Company")
+        transcript_title = transcript_metadata.get("transcript_title", "Earnings Call Transcript")
         
-        # Process remaining blocks using while loop to handle skipped iterations
-        i = 1
-        while i < len(qa_speaker_blocks):
-            current_block = qa_speaker_blocks[i]
-            current_block_id = current_block["speaker_block_id"]
+        # Main processing loop
+        while not sliding_state["processing_complete"] and sliding_state["current_window_start"] < len(qa_speaker_blocks):
             
-            # State 2: LLM Decision (continue vs end current QA ID)
-            qa_state["state"] = "llm_decision"
-            
-            # Create focused context window for LLM
-            context_data = create_analyst_session_context(
+            # Create current window (up to 15 blocks)
+            current_window = create_indexed_speaker_blocks(
                 qa_speaker_blocks, 
-                i, 
-                qa_state["current_qa_start_index"],
-                transcript_metadata
+                sliding_state["current_window_start"], 
+                window_size=15
             )
             
-            # Make LLM decision
-            llm_decision = make_qa_boundary_decision(
-                context_data, 
-                current_block_id, 
-                qa_state["current_qa_id"],
+            if not current_window:
+                # No more blocks to process
+                sliding_state["processing_complete"] = True
+                break
+            
+            log_execution(f"Processing window starting at block {sliding_state['current_window_start']} with {len(current_window)} blocks for QA ID {sliding_state['current_qa_id']}")
+            
+            # Phase 1: Breakpoint Detection
+            breakpoint_result = detect_analyst_breakpoint(
+                current_window,
+                company_name,
+                transcript_title, 
+                sliding_state["current_qa_id"],
                 transcript_id,
                 enhanced_error_logger
             )
             
-            if llm_decision == "continue":
-                # Continue current QA ID
-                decision = {
-                    "current_block_id": current_block_id,
-                    "qa_group_id": qa_state["current_qa_id"],
-                    "decision_type": "llm_continue",
-                    "state": "llm_decision"
-                }
-                qa_state["all_decisions"].append(decision)
-                log_execution(f"State 2: Block {current_block_id} continues QA ID {qa_state['current_qa_id']}")
-                i += 1  # Move to next block
+            if breakpoint_result is None:
+                # LLM call failed - treat as skip to be conservative
+                log_execution(f"Breakpoint detection failed, treating as skip for QA ID {sliding_state['current_qa_id']}")
+                sliding_state["held_blocks"].extend([block_data["block"] for block_data in current_window])
+                sliding_state["current_window_start"] += len(current_window)
+                continue
+            
+            if breakpoint_result["action"] == "skip":
+                # Hold current blocks and advance window
+                log_execution(f"Skip decision: holding {len(current_window)} blocks for QA ID {sliding_state['current_qa_id']}")
+                sliding_state["held_blocks"].extend([block_data["block"] for block_data in current_window])
+                sliding_state["current_window_start"] += len(current_window)
+                continue
                 
-            elif llm_decision == "end":
-                # End current QA ID and auto-assign next block to next QA ID
+            elif breakpoint_result["action"] == "breakpoint":
+                # Found breakpoint - create qa_id assignment
+                breakpoint_index = breakpoint_result["index"]  # 1-based index within current window
                 
-                # First, add the current block as the end of current QA ID
-                end_decision = {
-                    "current_block_id": current_block_id,
-                    "qa_group_id": qa_state["current_qa_id"],
-                    "decision_type": "llm_end",
-                    "state": "llm_decision"
-                }
-                qa_state["all_decisions"].append(end_decision)
-                log_execution(f"State 2: Block {current_block_id} ends QA ID {qa_state['current_qa_id']}")
+                log_execution(f"Breakpoint detected at index {breakpoint_index} for QA ID {sliding_state['current_qa_id']}")
                 
-                # State 3: Auto-assign next block (if exists) to next QA ID
-                if i + 1 < len(qa_speaker_blocks):
-                    qa_state["current_qa_id"] += 1
-                    qa_state["current_qa_start_index"] = i + 1
-                    qa_state["state"] = "auto_assign_next"
-                    
-                    next_block = qa_speaker_blocks[i + 1]
-                    next_decision = {
-                        "current_block_id": next_block["speaker_block_id"],
-                        "qa_group_id": qa_state["current_qa_id"],
-                        "decision_type": "auto_assigned_next",
-                        "state": "auto_assign_next"
-                    }
-                    qa_state["all_decisions"].append(next_decision)
-                    log_execution(f"State 3: Auto-assigned block {next_block['speaker_block_id']} to QA ID {qa_state['current_qa_id']}")
-                    
-                    # Skip the next block since we've already processed it, move to i+2
-                    i += 2
+                # Blocks for current qa_id: held_blocks + blocks up to (but not including) breakpoint
+                current_window_blocks = [block_data["block"] for block_data in current_window[:breakpoint_index-1]]
+                proposed_qa_blocks = sliding_state["held_blocks"] + current_window_blocks
+                
+                # Remaining blocks in window (for validation context)
+                remaining_window_blocks = current_window[breakpoint_index-1:]
+                
+                if not proposed_qa_blocks:
+                    # Edge case: no blocks for this qa_id (shouldn't happen with proper logic)
+                    log_execution(f"No blocks proposed for QA ID {sliding_state['current_qa_id']}, skipping validation")
+                    validated = True
                 else:
-                    # No more blocks, end processing
-                    i += 1
+                    # Phase 2: Validation (3 attempts)
+                    validated = validate_analyst_assignment(
+                        proposed_qa_blocks,
+                        remaining_window_blocks,
+                        company_name,
+                        transcript_title,
+                        sliding_state["current_qa_id"],
+                        transcript_id,
+                        enhanced_error_logger
+                    )
+                
+                if validated:
+                    # Create and store qa_group
+                    if proposed_qa_blocks:  # Only create group if we have blocks
+                        qa_group = {
+                            "qa_group_id": sliding_state["current_qa_id"],
+                            "start_block_id": proposed_qa_blocks[0]["speaker_block_id"],
+                            "end_block_id": proposed_qa_blocks[-1]["speaker_block_id"],
+                            "confidence": 1.0,  # High confidence in sliding window + validation
+                            "method": "sliding_window_validated",
+                            "speaker_blocks": proposed_qa_blocks
+                        }
+                        sliding_state["all_qa_groups"].append(qa_group)
+                        log_execution(f"Created QA ID {sliding_state['current_qa_id']} with {len(proposed_qa_blocks)} blocks")
+                    
+                    # Advance state for next qa_id
+                    sliding_state["current_qa_id"] += 1
+                    sliding_state["held_blocks"] = []  # Clear held blocks
+                    
+                    # Advance window to breakpoint (where next analyst starts)
+                    breakpoint_absolute_index = sliding_state["current_window_start"] + breakpoint_index - 1
+                    sliding_state["current_window_start"] = breakpoint_absolute_index
+                    
+                else:
+                    # Validation failed - retry breakpoint detection on same window
+                    log_execution(f"Validation failed for QA ID {sliding_state['current_qa_id']}, retrying breakpoint detection")
+                    # Continue with same window state - will retry breakpoint detection
                     
             else:
-                # LLM decision failed - treat as continue to be conservative
-                log_execution(f"LLM decision failed for block {current_block_id}, defaulting to continue")
-                decision = {
-                    "current_block_id": current_block_id,
-                    "qa_group_id": qa_state["current_qa_id"],
-                    "decision_type": "default_continue",
-                    "state": "llm_decision_failed"
-                }
-                qa_state["all_decisions"].append(decision)
-                i += 1  # Move to next block
+                # Invalid action (shouldn't happen with validation)
+                log_execution(f"Invalid breakpoint action: {breakpoint_result.get('action')}")
+                sliding_state["processing_complete"] = True
         
-        # Convert decisions to QA groups
-        qa_groups = convert_decisions_to_qa_groups(qa_state["all_decisions"])
+        # Handle any remaining held blocks as final qa_id
+        if sliding_state["held_blocks"]:
+            final_qa_group = {
+                "qa_group_id": sliding_state["current_qa_id"],
+                "start_block_id": sliding_state["held_blocks"][0]["speaker_block_id"],
+                "end_block_id": sliding_state["held_blocks"][-1]["speaker_block_id"],
+                "confidence": 1.0,
+                "method": "sliding_window_final",
+                "speaker_blocks": sliding_state["held_blocks"]
+            }
+            sliding_state["all_qa_groups"].append(final_qa_group)
+            log_execution(f"Created final QA ID {sliding_state['current_qa_id']} with {len(sliding_state['held_blocks'])} remaining blocks")
         
-        log_execution(f"Successfully identified {len(qa_groups)} Q&A groups using state-based approach")
-        return qa_groups
+        log_execution(f"Successfully identified {len(sliding_state['all_qa_groups'])} Q&A groups using sliding window approach")
+        return sliding_state["all_qa_groups"]
         
     except Exception as e:
-        error_msg = f"State-based Q&A boundary processing failed: {e}"
+        error_msg = f"Sliding window Q&A boundary processing failed: {e}"
         log_error(error_msg, "processing", {})
         enhanced_error_logger.log_processing_error(transcript_id, error_msg)
         return []
-
-
-def convert_decisions_to_qa_groups(all_decisions: List[Dict]) -> List[Dict]:
-    """Convert state machine decisions to QA groups for final output."""
-    qa_groups = []
-    current_group_decisions = []
-    current_qa_id = None
-    
-    for decision in all_decisions:
-        qa_id = decision["qa_group_id"]
-        
-        if qa_id != current_qa_id:
-            # Finalize previous group
-            if current_group_decisions:
-                qa_groups.append(create_qa_group_from_decisions(current_group_decisions))
-            
-            # Start new group
-            current_group_decisions = [decision]
-            current_qa_id = qa_id
-        else:
-            # Continue current group
-            current_group_decisions.append(decision)
-    
-    # Finalize last group
-    if current_group_decisions:
-        qa_groups.append(create_qa_group_from_decisions(current_group_decisions))
-    
-    return qa_groups
-
-
-def create_qa_group_from_decisions(decisions: List[Dict]) -> Dict:
-    """Create QA group object from list of decisions."""
-    block_ids = [d["current_block_id"] for d in decisions]
-    qa_id = decisions[0]["qa_group_id"]
-    
-    # Determine method based on decision types
-    decision_types = [d["decision_type"] for d in decisions]
-    if any("auto_assigned" in dt for dt in decision_types):
-        method = "state_based_auto_assignment"
-    else:
-        method = "state_based_llm_decision"
-    
-    return {
-        "qa_group_id": qa_id,
-        "start_block_id": min(block_ids),
-        "end_block_id": max(block_ids),
-        "confidence": 1.0,  # High confidence in state-based approach
-        "method": method,
-        "block_decisions": decisions
-    }
 
 
 def extract_transcript_metadata(transcript_records: List[Dict]) -> Dict:
@@ -1327,42 +1443,20 @@ def extract_transcript_metadata(transcript_records: List[Dict]) -> Dict:
     }
 
 
-def finalize_qa_group(group_decisions: List[Dict], speaker_blocks: List[Dict]) -> Dict:
-    """Create final Q&A group from boundary decisions."""
-    
-    # Get block range
-    block_ids = [d["current_block_id"] for d in group_decisions]
-    start_block_id = min(block_ids)
-    end_block_id = max(block_ids)
-    
-    # Calculate aggregated confidence and method
-    confidence = calculate_qa_group_confidence(group_decisions)
-    method = determine_qa_group_method(group_decisions)
-    
-    # Get group ID (should be consistent across decisions)
-    qa_group_id = group_decisions[0]["qa_group_id"]
-    
-    return {
-        "qa_group_id": qa_group_id,
-        "start_block_id": start_block_id,
-        "end_block_id": end_block_id,
-        "confidence": confidence,
-        "method": method,
-        "block_decisions": group_decisions
-    }
-
-
 def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) -> List[Dict]:
     """
     Apply Q&A group assignments to paragraph records.
     Only adds: qa_group_id, qa_group_confidence, qa_group_method
     """
     
-    # Create mapping from speaker block to Q&A group
+    # Create mapping from speaker block ID to Q&A group info
     block_to_qa_map = {}
     
     for group in qa_groups:
-        for block_id in range(group["start_block_id"], group["end_block_id"] + 1):
+        # Get all speaker block IDs from the group's speaker_blocks
+        speaker_blocks = group.get("speaker_blocks", [])
+        for speaker_block in speaker_blocks:
+            block_id = speaker_block["speaker_block_id"]
             block_to_qa_map[block_id] = {
                 "qa_group_id": group["qa_group_id"],
                 "qa_group_confidence": group["confidence"],
@@ -1422,8 +1516,8 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
         # Group records by speaker blocks
         speaker_blocks = group_records_by_speaker_block(transcript_records)
         
-        # Process Q&A boundaries using state-based approach
-        qa_groups = process_qa_boundaries_state_based(
+        # Process Q&A boundaries using sliding window approach
+        qa_groups = process_qa_boundaries_sliding_window(
             speaker_blocks, 
             transcript_id, 
             transcript_metadata, 
