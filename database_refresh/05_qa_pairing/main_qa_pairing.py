@@ -1345,8 +1345,8 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             log_execution(f"No Q&A sections found in transcript {transcript_id}")
             return []
         
-        # Sort by speaker_block_id first, then by paragraph_id within each speaker block
-        qa_speaker_blocks.sort(key=lambda x: (x.get("speaker_block_id", 0), x.get("paragraph_id", 0)))
+        # Sort by speaker_block_id
+        qa_speaker_blocks.sort(key=lambda x: x.get("speaker_block_id", 0))
         
         # Extract unique speaker_block_ids for tracking (maintains original transcript order)
         speaker_block_id_sequence = []
@@ -1530,10 +1530,17 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     continue
                 
                 log_execution(f"Breakpoint detected at index {breakpoint_index} (speaker block {breakpoint_speaker_block_id})")
+                log_execution(f"Current window speaker blocks: {current_window_block_ids}, held blocks count: {len(sliding_state['held_blocks'])}")
                 
                 # Get speaker_block_ids up to (but not including) breakpoint for current qa_id
-                current_qa_block_ids = current_window_block_ids[:breakpoint_index-1]
-                current_window_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_qa_block_ids)
+                # breakpoint_index is 1-based, so if it's 3, we want indices 0,1 (blocks 1,2)
+                if breakpoint_index > 1:
+                    current_qa_block_ids = current_window_block_ids[:breakpoint_index-1]
+                    current_window_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_qa_block_ids)
+                else:
+                    # Breakpoint at index 1 means no blocks from current window belong to current QA
+                    current_qa_block_ids = []
+                    current_window_blocks = []
                 proposed_qa_blocks = sliding_state["held_blocks"] + current_window_blocks
                 
                 # Remaining speaker_block_ids in window (for validation context)
@@ -1543,9 +1550,13 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 # Prepare for validation
                 
                 if not proposed_qa_blocks:
-                    # Edge case: no blocks for this qa_id (shouldn't happen with proper logic)
-                    log_execution(f"No blocks proposed for QA ID {sliding_state['current_qa_id']}, skipping validation")
-                    validated = True
+                    # Edge case: no blocks for this qa_id 
+                    # This can happen when breakpoint is at index 1 with no held blocks
+                    log_execution(f"WARNING: No blocks proposed for QA ID {sliding_state['current_qa_id']} (breakpoint at index {breakpoint_index}, held blocks: {len(sliding_state['held_blocks'])})")
+                    # Don't create an empty group - just advance
+                    sliding_state["current_block_id_index"] = breakpoint_block_id_index
+                    # Don't increment QA ID since we didn't create a group
+                    continue
                 else:
                     # Phase 2: Validation (3 attempts)
                     validated = validate_analyst_assignment(
@@ -1651,8 +1662,28 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             log_execution(f"Created final QA ID {sliding_state['current_qa_id']} with {len(sliding_state['held_blocks'])} remaining blocks")
         
         log_execution(f"Sliding window processing complete - Created {len(sliding_state['all_qa_groups'])} Q&A groups in {iteration_count} iterations")
+        
+        # Check for gaps in speaker block coverage
+        all_assigned_blocks = set()
+        for group in sliding_state["all_qa_groups"]:
+            for block in group.get("speaker_blocks", []):
+                all_assigned_blocks.add(block.get("speaker_block_id"))
+        
+        # Find gaps
+        all_qa_block_ids = set(b.get("speaker_block_id") for b in qa_speaker_blocks)
+        missing_blocks = all_qa_block_ids - all_assigned_blocks
+        
+        if missing_blocks:
+            log_execution(f"WARNING: {len(missing_blocks)} speaker blocks not assigned to any QA group: {sorted(missing_blocks)[:10]}{'...' if len(missing_blocks) > 10 else ''}")
+            # Log details about missing blocks
+            for block_id in sorted(missing_blocks)[:5]:
+                # Find the speaker block
+                for block in qa_speaker_blocks:
+                    if block.get("speaker_block_id") == block_id:
+                        log_execution(f"  Missing block {block_id}: Speaker={block.get('speaker')}, Paragraphs={len(block.get('paragraphs', []))}")
+                        break
             
-        log_execution(f"Successfully identified {len(sliding_state['all_qa_groups'])} Q&A groups using sliding window approach")
+        log_execution(f"Successfully identified {len(sliding_state['all_qa_groups'])} Q&A groups covering {len(all_assigned_blocks)} of {len(all_qa_block_ids)} speaker blocks")
         return sliding_state["all_qa_groups"]
         
     except Exception as e:
@@ -1699,20 +1730,23 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     # Create mapping from speaker block ID to Q&A group info
     block_to_qa_map = {}
     
-    log_execution(f"🔍 DEBUG: Applying QA assignments from {len(qa_groups)} groups to {len(records)} records")
+    log_execution(f"Applying Q&A assignments from {len(qa_groups)} groups to {len(records)} records")
     
-    # DEBUG: Show qa_groups summary
-    for i, group in enumerate(qa_groups):
+    # Log QA groups summary for debugging missing assignments
+    all_covered_speaker_ids = set()
+    for group in qa_groups:
         speaker_blocks = group.get("speaker_blocks", [])
-        speaker_ids = [b.get('speaker_block_id') for b in speaker_blocks[:5]]
-        log_execution(f"🔍 qa_groups[{i}]: ID={group.get('qa_group_id')}, blocks={len(speaker_blocks)}, speaker_ids={speaker_ids}{'...' if len(speaker_blocks) > 5 else ''}")
+        block_ids = [b.get("speaker_block_id") for b in speaker_blocks]
+        all_covered_speaker_ids.update(block_ids)
+        if block_ids:
+            log_execution(f"QA Group {group['qa_group_id']}: {len(speaker_blocks)} blocks, speaker IDs {min(block_ids)}-{max(block_ids)}")
     
     for group in qa_groups:
         # Get all speaker block IDs from the group's speaker_blocks
         speaker_blocks = group.get("speaker_blocks", [])
         qa_id = group["qa_group_id"]
         
-        log_execution(f"🔍 DEBUG: QA Group {qa_id} has {len(speaker_blocks)} speaker blocks")
+        # Process all speaker blocks in this QA group
         
         block_ids_in_group = []
         for speaker_block in speaker_blocks:
@@ -1725,12 +1759,7 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
                 }
                 block_ids_in_group.append(block_id)
             else:
-                log_execution(f"⚠️ DEBUG: Speaker block missing speaker_block_id in QA Group {qa_id}: {list(speaker_block.keys()) if isinstance(speaker_block, dict) else type(speaker_block)}")
-        
-        log_execution(f"🔍 DEBUG: QA Group {qa_id} mapped speaker block IDs: {block_ids_in_group[:10]}{'...' if len(block_ids_in_group) > 10 else ''}")
-    
-    log_execution(f"🔍 DEBUG: Total speaker block IDs mapped: {len(block_to_qa_map)}")
-    log_execution(f"🔍 DEBUG: Sample mapped IDs: {list(block_to_qa_map.keys())[:10]}{'...' if len(block_to_qa_map) > 10 else ''}")
+                log_execution(f"WARNING: Speaker block missing speaker_block_id in QA Group {qa_id}")
     
     # Apply to records
     enhanced_records = []
@@ -1738,9 +1767,7 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     assigned_records_count = 0
     unassigned_speaker_block_ids = []
     
-    # DEBUG: Show sample records structure
-    qa_record_sample = [r for r in records[:10] if r.get('section_name') == 'Q&A'][:3]
-    log_execution(f"🔍 Sample Q&A records: {[(r.get('speaker_block_id'), r.get('paragraph_id')) for r in qa_record_sample]}")
+    log_execution(f"Total speaker block IDs covered by QA groups: {len(all_covered_speaker_ids)}")
     
     for record in records:
         enhanced_record = record.copy()
@@ -1761,10 +1788,9 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
                     "qa_group_confidence": None,
                     "qa_group_method": None
                 })
-                if speaker_block_id is None:
-                    log_execution(f"⚠️ DEBUG: Q&A record missing speaker_block_id: {record.get('paragraph_id', 'unknown')}")
-                elif speaker_block_id not in block_to_qa_map:
-                    unassigned_speaker_block_ids.append(speaker_block_id)
+                if speaker_block_id is not None and speaker_block_id not in block_to_qa_map:
+                    if speaker_block_id not in unassigned_speaker_block_ids:
+                        unassigned_speaker_block_ids.append(speaker_block_id)
         else:
             # Non-Q&A sections don't get Q&A assignments
             enhanced_record.update({
@@ -1775,15 +1801,10 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
         
         enhanced_records.append(enhanced_record)
     
-    log_execution(f"🔍 DEBUG: Assignment results - Q&A records: {qa_records_count}, Assigned: {assigned_records_count}, Unassigned: {qa_records_count - assigned_records_count}")
-    
-    if unassigned_speaker_block_ids:
-        unique_unassigned = list(set(unassigned_speaker_block_ids))
-        log_execution(f"🔍 DEBUG: Unassigned speaker block IDs: {unique_unassigned[:20]}{'...' if len(unique_unassigned) > 20 else ''}")
-    
-    # DEBUG: Show sample enhanced records with assignments
-    qa_assigned_sample = [(r.get('speaker_block_id'), r.get('qa_group_id')) for r in enhanced_records if r.get('section_name') == 'Q&A' and r.get('qa_group_id') is not None][:5]
-    log_execution(f"🔍 Sample assigned Q&A records (speaker_block_id, qa_group_id): {qa_assigned_sample}")
+    if qa_records_count > 0:
+        log_execution(f"Q&A assignment complete - Records: {qa_records_count}, Assigned: {assigned_records_count}, Unassigned: {qa_records_count - assigned_records_count}")
+        if unassigned_speaker_block_ids:
+            log_execution(f"WARNING: {len(unassigned_speaker_block_ids)} speaker blocks have no QA assignment: {sorted(unassigned_speaker_block_ids)[:10]}{'...' if len(unassigned_speaker_block_ids) > 10 else ''}")
     
     return enhanced_records
 
