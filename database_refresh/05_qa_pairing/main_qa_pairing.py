@@ -1408,7 +1408,9 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             "held_blocks": [],  # Accumulated blocks from "skip" decisions
             "processing_complete": False,
             "all_qa_groups": [],
-            "speaker_block_id_sequence": speaker_block_id_sequence  # For tracking
+            "speaker_block_id_sequence": speaker_block_id_sequence,  # For tracking
+            "validation_retries_for_current_position": 0,  # Track validation retries per window position
+            "max_validation_retries_per_position": 2  # Limit validation retries to prevent infinite loops
         }
         
         # Extract metadata for prompts
@@ -1547,7 +1549,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     )
                 
                 if validated:
-                    # Create and store qa_group
+                    # Validation succeeded - create qa_group and advance
                     if proposed_qa_blocks:  # Only create group if we have blocks
                         qa_group = {
                             "qa_group_id": sliding_state["current_qa_id"],
@@ -1558,9 +1560,10 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                             "speaker_blocks": proposed_qa_blocks
                         }
                         sliding_state["all_qa_groups"].append(qa_group)
-                        log_execution(f"Created QA ID {sliding_state['current_qa_id']} with {len(proposed_qa_blocks)} blocks")
+                        log_execution(f"✅ Created QA ID {sliding_state['current_qa_id']} with {len(proposed_qa_blocks)} blocks (VALIDATED)")
                     
-                    # Advance state for next qa_id
+                    # Reset validation retry counter and advance to next qa_id
+                    sliding_state["validation_retries_for_current_position"] = 0
                     sliding_state["current_qa_id"] += 1
                     sliding_state["held_blocks"] = []  # Clear held blocks
                     
@@ -1570,9 +1573,39 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     log_execution(f"📍 Window advanced to speaker block ID {breakpoint_speaker_block_id} (index {breakpoint_block_id_index}) for next QA ID {sliding_state['current_qa_id']}")
                     
                 else:
-                    # Validation failed - retry breakpoint detection on same window
-                    log_execution(f"❌ Validation failed for QA ID {sliding_state['current_qa_id']}, retrying breakpoint detection")
-                    # Continue with same window state - will retry breakpoint detection
+                    # Validation failed - check retry limit before retrying
+                    sliding_state["validation_retries_for_current_position"] += 1
+                    
+                    if sliding_state["validation_retries_for_current_position"] >= sliding_state["max_validation_retries_per_position"]:
+                        # Exceeded retry limit - create qa_group anyway with lower confidence and advance
+                        log_execution(f"⚠️ Validation failed {sliding_state['validation_retries_for_current_position']} times for QA ID {sliding_state['current_qa_id']}, creating group anyway")
+                        
+                        if proposed_qa_blocks:  # Only create group if we have blocks
+                            qa_group = {
+                                "qa_group_id": sliding_state["current_qa_id"],
+                                "start_block_id": proposed_qa_blocks[0]["speaker_block_id"],
+                                "end_block_id": proposed_qa_blocks[-1]["speaker_block_id"],
+                                "confidence": 0.5,  # Lower confidence due to validation failure
+                                "method": "sliding_window_unvalidated",
+                                "speaker_blocks": proposed_qa_blocks
+                            }
+                            sliding_state["all_qa_groups"].append(qa_group)
+                            log_execution(f"⚠️ Created QA ID {sliding_state['current_qa_id']} with {len(proposed_qa_blocks)} blocks (UNVALIDATED)")
+                        
+                        # Reset validation retry counter and advance to next qa_id
+                        sliding_state["validation_retries_for_current_position"] = 0
+                        sliding_state["current_qa_id"] += 1
+                        sliding_state["held_blocks"] = []  # Clear held blocks
+                        
+                        # Advance window to breakpoint speaker_block_id (where next analyst starts)
+                        sliding_state["current_block_id_index"] = breakpoint_block_id_index
+                        
+                        log_execution(f"📍 Window FORCE advanced to speaker block ID {breakpoint_speaker_block_id} (index {breakpoint_block_id_index}) for next QA ID {sliding_state['current_qa_id']}")
+                    
+                    else:
+                        # Still have retries left - retry breakpoint detection on same window
+                        log_execution(f"❌ Validation failed for QA ID {sliding_state['current_qa_id']} (retry {sliding_state['validation_retries_for_current_position']}/{sliding_state['max_validation_retries_per_position']}), retrying breakpoint detection")
+                        # Continue with same window state - will retry breakpoint detection
                     
             else:
                 # Invalid action (shouldn't happen with validation)
