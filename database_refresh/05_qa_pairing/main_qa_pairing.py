@@ -804,7 +804,7 @@ Content: {format_speaker_block_content(block['paragraphs'])}""")
     
     return f"""<task>
 You are analyzing a {company_name} earnings call Q&A transcript titled "{transcript_title}".
-Your task is to identify where the NEXT analyst's turn begins in these indexed speaker blocks.
+Your task is to find the VERY FIRST breakpoint where the NEXT analyst's turn begins.
 </task>
 
 <context>
@@ -812,37 +812,44 @@ You are currently processing QA ID {current_qa_id}. You need to find where this 
 </context>
 
 <objective>
-Examine the {len(indexed_blocks)} indexed speaker blocks below and determine:
-1. SKIP: If the current analyst's turn continues beyond these blocks (breakpoint not found)
-2. BREAKPOINT: If you find where the next analyst's turn begins (provide the index 1-{len(indexed_blocks)})
+Examine the {len(indexed_blocks)} indexed speaker blocks below IN SEQUENTIAL ORDER (1, 2, 3, etc.) and determine:
 
-When you choose SKIP: These {len(indexed_blocks)} blocks will be held and combined with the next batch of blocks to find the true breakpoint.
-When you choose BREAKPOINT: The blocks up to (but not including) your chosen index belong to the current analyst.
+1. SKIP: If the current analyst's turn continues beyond ALL these blocks (no breakpoint found in this batch)
+2. BREAKPOINT: If you find the VERY FIRST index where the next analyst's turn begins
+
+🚨 CRITICAL: You are looking for the FIRST/EARLIEST breakpoint only. Even if there are multiple analyst changes in these blocks, return only the index of the FIRST one you encounter when reading sequentially from index 1.
+
+When you choose SKIP: These {len(indexed_blocks)} blocks will be held and combined with the next batch to find the breakpoint.
+When you choose BREAKPOINT: All blocks up to (but not including) your chosen index belong to the current analyst.
 </objective>
 
 <instructions>
-Look for clear signals that indicate when one analyst's complete session ends and a new analyst begins:
+🔍 SEQUENTIAL ANALYSIS PROCESS:
+1. Start at Index 1 and read through each block in order
+2. Look for the FIRST clear transition from current analyst to a NEW analyst
+3. Stop immediately when you find the first breakpoint - do not continue analyzing
+4. If no breakpoint is found in ALL blocks, choose SKIP
 
 <breakpoint_indicators>
-STRONG breakpoint signals:
-- Operator: "Next question from [New Analyst Name], [Firm]"
-- New speaker introduction after analyst questions are fully answered
-- Clear topic shift with new analyst acknowledgment
-- Operator transitioning to different analyst
+STRONG breakpoint signals (return the index immediately when found):
+- Operator: "Next question from [New Analyst Name], [Firm]" 
+- New analyst introduction after current analyst's session is complete
+- Clear transition to different analyst with operator facilitation
+- New analyst acknowledgment (e.g., "Thank you, operator...")
 
-CONTINUE signals (choose SKIP):
-- Same analyst asking follow-up questions
+CONTINUE signals (keep reading, don't return breakpoint yet):
+- Same analyst asking follow-up questions  
 - Executive still responding to current analyst's questions
 - Ongoing back-and-forth within same analyst session
 - Brief operator comments within same analyst conversation
 </breakpoint_indicators>
 
-<decision_logic>
-1. **Analyst Session Focus**: Each QA ID should capture ONE analyst's complete interaction
-2. **Complete Conversations**: Ensure current analyst's questions are fully addressed before breakpoint
-3. **Clear Transitions**: Look for explicit operator transitions or new analyst introductions
-4. **Natural Boundaries**: Breakpoints should feel natural, not mid-conversation
-</decision_logic>
+<critical_reminders>
+🚨 FIRST BREAKPOINT ONLY: Even if you see multiple analyst transitions, return only the FIRST one
+🚨 SEQUENTIAL ORDER: Process blocks 1→2→3→4... and stop at first breakpoint found
+🚨 COMPLETE SESSIONS: Ensure current analyst's questions are fully addressed before identifying breakpoint
+🚨 NO LOOKING AHEAD: Don't analyze all blocks first - stop at the first valid breakpoint
+</critical_reminders>
 </instructions>
 
 <indexed_speaker_blocks>
@@ -851,8 +858,10 @@ CONTINUE signals (choose SKIP):
 
 <output_format>
 Call the analyst_breakpoint function with:
-- "skip" if the breakpoint is not in these {len(indexed_blocks)} blocks
-- "breakpoint" with the index (1-{len(indexed_blocks)}) where the next analyst turn begins
+- "skip" if NO breakpoint is found in these {len(indexed_blocks)} blocks
+- "breakpoint" with the index of the FIRST breakpoint found (1-{len(indexed_blocks)})
+
+🚨 REMEMBER: Return the FIRST breakpoint you find when reading sequentially from index 1. Do not continue analyzing after finding the first valid breakpoint.
 </output_format>"""
 
 
@@ -943,7 +952,7 @@ def create_breakpoint_detection_tool():
             "type": "function",  
             "function": {
                 "name": "analyst_breakpoint",
-                "description": "Identify where the next analyst turn begins in the indexed speaker blocks, or skip to examine the next batch. When you skip, the current blocks will be held and combined with blocks from the next window to find the true breakpoint.",
+                "description": "Find the FIRST/EARLIEST breakpoint where the next analyst's turn begins by reading blocks sequentially from index 1. Return the index of the FIRST breakpoint found, or skip if no breakpoint exists in this batch. Do not analyze all blocks - stop immediately at the first valid breakpoint.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -955,7 +964,7 @@ def create_breakpoint_detection_tool():
                         "index": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Required when action is 'breakpoint'. The 1-based index where the next analyst turn begins."
+                            "description": "Required when action is 'breakpoint'. The 1-based index of the FIRST/EARLIEST block where the next analyst turn begins. Must be the first breakpoint found when reading sequentially from index 1."
                         }
                     },
                     "required": ["action"]
