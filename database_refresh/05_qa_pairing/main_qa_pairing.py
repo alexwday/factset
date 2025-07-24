@@ -2,6 +2,12 @@
 Stage 5: Q&A Boundary Detection & Conversation Pairing
 Processes Stage 4 validated content to identify and group question-answer conversation boundaries.
 Self-contained standalone script that loads config from NAS at runtime.
+
+Configuration Parameters (in stage_05_qa_pairing section):
+- window_size: Number of speaker blocks to analyze at once (default: 10)
+- max_held_blocks: Maximum blocks to accumulate before forcing a breakpoint (default: 50)
+- max_consecutive_skips: Maximum consecutive skip decisions before forcing a breakpoint (default: 5)
+- max_validation_retries_per_position: Retries for validation at same position (default: 2)
 """
 
 import os
@@ -151,7 +157,7 @@ class EnhancedErrorLogger:
         
         for error_type, errors in error_types.items():
             if errors:
-                filename = f"stage_05_qa_pairing_pairing_{error_type}_errors_{timestamp}.json"
+                filename = f"stage_05_qa_pairing_{error_type}_errors_{timestamp}.json"
                 nas_path = nas_path_join(logs_path, "Errors", filename)
                 
                 try:
@@ -184,7 +190,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any], enh
 
     # Save main execution log
     main_log_content = {
-        "stage": "stage_05_qa_pairing_pairing",
+        "stage": "stage_05_qa_pairing",
         "execution_start": (
             execution_log[0]["timestamp"]
             if execution_log
@@ -195,7 +201,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any], enh
         "execution_log": execution_log,
     }
 
-    main_log_filename = f"stage_05_qa_pairing_pairing_{timestamp}.json"
+    main_log_filename = f"stage_05_qa_pairing_{timestamp}.json"
     main_log_path = nas_path_join(logs_path, main_log_filename)
     main_log_json = json.dumps(main_log_content, indent=2)
     main_log_obj = io.BytesIO(main_log_json.encode("utf-8"))
@@ -212,14 +218,14 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any], enh
         nas_create_directory_recursive(nas_conn, errors_path)
 
         error_log_content = {
-            "stage": "stage_05_qa_pairing_pairing",
+            "stage": "stage_05_qa_pairing",
             "execution_time": datetime.now().isoformat(),
             "total_errors": len(error_log),
             "error_summary": stage_summary.get("errors", {}),
             "errors": error_log,
         }
 
-        error_log_filename = f"stage_05_qa_pairing_pairing_errors_{timestamp}.json"
+        error_log_filename = f"stage_05_qa_pairing_errors_{timestamp}.json"
         error_log_path = nas_path_join(errors_path, error_log_filename)
         error_log_json = json.dumps(error_log_content, indent=2)
         error_log_obj = io.BytesIO(error_log_json.encode("utf-8"))
@@ -392,9 +398,6 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             log_error(error_msg, "config_validation", {"missing_parameter": f"llm_config.{param}"})
             raise ValueError(error_msg)
 
-    # Note: state_config is no longer used in sliding window approach
-    # Legacy validation removed - sliding window approach uses direct LLM calls without lookahead configuration
-
     # Validate monitored institutions
     if not config["monitored_institutions"]:
         error_msg = "monitored_institutions cannot be empty"
@@ -470,52 +473,68 @@ def setup_proxy_configuration() -> str:
         raise
 
 
-def get_oauth_token() -> Optional[str]:
-    """Get OAuth token using client credentials flow."""
+def get_oauth_token(retry_count: int = 3, retry_delay: float = 1.0) -> Optional[str]:
+    """Get OAuth token using client credentials flow with retry logic."""
     global ssl_cert_path
     
-    try:
-        token_endpoint = config["stage_05_qa_pairing"]["llm_config"]["token_endpoint"]
-        
-        # Prepare OAuth request
-        auth_data = {
-            'grant_type': 'client_credentials',
-            'client_id': os.getenv("LLM_CLIENT_ID"),
-            'client_secret': os.getenv("LLM_CLIENT_SECRET")
-        }
-        
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-        
-        # Use SSL certificate if available
-        verify_ssl = ssl_cert_path if ssl_cert_path else True
-        
-        response = requests.post(
-            token_endpoint,
-            data=auth_data,
-            headers=headers,
-            verify=verify_ssl,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            token_data = response.json()
-            access_token = token_data.get('access_token')
-            if access_token:
-                log_execution("Successfully obtained OAuth token")
-                return access_token
-            else:
-                error_msg = "No access token in OAuth response"
-                log_error(error_msg, "authentication", {})
-                return None
-        else:
-            error_msg = f"OAuth token request failed: {response.status_code} - {response.text}"
-            log_error(error_msg, "authentication", {})
-            return None
+    for attempt in range(1, retry_count + 1):
+        try:
+            token_endpoint = config["stage_05_qa_pairing"]["llm_config"]["token_endpoint"]
             
-    except Exception as e:
-        error_msg = f"OAuth token acquisition failed: {e}"
-        log_error(error_msg, "authentication", {"exception_type": type(e).__name__})
-        return None
+            # Prepare OAuth request
+            auth_data = {
+                'grant_type': 'client_credentials',
+                'client_id': os.getenv("LLM_CLIENT_ID"),
+                'client_secret': os.getenv("LLM_CLIENT_SECRET")
+            }
+            
+            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+            
+            # Use SSL certificate if available
+            verify_ssl = ssl_cert_path if ssl_cert_path else True
+            
+            response = requests.post(
+                token_endpoint,
+                data=auth_data,
+                headers=headers,
+                verify=verify_ssl,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                token_data = response.json()
+                access_token = token_data.get('access_token')
+                if access_token:
+                    log_execution("Successfully obtained OAuth token")
+                    return access_token
+                else:
+                    error_msg = "No access token in OAuth response"
+                    log_error(error_msg, "authentication", {"attempt": attempt})
+                    if attempt < retry_count:
+                        time.sleep(retry_delay * attempt)  # Exponential backoff
+                        continue
+                    return None
+            else:
+                error_msg = f"OAuth token request failed: {response.status_code}"
+                log_error(error_msg, "authentication", {"attempt": attempt, "status_code": response.status_code})
+                if attempt < retry_count:
+                    time.sleep(retry_delay * attempt)  # Exponential backoff
+                    continue
+                return None
+                
+        except (requests.ConnectionError, requests.Timeout) as e:
+            error_msg = f"Network error during OAuth token acquisition: {e}"
+            log_error(error_msg, "authentication", {"attempt": attempt, "exception_type": type(e).__name__})
+            if attempt < retry_count:
+                time.sleep(retry_delay * attempt)
+                continue
+            return None
+        except Exception as e:
+            error_msg = f"OAuth token acquisition failed: {e}"
+            log_error(error_msg, "authentication", {"attempt": attempt, "exception_type": type(e).__name__})
+            return None
+    
+    return None
 
 
 def setup_llm_client() -> Optional[OpenAI]:
@@ -934,8 +953,19 @@ Call the validate_assignment function with:
 </output_format>"""
 
 
-def format_speaker_block_content(paragraphs: List[Dict]) -> str:
+def format_speaker_block_content(paragraphs: List[Dict], max_length: Optional[int] = None) -> str:
     """Format paragraph content from a speaker block for prompt display."""
+    if not paragraphs:
+        return "[No content]"
+    
+    if max_length:
+        # For previews, just use first paragraph
+        first_content = paragraphs[0].get('paragraph_content', '').strip()
+        if len(first_content) > max_length:
+            return first_content[:max_length] + "..."
+        return first_content
+    
+    # Full content concatenation
     content_parts = []
     for paragraph in paragraphs:
         content = paragraph.get('paragraph_content', '').strip()
@@ -1085,26 +1115,6 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
             try:
                 log_execution(f"Breakpoint detection attempt {attempt}/{max_retries} for QA ID {current_qa_id}")
                 
-                # Log the prompt being sent (for debugging)
-                log_execution("=== LLM BREAKPOINT DETECTION PROMPT ===")
-                log_execution(f"Window: {len(indexed_blocks)} blocks (indices 1-{len(indexed_blocks)})")
-                
-                # Show speaker preview for each index
-                speaker_preview = []
-                for i, block_data in enumerate(indexed_blocks, 1):
-                    block = block_data["block"]
-                    # Get first 100 chars of content for preview
-                    first_para = block['paragraphs'][0] if block['paragraphs'] else {}
-                    content_preview = first_para.get('paragraph_content', '')[:100] + "..." if first_para.get('paragraph_content', '') else "[No content]"
-                    speaker_preview.append(f"Index {i}: {block['speaker']} - {content_preview}")
-                
-                for preview in speaker_preview:
-                    log_execution(preview)
-                
-                log_execution("=== FULL PROMPT SENT TO LLM ===")
-                log_execution(prompt)
-                log_execution("=== END PROMPT ===")
-                
                 # Make LLM API call
                 response = llm_client.chat.completions.create(
                     model=config["stage_05_qa_pairing"]["llm_config"]["model"],
@@ -1115,17 +1125,7 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                     max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
                 )
                 
-                # Log the raw response from LLM
-                log_execution("=== LLM RESPONSE RECEIVED ===")
-                if response.choices[0].message.tool_calls:
-                    for i, tool_call in enumerate(response.choices[0].message.tool_calls):
-                        log_execution(f"Tool Call {i+1}: {tool_call.function.name}")
-                        log_execution(f"Raw Arguments: {tool_call.function.arguments}")
-                else:
-                    log_execution("No tool calls in response")
-                    if hasattr(response.choices[0].message, 'content') and response.choices[0].message.content:
-                        log_execution(f"Text Content: {response.choices[0].message.content}")
-                log_execution("=== END LLM RESPONSE ===")
+                # Parse response
                 
                 # Parse response
                 if not response.choices[0].message.tool_calls:
@@ -1196,14 +1196,9 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                 attempt_info = f" (attempt {attempt})" if attempt > 1 else ""
                 if parsed_result["action"] == "breakpoint":
                     breakpoint_index = parsed_result['index']
-                    log_execution(f"🎯 BREAKPOINT DETECTED{attempt_info}: INDEX {breakpoint_index} for QA ID {current_qa_id}")
-                    log_execution(f"✅ QA ID {current_qa_id} will include indices 1-{breakpoint_index-1} ({breakpoint_index-1} blocks)")
-                    log_execution(f"🔄 Next QA ID {current_qa_id+1} will start at index {breakpoint_index}")
+                    log_execution(f"Breakpoint detected{attempt_info} at index {breakpoint_index} for QA ID {current_qa_id}")
                 else:
-                    log_execution(f"⏭️ SKIP DECISION{attempt_info} for QA ID {current_qa_id}")
-                    log_execution(f"🔄 Will hold all {len(indexed_blocks)} blocks and examine next window")
-                
-                log_execution("=" * 80)  # Separator for readability
+                    log_execution(f"Skip decision{attempt_info} for QA ID {current_qa_id}")
                 
                 return parsed_result
                 
@@ -1244,20 +1239,16 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
     
     for validation_attempt in range(1, max_validation_attempts + 1):
         try:
-            log_execution(f"🔍 VALIDATION ATTEMPT {validation_attempt}/{max_validation_attempts} for QA ID {qa_id}")
+            log_execution(f"Validation attempt {validation_attempt}/{max_validation_attempts} for QA ID {qa_id}")
             
             # Log validation summary only
-            proposed_speaker_ids = [b.get('speaker_block_id') for b in proposed_qa_blocks]
-            remaining_speaker_ids = [b.get('speaker_block_id') if isinstance(b, dict) and 'speaker_block_id' in b else b.get('speaker_block_id') for b in remaining_blocks[:3]]
-            log_execution(f"📋 Validating QA ID {qa_id}: {len(proposed_qa_blocks)} blocks (speaker IDs: {proposed_speaker_ids[:5]}{'...' if len(proposed_speaker_ids) > 5 else ''})")
-            log_execution(f"📋 Remaining for context: {len(remaining_blocks)} blocks (speaker IDs: {remaining_speaker_ids})")
+            log_execution(f"Validating QA ID {qa_id}: {len(proposed_qa_blocks)} blocks")
             
             # Create validation prompt
             prompt = create_validation_prompt(proposed_qa_blocks, remaining_blocks, company_name, transcript_title, qa_id)
             
-            log_execution("=== VALIDATION PROMPT SENT TO LLM ===")
-            log_execution(prompt)
-            log_execution("=== END VALIDATION PROMPT ===")
+            # Create validation prompt
+            prompt = create_validation_prompt(proposed_qa_blocks, remaining_blocks, company_name, transcript_title, qa_id)
             
             # Make LLM API call
             response = llm_client.chat.completions.create(
@@ -1269,17 +1260,7 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
                 max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
             )
             
-            # Log validation response
-            log_execution("=== VALIDATION RESPONSE RECEIVED ===")
-            if response.choices[0].message.tool_calls:
-                for i, tool_call in enumerate(response.choices[0].message.tool_calls):
-                    log_execution(f"Tool Call {i+1}: {tool_call.function.name}")
-                    log_execution(f"Raw Arguments: {tool_call.function.arguments}")
-            else:
-                log_execution("No tool calls in validation response")
-                if hasattr(response.choices[0].message, 'content') and response.choices[0].message.content:
-                    log_execution(f"Text Content: {response.choices[0].message.content}")
-            log_execution("=== END VALIDATION RESPONSE ===")
+            # Parse validation response
             
             # Parse response
             if not response.choices[0].message.tool_calls:
@@ -1314,20 +1295,14 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
                 attempt_info = f" (attempt {validation_attempt})" if validation_attempt > 1 else ""
                 
                 if validation == "accept":
-                    log_execution(f"✅ VALIDATION ACCEPTED{attempt_info} for QA ID {qa_id}")
-                    log_execution(f"📋 QA ID {qa_id} confirmed with {len(proposed_qa_blocks)} blocks")
-                    log_execution("=" * 80)  # Separator
+                    log_execution(f"Validation accepted{attempt_info} for QA ID {qa_id}")
                     return True
                 else:
-                    log_execution(f"❌ VALIDATION REJECTED{attempt_info} for QA ID {qa_id}")
-                    # Reject - try again if attempts remaining
+                    log_execution(f"Validation rejected{attempt_info} for QA ID {qa_id}")
                     if validation_attempt == max_validation_attempts:
-                        log_execution(f"⚠️ Validation rejected after {max_validation_attempts} attempts, accepting assignment anyway")
-                        log_execution("=" * 80)  # Separator
-                        return True  # Accept on final failure
+                        log_execution(f"Accepting assignment after {max_validation_attempts} failed attempts")
+                        return True
                     else:
-                        log_execution(f"🔄 Validation rejected, will retry breakpoint detection")
-                        log_execution("=" * 80)  # Separator
                         return False
                 
             except (json.JSONDecodeError, KeyError, ValueError) as e:
@@ -1385,6 +1360,12 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
         log_execution(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks using sliding window approach")
         log_execution(f"Speaker block ID range: {min(speaker_block_id_sequence)} to {max(speaker_block_id_sequence)} ({len(speaker_block_id_sequence)} unique blocks)")
         
+        # Get configuration limits
+        window_size = config["stage_05_qa_pairing"].get("window_size", 10)
+        max_held_blocks = config["stage_05_qa_pairing"].get("max_held_blocks", 50)  # Memory limit
+        max_validation_retries = config["stage_05_qa_pairing"].get("max_validation_retries_per_position", 2)
+        max_consecutive_skips = config["stage_05_qa_pairing"].get("max_consecutive_skips", 5)  # Prevent infinite skips
+        
         # Initialize sliding window state using speaker_block_ids
         sliding_state = {
             "current_qa_id": 1,
@@ -1394,31 +1375,41 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             "all_qa_groups": [],
             "speaker_block_id_sequence": speaker_block_id_sequence,  # For tracking
             "validation_retries_for_current_position": 0,  # Track validation retries per window position
-            "max_validation_retries_per_position": 2  # Limit validation retries to prevent infinite loops
+            "max_validation_retries_per_position": max_validation_retries,
+            "consecutive_skips": 0,  # Track consecutive skip decisions
+            "stuck_position_count": 0  # Track if we're stuck at same position
         }
         
         # Extract metadata for prompts
         company_name = transcript_metadata.get("company_name", "Unknown Company")
         transcript_title = transcript_metadata.get("transcript_title", "Earnings Call Transcript")
         
-        # Main processing loop with infinite loop protection using speaker_block_ids
-        max_iterations = len(speaker_block_id_sequence) * 2  # Should never need more than 2x the total speaker blocks
+        # Main processing loop with enhanced infinite loop protection
+        max_iterations = len(speaker_block_id_sequence) * 3  # Allow 3x for retries
         iteration_count = 0
+        last_position = -1
         
         while not sliding_state["processing_complete"] and sliding_state["current_block_id_index"] < len(speaker_block_id_sequence):
             iteration_count += 1
             
             # Infinite loop protection
             if iteration_count > max_iterations:
-                current_block_id = speaker_block_id_sequence[sliding_state["current_block_id_index"]] if sliding_state["current_block_id_index"] < len(speaker_block_id_sequence) else "END"
-                log_execution(f"🚨 INFINITE LOOP DETECTED! Breaking after {iteration_count} iterations")
-                log_execution(f"📊 Current state: block_id_index={sliding_state['current_block_id_index']}, current_block_id={current_block_id}")
-                log_execution(f"💼 Held blocks: {len(sliding_state['held_blocks'])}, current_qa_id={sliding_state['current_qa_id']}")
+                log_execution(f"INFINITE LOOP DETECTED! Breaking after {iteration_count} iterations")
                 enhanced_error_logger.log_processing_error(transcript_id, f"Infinite loop detected after {iteration_count} iterations")
                 break
             
+            # Check if we're stuck at same position
+            if sliding_state["current_block_id_index"] == last_position:
+                sliding_state["stuck_position_count"] += 1
+                if sliding_state["stuck_position_count"] > 3:
+                    log_execution(f"Stuck at position {last_position} for {sliding_state['stuck_position_count']} iterations, force advancing")
+                    sliding_state["current_block_id_index"] += 1
+                    sliding_state["stuck_position_count"] = 0
+            else:
+                sliding_state["stuck_position_count"] = 0
+                last_position = sliding_state["current_block_id_index"]
+            
             # Create current window using speaker_block_ids
-            window_size = config["stage_05_qa_pairing"]["window_size"]
             end_block_index = min(sliding_state["current_block_id_index"] + window_size, len(speaker_block_id_sequence))
             current_window_block_ids = speaker_block_id_sequence[sliding_state["current_block_id_index"]:end_block_index]
             
@@ -1435,19 +1426,10 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 sliding_state["processing_complete"] = True
                 break
             
-            log_execution("🔄" + "="*79)
-            log_execution(f"🎯 PROCESSING WINDOW for QA ID {sliding_state['current_qa_id']} (Iteration {iteration_count}/{max_iterations})")
-            log_execution(f"📍 Speaker block IDs in scope: {current_window_block_ids[0]} to {current_window_block_ids[-1]} ({len(current_window_block_ids)} speaker blocks)")
-            log_execution(f"📊 Current window: {len(current_window)} paragraph blocks across {len(current_window_block_ids)} speaker blocks")
-            log_execution(f"💼 Held blocks: {len(sliding_state['held_blocks'])} paragraph blocks")
-            
-            if sliding_state['held_blocks']:
-                log_execution(f"📝 Total context if skip: {len(sliding_state['held_blocks']) + len(current_window)} paragraph blocks")
+            log_execution(f"Processing window for QA ID {sliding_state['current_qa_id']} (iteration {iteration_count})")
             
             # Track window advancement to detect infinite loops
             previous_block_id_index = sliding_state['current_block_id_index']
-            
-            log_execution("🔄" + "="*79)
             
             # Phase 1: Breakpoint Detection
             breakpoint_result = detect_analyst_breakpoint(
@@ -1461,7 +1443,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             
             if breakpoint_result is None:
                 # LLM call failed - treat as skip to be conservative with consistent structure
-                log_execution(f"⚠️ BREAKPOINT DETECTION FAILED: Treating as skip for QA ID {sliding_state['current_qa_id']}")
+                log_execution(f"Breakpoint detection failed: Treating as skip for QA ID {sliding_state['current_qa_id']}")
                 
                 # Get actual blocks using same method as breakpoint logic for consistency
                 current_failed_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_window_block_ids)
@@ -1472,31 +1454,67 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 sliding_state["current_block_id_index"] = new_block_id_index
                 
                 next_block_id = speaker_block_id_sequence[new_block_id_index] if new_block_id_index < len(speaker_block_id_sequence) else "END"
-                log_execution(f"📝 Total held blocks now: {new_held_count}")
-                log_execution(f"📍 Next window will start at speaker block ID: {next_block_id} (index {new_block_id_index})")
-                log_execution("⚠️" + "="*79)
+                log_execution(f"Total held blocks: {new_held_count}, Next speaker block: {next_block_id}")
                 continue
             
             if breakpoint_result["action"] == "skip":
-                # Hold current blocks and advance window - use same structure as breakpoint logic
-                log_execution(f"⏭️ SKIP ACTION: Holding {len(current_window)} blocks from speaker blocks {current_window_block_ids[0]} to {current_window_block_ids[-1]} for QA ID {sliding_state['current_qa_id']}")
+                sliding_state["consecutive_skips"] += 1
+                
+                # Check for too many consecutive skips or memory limit
+                if sliding_state["consecutive_skips"] >= max_consecutive_skips:
+                    log_execution(f"Reached {max_consecutive_skips} consecutive skips, forcing breakpoint")
+                    # Force create a QA group with all held blocks
+                    if sliding_state["held_blocks"]:
+                        forced_qa_group = {
+                            "qa_group_id": sliding_state["current_qa_id"],
+                            "start_block_id": sliding_state["held_blocks"][0]["speaker_block_id"],
+                            "end_block_id": sliding_state["held_blocks"][-1]["speaker_block_id"],
+                            "confidence": 0.7,
+                            "method": "sliding_window_forced_skip_limit",
+                            "speaker_blocks": sliding_state["held_blocks"]
+                        }
+                        sliding_state["all_qa_groups"].append(forced_qa_group)
+                        log_execution(f"Created forced QA ID {sliding_state['current_qa_id']} with {len(sliding_state['held_blocks'])} blocks")
+                        sliding_state["current_qa_id"] += 1
+                        sliding_state["held_blocks"] = []
+                        sliding_state["consecutive_skips"] = 0
                 
                 # Get actual blocks using same method as breakpoint logic for consistency
                 current_skip_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_window_block_ids)
-                sliding_state["held_blocks"].extend(current_skip_blocks)
+                
+                # Check memory limit before adding more blocks
+                if len(sliding_state["held_blocks"]) + len(current_skip_blocks) > max_held_blocks:
+                    log_execution(f"Held blocks would exceed limit ({max_held_blocks}), forcing breakpoint")
+                    # Create QA group with current held blocks
+                    if sliding_state["held_blocks"]:
+                        memory_limit_qa_group = {
+                            "qa_group_id": sliding_state["current_qa_id"],
+                            "start_block_id": sliding_state["held_blocks"][0]["speaker_block_id"],
+                            "end_block_id": sliding_state["held_blocks"][-1]["speaker_block_id"],
+                            "confidence": 0.8,
+                            "method": "sliding_window_memory_limit",
+                            "speaker_blocks": sliding_state["held_blocks"]
+                        }
+                        sliding_state["all_qa_groups"].append(memory_limit_qa_group)
+                        log_execution(f"Created QA ID {sliding_state['current_qa_id']} with {len(sliding_state['held_blocks'])} blocks (memory limit)")
+                        sliding_state["current_qa_id"] += 1
+                        sliding_state["held_blocks"] = current_skip_blocks  # Start fresh with current blocks
+                        sliding_state["consecutive_skips"] = 1
+                else:
+                    sliding_state["held_blocks"].extend(current_skip_blocks)
                 
                 new_held_count = len(sliding_state["held_blocks"])
                 new_block_id_index = sliding_state["current_block_id_index"] + len(current_window_block_ids)
                 sliding_state["current_block_id_index"] = new_block_id_index
                 
                 next_block_id = speaker_block_id_sequence[new_block_id_index] if new_block_id_index < len(speaker_block_id_sequence) else "END"
-                held_speaker_ids = [b.get('speaker_block_id') for b in sliding_state['held_blocks']]
-                log_execution(f"📝 Total held blocks now: {new_held_count} (speaker block IDs: {held_speaker_ids[-5:] if len(held_speaker_ids) > 5 else held_speaker_ids})")
-                log_execution(f"📍 Next window will start at speaker block ID: {next_block_id} (index {new_block_id_index})")
-                log_execution("⏭️" + "="*79)
+                log_execution(f"Skip action: Held blocks: {new_held_count}/{max_held_blocks}, Consecutive skips: {sliding_state['consecutive_skips']}/{max_consecutive_skips}")
                 continue
                 
             elif breakpoint_result["action"] == "breakpoint":
+                # Found breakpoint - reset consecutive skip counter
+                sliding_state["consecutive_skips"] = 0
+                
                 # Found breakpoint - create qa_id assignment
                 breakpoint_index = breakpoint_result["index"]  # 1-based index within current window
                 
@@ -1506,12 +1524,12 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     breakpoint_block_id_index = sliding_state["current_block_id_index"] + breakpoint_index - 1
                 else:
                     # Invalid breakpoint index
-                    log_execution(f"⚠️ Invalid breakpoint index {breakpoint_index} > window size {len(current_window_block_ids)}")
+                    log_execution(f"Invalid breakpoint index {breakpoint_index} > window size {len(current_window_block_ids)}")
                     enhanced_error_logger.log_boundary_error(transcript_id, current_window_block_ids[0], f"Invalid breakpoint index {breakpoint_index}")
                     sliding_state["processing_complete"] = True
                     continue
                 
-                log_execution(f"✅ BREAKPOINT DETECTED: Index {breakpoint_index} → Speaker Block ID {breakpoint_speaker_block_id} for QA ID {sliding_state['current_qa_id']}")
+                log_execution(f"Breakpoint detected at index {breakpoint_index} (speaker block {breakpoint_speaker_block_id})")
                 
                 # Get speaker_block_ids up to (but not including) breakpoint for current qa_id
                 current_qa_block_ids = current_window_block_ids[:breakpoint_index-1]
@@ -1522,8 +1540,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 remaining_block_ids = current_window_block_ids[breakpoint_index-1:]
                 remaining_window_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, remaining_block_ids)
                 
-                log_execution(f"📋 QA ID {sliding_state['current_qa_id']} proposed assignment: speaker blocks {[b.get('speaker_block_id') for b in proposed_qa_blocks[:5]]}{'...' if len(proposed_qa_blocks) > 5 else ''}")
-                log_execution(f"📋 Remaining for validation: speaker blocks {remaining_block_ids[:5]}{'...' if len(remaining_block_ids) > 5 else ''}")
+                # Prepare for validation
                 
                 if not proposed_qa_blocks:
                     # Edge case: no blocks for this qa_id (shouldn't happen with proper logic)
@@ -1553,7 +1570,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                             "speaker_blocks": proposed_qa_blocks
                         }
                         sliding_state["all_qa_groups"].append(qa_group)
-                        log_execution(f"✅ Created QA ID {sliding_state['current_qa_id']} with {len(proposed_qa_blocks)} blocks (VALIDATED)")
+                        log_execution(f"Created QA ID {sliding_state['current_qa_id']} with {len(proposed_qa_blocks)} blocks")
                     
                     # Reset validation retry counter and advance to next qa_id
                     sliding_state["validation_retries_for_current_position"] = 0
@@ -1563,7 +1580,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     # Advance window to breakpoint speaker_block_id (where next analyst starts)
                     sliding_state["current_block_id_index"] = breakpoint_block_id_index
                     
-                    log_execution(f"📍 Window advanced to speaker block ID {breakpoint_speaker_block_id} (index {breakpoint_block_id_index}) for next QA ID {sliding_state['current_qa_id']}")
+                    # Window advanced
                     
                 else:
                     # Validation failed - check retry limit before retrying
@@ -1571,7 +1588,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     
                     if sliding_state["validation_retries_for_current_position"] >= sliding_state["max_validation_retries_per_position"]:
                         # Exceeded retry limit - create qa_group anyway with lower confidence and advance
-                        log_execution(f"⚠️ Validation failed {sliding_state['validation_retries_for_current_position']} times for QA ID {sliding_state['current_qa_id']}, creating group anyway")
+                        log_execution(f"Validation failed {sliding_state['validation_retries_for_current_position']} times, creating group with lower confidence")
                         
                         if proposed_qa_blocks:  # Only create group if we have blocks
                             qa_group = {
@@ -1583,7 +1600,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                                 "speaker_blocks": proposed_qa_blocks
                             }
                             sliding_state["all_qa_groups"].append(qa_group)
-                            log_execution(f"⚠️ Created QA ID {sliding_state['current_qa_id']} with {len(proposed_qa_blocks)} blocks (UNVALIDATED)")
+                            log_execution(f"Created QA ID {sliding_state['current_qa_id']} with {len(proposed_qa_blocks)} blocks (unvalidated)")
                         
                         # Reset validation retry counter and advance to next qa_id
                         sliding_state["validation_retries_for_current_position"] = 0
@@ -1593,32 +1610,31 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                         # Advance window to breakpoint speaker_block_id (where next analyst starts)
                         sliding_state["current_block_id_index"] = breakpoint_block_id_index
                         
-                        log_execution(f"📍 Window FORCE advanced to speaker block ID {breakpoint_speaker_block_id} (index {breakpoint_block_id_index}) for next QA ID {sliding_state['current_qa_id']}")
+                        # Force advanced window
                     
                     else:
                         # Still have retries left - retry breakpoint detection on same window
-                        log_execution(f"❌ Validation failed for QA ID {sliding_state['current_qa_id']} (retry {sliding_state['validation_retries_for_current_position']}/{sliding_state['max_validation_retries_per_position']}), retrying breakpoint detection")
+                        log_execution(f"Validation failed (retry {sliding_state['validation_retries_for_current_position']}/{sliding_state['max_validation_retries_per_position']}), retrying")
                         # Continue with same window state - will retry breakpoint detection
                     
             else:
                 # Invalid action (shouldn't happen with validation)
-                log_execution(f"⚠️ Invalid breakpoint action: {breakpoint_result.get('action')}")
+                log_execution(f"Invalid breakpoint action: {breakpoint_result.get('action')}")
                 sliding_state["processing_complete"] = True
             
             # Check for window advancement - critical for preventing infinite loops
             if sliding_state['current_block_id_index'] == previous_block_id_index and not sliding_state["processing_complete"]:
                 current_block_id = speaker_block_id_sequence[previous_block_id_index] if previous_block_id_index < len(speaker_block_id_sequence) else "END"
-                log_execution(f"🚨 WARNING: Window did not advance from speaker block ID {current_block_id} (index {previous_block_id_index})")
-                log_execution(f"📊 This could indicate an infinite loop condition")
+                log_execution(f"WARNING: Window did not advance from index {previous_block_id_index}")
                 
                 # Force advancement to prevent infinite loop
                 if sliding_state['current_block_id_index'] + len(current_window_block_ids) >= len(speaker_block_id_sequence):
-                    log_execution(f"🛑 Reached end of speaker blocks, marking processing complete")
+                    log_execution("Reached end of speaker blocks")
                     sliding_state["processing_complete"] = True
                 else:
                     force_advance_index = sliding_state['current_block_id_index'] + len(current_window_block_ids)
                     next_block_id = speaker_block_id_sequence[force_advance_index] if force_advance_index < len(speaker_block_id_sequence) else "END"
-                    log_execution(f"🔧 Force advancing window by {len(current_window_block_ids)} speaker blocks to ID {next_block_id}")
+                    log_execution(f"Force advancing window to prevent infinite loop")
                     sliding_state['current_block_id_index'] = force_advance_index
         
         # Handle any remaining held blocks as final qa_id
@@ -1634,18 +1650,7 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             sliding_state["all_qa_groups"].append(final_qa_group)
             log_execution(f"Created final QA ID {sliding_state['current_qa_id']} with {len(sliding_state['held_blocks'])} remaining blocks")
         
-        log_execution(f"🎉 SLIDING WINDOW PROCESSING COMPLETE")
-        log_execution(f"📊 Total iterations: {iteration_count}")
-        log_execution(f"📋 Q&A groups created: {len(sliding_state['all_qa_groups'])}")
-        log_execution(f"📍 Final window position: speaker block index {sliding_state['current_block_id_index']} of {len(sliding_state['speaker_block_id_sequence'])} speaker blocks")
-        log_execution(f"💼 Final held blocks: {len(sliding_state['held_blocks'])}")
-        
-        if iteration_count > max_iterations:
-            log_execution(f"⚠️ Processing stopped due to infinite loop protection")
-        elif sliding_state["processing_complete"]:
-            log_execution(f"✅ Processing completed normally")
-        else:
-            log_execution(f"ℹ️ Processing stopped - reached end of blocks")
+        log_execution(f"Sliding window processing complete - Created {len(sliding_state['all_qa_groups'])} Q&A groups in {iteration_count} iterations")
             
         log_execution(f"Successfully identified {len(sliding_state['all_qa_groups'])} Q&A groups using sliding window approach")
         return sliding_state["all_qa_groups"]
@@ -1791,8 +1796,16 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
     try:
         # Refresh OAuth token for each transcript
         if not refresh_oauth_token_for_transcript():
-            log_error(f"Failed to refresh OAuth token for transcript {transcript_id}", "authentication", {})
+            log_error(f"Failed to refresh OAuth token for transcript {transcript_id}", "authentication", {"transcript_id": transcript_id})
             enhanced_error_logger.log_authentication_error(f"Token refresh failed for {transcript_id}")
+            # Track authentication error in stage summary
+            global error_log
+            error_log.append({
+                "timestamp": datetime.now().isoformat(),
+                "error_type": "authentication",
+                "message": f"OAuth token refresh failed for transcript {transcript_id}",
+                "details": {"transcript_id": transcript_id}
+            })
             return transcript_records, 0  # Return original records without Q&A assignments
         
         log_execution(f"Processing Q&A pairing for transcript: {transcript_id}")
@@ -1955,7 +1968,7 @@ def main() -> None:
                 "output_path": output_file_path,
                 "total_records": len(all_enhanced_records)
             })
-            log_console(f"✅ Output saved successfully: {output_filename}")
+            log_console(f"Output saved successfully: {output_filename}")
         else:
             stage_summary["status"] = "failed"
             log_console("Failed to save output file", "ERROR")
