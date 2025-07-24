@@ -1049,6 +1049,26 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
             try:
                 log_execution(f"Breakpoint detection attempt {attempt}/{max_retries} for QA ID {current_qa_id}")
                 
+                # Log the prompt being sent (for debugging)
+                log_execution("=== LLM BREAKPOINT DETECTION PROMPT ===")
+                log_execution(f"Window: {len(indexed_blocks)} blocks (indices 1-{len(indexed_blocks)})")
+                
+                # Show speaker preview for each index
+                speaker_preview = []
+                for i, block_data in enumerate(indexed_blocks, 1):
+                    block = block_data["block"]
+                    # Get first 100 chars of content for preview
+                    first_para = block['paragraphs'][0] if block['paragraphs'] else {}
+                    content_preview = first_para.get('paragraph_content', '')[:100] + "..." if first_para.get('paragraph_content', '') else "[No content]"
+                    speaker_preview.append(f"Index {i}: {block['speaker']} - {content_preview}")
+                
+                for preview in speaker_preview:
+                    log_execution(preview)
+                
+                log_execution("=== FULL PROMPT SENT TO LLM ===")
+                log_execution(prompt)
+                log_execution("=== END PROMPT ===")
+                
                 # Make LLM API call
                 response = llm_client.chat.completions.create(
                     model=config["stage_05_qa_pairing"]["llm_config"]["model"],
@@ -1059,9 +1079,22 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                     max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
                 )
                 
+                # Log the raw response from LLM
+                log_execution("=== LLM RESPONSE RECEIVED ===")
+                if response.choices[0].message.tool_calls:
+                    for i, tool_call in enumerate(response.choices[0].message.tool_calls):
+                        log_execution(f"Tool Call {i+1}: {tool_call.function.name}")
+                        log_execution(f"Raw Arguments: {tool_call.function.arguments}")
+                else:
+                    log_execution("No tool calls in response")
+                    if hasattr(response.choices[0].message, 'content') and response.choices[0].message.content:
+                        log_execution(f"Text Content: {response.choices[0].message.content}")
+                log_execution("=== END LLM RESPONSE ===")
+                
                 # Parse response
                 if not response.choices[0].message.tool_calls:
                     error_msg = f"No tool call response for breakpoint detection (QA ID {current_qa_id})"
+                    log_execution(f"ERROR: {error_msg}")
                     if attempt == max_retries:
                         log_error(f"{error_msg} (final attempt)", "boundary_detection", {})
                         enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
@@ -1123,12 +1156,26 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                     # Accumulate costs for final summary
                     enhanced_error_logger.accumulate_costs(token_usage)
                 
-                # Log successful decision
+                # Log successful decision with detailed context
                 attempt_info = f" (attempt {attempt})" if attempt > 1 else ""
                 if parsed_result["action"] == "breakpoint":
-                    log_execution(f"Breakpoint detected{attempt_info}: index {parsed_result['index']} for QA ID {current_qa_id}")
+                    breakpoint_index = parsed_result['index']
+                    log_execution(f"🎯 BREAKPOINT DETECTED{attempt_info}: INDEX {breakpoint_index} for QA ID {current_qa_id}")
+                    
+                    # Show what's at the breakpoint for context
+                    if breakpoint_index <= len(indexed_blocks):
+                        breakpoint_block = indexed_blocks[breakpoint_index-1]["block"]  # Convert to 0-based
+                        first_para = breakpoint_block['paragraphs'][0] if breakpoint_block['paragraphs'] else {}
+                        breakpoint_content = first_para.get('paragraph_content', '')[:200] + "..." if first_para.get('paragraph_content', '') else "[No content]"
+                        log_execution(f"🎯 Breakpoint at Index {breakpoint_index}: {breakpoint_block['speaker']} - {breakpoint_content}")
+                    
+                    log_execution(f"✅ QA ID {current_qa_id} will include indices 1-{breakpoint_index-1} ({breakpoint_index-1} blocks)")
+                    log_execution(f"🔄 Next QA ID {current_qa_id+1} will start at index {breakpoint_index}")
                 else:
-                    log_execution(f"Skip decision{attempt_info} for QA ID {current_qa_id}")
+                    log_execution(f"⏭️ SKIP DECISION{attempt_info} for QA ID {current_qa_id}")
+                    log_execution(f"🔄 Will hold all {len(indexed_blocks)} blocks and examine next window")
+                
+                log_execution("=" * 80)  # Separator for readability
                 
                 return parsed_result
                 
@@ -1169,10 +1216,28 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
     
     for validation_attempt in range(1, max_validation_attempts + 1):
         try:
-            log_execution(f"Validation attempt {validation_attempt}/{max_validation_attempts} for QA ID {qa_id}")
+            log_execution(f"🔍 VALIDATION ATTEMPT {validation_attempt}/{max_validation_attempts} for QA ID {qa_id}")
+            
+            # Log what we're validating
+            log_execution(f"📋 Proposed QA ID {qa_id}: {len(proposed_qa_blocks)} blocks")
+            for i, block in enumerate(proposed_qa_blocks, 1):
+                first_para = block['paragraphs'][0] if block['paragraphs'] else {}
+                content_preview = first_para.get('paragraph_content', '')[:100] + "..." if first_para.get('paragraph_content', '') else "[No content]"
+                log_execution(f"  Block {i}: {block['speaker']} - {content_preview}")
+            
+            log_execution(f"📋 Remaining blocks for context: {len(remaining_blocks[:5])}")
+            for i, block_data in enumerate(remaining_blocks[:3], 1):  # Show first 3 for context
+                block = block_data["block"] if isinstance(block_data, dict) and "block" in block_data else block_data
+                first_para = block['paragraphs'][0] if block['paragraphs'] else {}
+                content_preview = first_para.get('paragraph_content', '')[:100] + "..." if first_para.get('paragraph_content', '') else "[No content]"
+                log_execution(f"  Remaining {i}: {block['speaker']} - {content_preview}")
             
             # Create validation prompt
             prompt = create_validation_prompt(proposed_qa_blocks, remaining_blocks, company_name, transcript_title, qa_id)
+            
+            log_execution("=== VALIDATION PROMPT SENT TO LLM ===")
+            log_execution(prompt)
+            log_execution("=== END VALIDATION PROMPT ===")
             
             # Make LLM API call
             response = llm_client.chat.completions.create(
@@ -1184,12 +1249,24 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
                 max_tokens=config["stage_05_qa_pairing"]["llm_config"]["max_tokens"]
             )
             
+            # Log validation response
+            log_execution("=== VALIDATION RESPONSE RECEIVED ===")
+            if response.choices[0].message.tool_calls:
+                for i, tool_call in enumerate(response.choices[0].message.tool_calls):
+                    log_execution(f"Tool Call {i+1}: {tool_call.function.name}")
+                    log_execution(f"Raw Arguments: {tool_call.function.arguments}")
+            else:
+                log_execution("No tool calls in validation response")
+                if hasattr(response.choices[0].message, 'content') and response.choices[0].message.content:
+                    log_execution(f"Text Content: {response.choices[0].message.content}")
+            log_execution("=== END VALIDATION RESPONSE ===")
+            
             # Parse response
             if not response.choices[0].message.tool_calls:
                 error_msg = f"No tool call response for validation (QA ID {qa_id})"
-                log_execution(f"{error_msg}, attempt {validation_attempt}/{max_validation_attempts}")
+                log_execution(f"ERROR: {error_msg}, attempt {validation_attempt}/{max_validation_attempts}")
                 if validation_attempt == max_validation_attempts:
-                    log_execution(f"Validation failed after {max_validation_attempts} attempts, accepting assignment")
+                    log_execution(f"⚠️ Validation failed after {max_validation_attempts} attempts, accepting assignment")
                     return True  # Accept on final failure
                 continue
             
@@ -1213,19 +1290,24 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
                     }
                     enhanced_error_logger.accumulate_costs(token_usage)
                 
-                # Log and return validation result
+                # Log and return validation result with detailed feedback
                 attempt_info = f" (attempt {validation_attempt})" if validation_attempt > 1 else ""
-                log_execution(f"Validation{attempt_info}: {validation} for QA ID {qa_id}")
                 
                 if validation == "accept":
+                    log_execution(f"✅ VALIDATION ACCEPTED{attempt_info} for QA ID {qa_id}")
+                    log_execution(f"📋 QA ID {qa_id} confirmed with {len(proposed_qa_blocks)} blocks")
+                    log_execution("=" * 80)  # Separator
                     return True
                 else:
+                    log_execution(f"❌ VALIDATION REJECTED{attempt_info} for QA ID {qa_id}")
                     # Reject - try again if attempts remaining
                     if validation_attempt == max_validation_attempts:
-                        log_execution(f"Validation rejected after {max_validation_attempts} attempts, accepting assignment anyway")
+                        log_execution(f"⚠️ Validation rejected after {max_validation_attempts} attempts, accepting assignment anyway")
+                        log_execution("=" * 80)  # Separator
                         return True  # Accept on final failure
                     else:
-                        log_execution(f"Validation rejected, will retry breakpoint detection")
+                        log_execution(f"🔄 Validation rejected, will retry breakpoint detection")
+                        log_execution("=" * 80)  # Separator
                         return False
                 
             except (json.JSONDecodeError, KeyError, ValueError) as e:
@@ -1299,7 +1381,16 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 sliding_state["processing_complete"] = True
                 break
             
-            log_execution(f"Processing window starting at block {sliding_state['current_window_start']} with {len(current_window)} blocks for QA ID {sliding_state['current_qa_id']}")
+            log_execution("🔄" + "="*79)
+            log_execution(f"🎯 PROCESSING WINDOW for QA ID {sliding_state['current_qa_id']}")
+            log_execution(f"📍 Window start: block {sliding_state['current_window_start']}")
+            log_execution(f"📊 Current window: {len(current_window)} blocks")
+            log_execution(f"💼 Held blocks: {len(sliding_state['held_blocks'])} blocks")
+            
+            if sliding_state['held_blocks']:
+                log_execution(f"📝 Total context if skip: {len(sliding_state['held_blocks']) + len(current_window)} blocks")
+            
+            log_execution("🔄" + "="*79)
             
             # Phase 1: Breakpoint Detection
             breakpoint_result = detect_analyst_breakpoint(
@@ -1313,16 +1404,28 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             
             if breakpoint_result is None:
                 # LLM call failed - treat as skip to be conservative
-                log_execution(f"Breakpoint detection failed, treating as skip for QA ID {sliding_state['current_qa_id']}")
+                log_execution(f"⚠️ BREAKPOINT DETECTION FAILED: Treating as skip for QA ID {sliding_state['current_qa_id']}")
                 sliding_state["held_blocks"].extend([block_data["block"] for block_data in current_window])
-                sliding_state["current_window_start"] += len(current_window)
+                new_held_count = len(sliding_state["held_blocks"])
+                new_window_start = sliding_state["current_window_start"] + len(current_window)
+                sliding_state["current_window_start"] = new_window_start
+                
+                log_execution(f"📝 Total held blocks now: {new_held_count}")
+                log_execution(f"📍 Next window will start at: {new_window_start}")
+                log_execution("⚠️" + "="*79)
                 continue
             
             if breakpoint_result["action"] == "skip":
                 # Hold current blocks and advance window
-                log_execution(f"Skip decision: holding {len(current_window)} blocks for QA ID {sliding_state['current_qa_id']}")
+                log_execution(f"⏭️ SKIP ACTION: Holding {len(current_window)} blocks for QA ID {sliding_state['current_qa_id']}")
                 sliding_state["held_blocks"].extend([block_data["block"] for block_data in current_window])
-                sliding_state["current_window_start"] += len(current_window)
+                new_held_count = len(sliding_state["held_blocks"])
+                new_window_start = sliding_state["current_window_start"] + len(current_window)
+                sliding_state["current_window_start"] = new_window_start
+                
+                log_execution(f"📝 Total held blocks now: {new_held_count}")
+                log_execution(f"📍 Next window will start at: {new_window_start}")
+                log_execution("⏭️" + "="*79)
                 continue
                 
             elif breakpoint_result["action"] == "breakpoint":
