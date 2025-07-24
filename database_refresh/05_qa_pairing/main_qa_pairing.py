@@ -1374,8 +1374,20 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
         company_name = transcript_metadata.get("company_name", "Unknown Company")
         transcript_title = transcript_metadata.get("transcript_title", "Earnings Call Transcript")
         
-        # Main processing loop
+        # Main processing loop with infinite loop protection
+        max_iterations = len(qa_speaker_blocks) * 2  # Should never need more than 2x the total blocks
+        iteration_count = 0
+        
         while not sliding_state["processing_complete"] and sliding_state["current_window_start"] < len(qa_speaker_blocks):
+            iteration_count += 1
+            
+            # Infinite loop protection
+            if iteration_count > max_iterations:
+                log_execution(f"🚨 INFINITE LOOP DETECTED! Breaking after {iteration_count} iterations")
+                log_execution(f"📊 Current state: window_start={sliding_state['current_window_start']}, total_blocks={len(qa_speaker_blocks)}")
+                log_execution(f"💼 Held blocks: {len(sliding_state['held_blocks'])}, current_qa_id={sliding_state['current_qa_id']}")
+                enhanced_error_logger.log_processing_error(transcript_id, f"Infinite loop detected after {iteration_count} iterations")
+                break
             
             # Create current window (configurable size)
             window_size = config["stage_05_qa_pairing"]["window_size"]
@@ -1391,13 +1403,16 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 break
             
             log_execution("🔄" + "="*79)
-            log_execution(f"🎯 PROCESSING WINDOW for QA ID {sliding_state['current_qa_id']}")
-            log_execution(f"📍 Window start: block {sliding_state['current_window_start']}")
+            log_execution(f"🎯 PROCESSING WINDOW for QA ID {sliding_state['current_qa_id']} (Iteration {iteration_count}/{max_iterations})")
+            log_execution(f"📍 Window start: block {sliding_state['current_window_start']} of {len(qa_speaker_blocks)} total blocks")
             log_execution(f"📊 Current window: {len(current_window)} blocks")
             log_execution(f"💼 Held blocks: {len(sliding_state['held_blocks'])} blocks")
             
             if sliding_state['held_blocks']:
                 log_execution(f"📝 Total context if skip: {len(sliding_state['held_blocks']) + len(current_window)} blocks")
+            
+            # Track window advancement to detect infinite loops
+            previous_window_start = sliding_state['current_window_start']
             
             log_execution("🔄" + "="*79)
             
@@ -1490,13 +1505,26 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     
                 else:
                     # Validation failed - retry breakpoint detection on same window
-                    log_execution(f"Validation failed for QA ID {sliding_state['current_qa_id']}, retrying breakpoint detection")
+                    log_execution(f"❌ Validation failed for QA ID {sliding_state['current_qa_id']}, retrying breakpoint detection")
                     # Continue with same window state - will retry breakpoint detection
                     
             else:
                 # Invalid action (shouldn't happen with validation)
-                log_execution(f"Invalid breakpoint action: {breakpoint_result.get('action')}")
+                log_execution(f"⚠️ Invalid breakpoint action: {breakpoint_result.get('action')}")
                 sliding_state["processing_complete"] = True
+            
+            # Check for window advancement - critical for preventing infinite loops
+            if sliding_state['current_window_start'] == previous_window_start and not sliding_state["processing_complete"]:
+                log_execution(f"🚨 WARNING: Window did not advance from position {previous_window_start}")
+                log_execution(f"📊 This could indicate an infinite loop condition")
+                
+                # Force advancement to prevent infinite loop
+                if sliding_state['current_window_start'] + len(current_window) >= len(qa_speaker_blocks):
+                    log_execution(f"🛑 Reached end of blocks, marking processing complete")
+                    sliding_state["processing_complete"] = True
+                else:
+                    log_execution(f"🔧 Force advancing window by {len(current_window)} blocks")
+                    sliding_state['current_window_start'] += len(current_window)
         
         # Handle any remaining held blocks as final qa_id
         if sliding_state["held_blocks"]:
@@ -1511,6 +1539,19 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
             sliding_state["all_qa_groups"].append(final_qa_group)
             log_execution(f"Created final QA ID {sliding_state['current_qa_id']} with {len(sliding_state['held_blocks'])} remaining blocks")
         
+        log_execution(f"🎉 SLIDING WINDOW PROCESSING COMPLETE")
+        log_execution(f"📊 Total iterations: {iteration_count}")
+        log_execution(f"📋 Q&A groups created: {len(sliding_state['all_qa_groups'])}")
+        log_execution(f"📍 Final window position: {sliding_state['current_window_start']} of {len(qa_speaker_blocks)} blocks")
+        log_execution(f"💼 Final held blocks: {len(sliding_state['held_blocks'])}")
+        
+        if iteration_count > max_iterations:
+            log_execution(f"⚠️ Processing stopped due to infinite loop protection")
+        elif sliding_state["processing_complete"]:
+            log_execution(f"✅ Processing completed normally")
+        else:
+            log_execution(f"ℹ️ Processing stopped - reached end of blocks")
+            
         log_execution(f"Successfully identified {len(sliding_state['all_qa_groups'])} Q&A groups using sliding window approach")
         return sliding_state["all_qa_groups"]
         
