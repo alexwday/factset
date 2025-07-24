@@ -368,8 +368,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
         "output_logs_path",
         "dev_mode",
         "dev_max_transcripts",
-        "llm_config",
-        "state_config"
+        "llm_config"
     ]
 
     for param in required_stage_05_qa_pairing_params:
@@ -392,15 +391,8 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             log_error(error_msg, "config_validation", {"missing_parameter": f"llm_config.{param}"})
             raise ValueError(error_msg)
 
-    # Validate state config structure
-    state_config = stage_05_qa_pairing_config["state_config"]
-    required_state_params = ["lookahead_blocks", "default_decision"]
-
-    for param in required_state_params:
-        if param not in state_config:
-            error_msg = f"Missing required state config parameter: {param}"
-            log_error(error_msg, "config_validation", {"missing_parameter": f"state_config.{param}"})
-            raise ValueError(error_msg)
+    # Note: state_config is no longer used in sliding window approach
+    # Legacy validation removed - sliding window approach uses direct LLM calls without lookahead configuration
 
     # Validate monitored institutions
     if not config["monitored_institutions"]:
@@ -411,7 +403,7 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     log_execution("Configuration validation successful", {
         "total_institutions": len(config["monitored_institutions"]),
         "llm_model": llm_config["model"],
-        "state_config": state_config
+        "approach": "sliding_window"
     })
 
 
