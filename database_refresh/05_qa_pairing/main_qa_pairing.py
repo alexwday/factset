@@ -368,7 +368,8 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
         "output_logs_path",
         "dev_mode",
         "dev_max_transcripts",
-        "llm_config"
+        "llm_config",
+        "window_size"
     ]
 
     for param in required_stage_05_qa_pairing_params:
@@ -403,7 +404,8 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
     log_execution("Configuration validation successful", {
         "total_institutions": len(config["monitored_institutions"]),
         "llm_model": llm_config["model"],
-        "approach": "sliding_window"
+        "approach": "sliding_window",
+        "window_size": stage_05_qa_pairing_config["window_size"]
     })
 
 
@@ -786,7 +788,7 @@ def group_records_by_speaker_block(records: List[Dict]) -> List[Dict]:
 
 def create_breakpoint_detection_prompt(indexed_blocks: List[Dict], company_name: str, transcript_title: str, current_qa_id: int) -> str:
     """
-    Create prompt for analyst breakpoint detection in 15-block sliding windows.
+    Create prompt for analyst breakpoint detection in configurable-size sliding windows.
     Instructs LLM to find where the next analyst turn begins or skip to next batch.
     """
     
@@ -934,27 +936,26 @@ def format_speaker_block_content(paragraphs: List[Dict]) -> str:
 
 
 def create_breakpoint_detection_tool():
-    """Create function calling tool for analyst breakpoint detection in 15-block windows."""
+    """Create function calling tool for analyst breakpoint detection in configurable-size windows."""
     
     return [
         {
             "type": "function",  
             "function": {
                 "name": "analyst_breakpoint",
-                "description": "Identify where the next analyst turn begins in the indexed speaker blocks, or skip to examine the next batch. When you skip, the current 15 blocks will be held and combined with blocks from the next window to find the true breakpoint.",
+                "description": "Identify where the next analyst turn begins in the indexed speaker blocks, or skip to examine the next batch. When you skip, the current blocks will be held and combined with blocks from the next window to find the true breakpoint.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
                             "enum": ["skip", "breakpoint"],
-                            "description": "skip: The end of current analyst turn is not in these 15 blocks, examine next batch and combine with current blocks. breakpoint: Found where next analyst turn begins."
+                            "description": "skip: The end of current analyst turn is not in these blocks, examine next batch and combine with current blocks. breakpoint: Found where next analyst turn begins."
                         },
                         "index": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": 15,
-                            "description": "Required when action is 'breakpoint'. The 1-based index (1-15) where the next analyst turn begins."
+                            "description": "Required when action is 'breakpoint'. The 1-based index where the next analyst turn begins."
                         }
                     },
                     "required": ["action"]
@@ -1005,7 +1006,7 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> dict:
     }
 
 
-def create_indexed_speaker_blocks(speaker_blocks: List[Dict], start_index: int, window_size: int = 15) -> List[Dict]:
+def create_indexed_speaker_blocks(speaker_blocks: List[Dict], start_index: int, window_size: int) -> List[Dict]:
     """
     Create 1-based indexed speaker blocks for sliding window processing.
     Returns list of dicts with 'index' (1-based) and 'block' (speaker block data).
@@ -1031,7 +1032,7 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                             transcript_id: str,
                             enhanced_error_logger: EnhancedErrorLogger) -> Optional[Dict]:
     """
-    Use LLM to detect analyst breakpoint in 15-block window.
+    Use LLM to detect analyst breakpoint in configurable-size window.
     Returns dict with action ("skip" or "breakpoint") and optional index.
     """
     global llm_client
@@ -1250,10 +1251,10 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
 
 def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_id: str, transcript_metadata: Dict, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
     """
-    Sliding window Q&A boundary processing with 15-block windows and skip/hold logic.
+    Sliding window Q&A boundary processing with configurable window size and skip/hold logic.
     
     Process:
-    1. Create 15-block sliding windows (1-based indexing)
+    1. Create sliding windows with configurable size (1-based indexing)
     2. LLM decides "skip" (hold blocks) or "breakpoint" (create qa_id)
     3. If breakpoint: validate assignment, advance window from breakpoint
     4. If skip: hold blocks, advance window, combine with next batch
@@ -1285,11 +1286,12 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
         # Main processing loop
         while not sliding_state["processing_complete"] and sliding_state["current_window_start"] < len(qa_speaker_blocks):
             
-            # Create current window (up to 15 blocks)
+            # Create current window (configurable size)
+            window_size = config["stage_05_qa_pairing"]["window_size"]
             current_window = create_indexed_speaker_blocks(
                 qa_speaker_blocks, 
                 sliding_state["current_window_start"], 
-                window_size=15
+                window_size
             )
             
             if not current_window:

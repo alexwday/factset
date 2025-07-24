@@ -77,12 +77,13 @@ stage_04_validate_structure:
 
 # Stage 05 specific settings (Sliding Window Q&A Pairing)
 stage_05_qa_pairing:
-  description: "Sliding window 15-block Q&A boundary detection and analyst session pairing"
+  description: "Sliding window Q&A boundary detection and analyst session pairing"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_04_validated_content.json"
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 2
+  window_size: 20  # Number of speaker blocks per sliding window
   
   # LLM Configuration (OAuth client credentials come from environment variables)
   llm_config:
