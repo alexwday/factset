@@ -808,7 +808,7 @@ def group_records_by_speaker_block(records: List[Dict]) -> List[Dict]:
 def create_breakpoint_detection_prompt(indexed_blocks: List[Dict], company_name: str, transcript_title: str, current_qa_id: int) -> str:
     """
     Create prompt for analyst breakpoint detection in configurable-size sliding windows.
-    Instructs LLM to find where the next analyst turn begins or skip to next batch.
+    Instructs LLM to find the LAST block of current analyst turn or skip to next batch.
     """
     
     # Format the indexed blocks for the prompt
@@ -823,51 +823,54 @@ Content: {format_speaker_block_content(block['paragraphs'])}""")
     
     return f"""<task>
 You are analyzing a {company_name} earnings call Q&A transcript titled "{transcript_title}".
-Your task is to find the VERY FIRST breakpoint where the NEXT analyst's turn begins.
+Your task is to find the LAST block that belongs to the current analyst's turn (QA ID {current_qa_id}).
 </task>
 
 <context>
-You are currently processing QA ID {current_qa_id}. You need to find where this analyst's turn ends and the next analyst's turn begins.
+You are currently processing QA ID {current_qa_id}. You need to find where this analyst's turn ends - the LAST block that belongs to their conversation.
 </context>
 
 <objective>
 Examine the {len(indexed_blocks)} indexed speaker blocks below IN SEQUENTIAL ORDER (1, 2, 3, etc.) and determine:
 
-1. SKIP: If the current analyst's turn continues beyond ALL these blocks (no breakpoint found in this batch)
-2. BREAKPOINT: If you find the VERY FIRST index where the next analyst's turn begins
+1. SKIP: If the current analyst's turn continues beyond ALL these blocks (no endpoint found in this batch)
+2. BREAKPOINT: If you find where the current analyst's turn ENDS - return the index of the LAST block belonging to this analyst
 
-🚨 CRITICAL: You are looking for the FIRST/EARLIEST breakpoint only. Even if there are multiple analyst changes in these blocks, return only the index of the FIRST one you encounter when reading sequentially from index 1.
+🚨 CRITICAL: You are looking for the LAST block of the current analyst's turn. This includes:
+- The analyst's final follow-up question
+- The executive's final response to this analyst
+- Any operator comment that concludes this analyst's session (e.g., "Thank you")
 
-When you choose SKIP: These {len(indexed_blocks)} blocks will be held and combined with the next batch to find the breakpoint.
-When you choose BREAKPOINT: All blocks up to (but not including) your chosen index belong to the current analyst.
+When you choose SKIP: These {len(indexed_blocks)} blocks will be held and combined with the next batch to find the endpoint.
+When you choose BREAKPOINT: All blocks up to AND INCLUDING your chosen index belong to the current analyst.
 </objective>
 
 <instructions>
 🔍 SEQUENTIAL ANALYSIS PROCESS:
 1. Start at Index 1 and read through each block in order
-2. Look for the FIRST clear transition from current analyst to a NEW analyst
-3. Stop immediately when you find the first breakpoint - do not continue analyzing
-4. If no breakpoint is found in ALL blocks, choose SKIP
+2. Identify where the current analyst's conversation naturally ends
+3. Return the index of the LAST block that belongs to the current analyst
+4. If the current analyst's turn extends beyond ALL blocks, choose SKIP
 
-<breakpoint_indicators>
-STRONG breakpoint signals (return the index immediately when found):
-- Operator: "Next question from [New Analyst Name], [Firm]" 
-- New analyst introduction after current analyst's session is complete
-- Clear transition to different analyst with operator facilitation
-- New analyst acknowledgment (e.g., "Thank you, operator...")
+<endpoint_indicators>
+STRONG endpoint signals (the LAST block of current analyst's turn):
+- Executive's final response to the current analyst's questions
+- Operator thanking the current analyst (e.g., "Thank you, Mr. Smith")
+- Operator transitioning to next analyst (this belongs to CURRENT analyst as their conclusion)
+- Current analyst's final thank you or closing remarks
 
-CONTINUE signals (keep reading, don't return breakpoint yet):
-- Same analyst asking follow-up questions  
-- Executive still responding to current analyst's questions
-- Ongoing back-and-forth within same analyst session
-- Brief operator comments within same analyst conversation
-</breakpoint_indicators>
+CONTINUE signals (current analyst's turn is still ongoing):
+- Analyst asking another follow-up question
+- Executive still answering the current analyst
+- Back-and-forth dialogue continuing
+- Analyst saying "just one more question" or similar
+</endpoint_indicators>
 
 <critical_reminders>
-🚨 FIRST BREAKPOINT ONLY: Even if you see multiple analyst transitions, return only the FIRST one
-🚨 SEQUENTIAL ORDER: Process blocks 1→2→3→4... and stop at first breakpoint found
-🚨 COMPLETE SESSIONS: Ensure current analyst's questions are fully addressed before identifying breakpoint
-🚨 NO LOOKING AHEAD: Don't analyze all blocks first - stop at the first valid breakpoint
+🚨 LAST BLOCK: You're finding the LAST block of the current analyst's turn
+🚨 INCLUDE TRANSITIONS: Operator comments like "Next question from..." that conclude the current analyst belong to the CURRENT analyst
+🚨 COMPLETE SESSIONS: Make sure all of the current analyst's questions have been answered
+🚨 BE INCLUSIVE: When in doubt, include transitional blocks with the current analyst
 </critical_reminders>
 </instructions>
 
@@ -877,10 +880,10 @@ CONTINUE signals (keep reading, don't return breakpoint yet):
 
 <output_format>
 Call the analyst_breakpoint function with:
-- "skip" if NO breakpoint is found in these {len(indexed_blocks)} blocks
-- "breakpoint" with the index of the FIRST breakpoint found (1-{len(indexed_blocks)})
+- "skip" if the current analyst's turn continues beyond these {len(indexed_blocks)} blocks
+- "breakpoint" with the index of the LAST block belonging to the current analyst (1-{len(indexed_blocks)})
 
-🚨 REMEMBER: Return the FIRST breakpoint you find when reading sequentially from index 1. Do not continue analyzing after finding the first valid breakpoint.
+🚨 REMEMBER: Return the index of the LAST block that belongs to the current analyst's turn. This includes any operator transitions that conclude their session.
 </output_format>"""
 
 
@@ -975,26 +978,26 @@ def format_speaker_block_content(paragraphs: List[Dict], max_length: Optional[in
 
 
 def create_breakpoint_detection_tool():
-    """Create function calling tool for analyst breakpoint detection in configurable-size windows."""
+    """Create function calling tool for analyst endpoint detection in configurable-size windows."""
     
     return [
         {
             "type": "function",  
             "function": {
                 "name": "analyst_breakpoint",
-                "description": "Find the FIRST/EARLIEST breakpoint where the next analyst's turn begins by reading blocks sequentially from index 1. Return the index of the FIRST breakpoint found, or skip if no breakpoint exists in this batch. Do not analyze all blocks - stop immediately at the first valid breakpoint.",
+                "description": "Find the LAST block that belongs to the current analyst's turn. Return the index of the LAST block of their conversation, or skip if their turn extends beyond this batch.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
                             "enum": ["skip", "breakpoint"],
-                            "description": "skip: The end of current analyst turn is not in these blocks, examine next batch and combine with current blocks. breakpoint: Found where next analyst turn begins."
+                            "description": "skip: The current analyst's turn continues beyond these blocks, examine next batch. breakpoint: Found the LAST block of current analyst's turn."
                         },
                         "index": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Required when action is 'breakpoint'. The 1-based index of the FIRST/EARLIEST block where the next analyst turn begins. Must be the first breakpoint found when reading sequentially from index 1."
+                            "description": "Required when action is 'breakpoint'. The 1-based index of the LAST block belonging to the current analyst. This includes any operator transitions that conclude their session."
                         }
                     },
                     "required": ["action"]
@@ -1098,8 +1101,9 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                             transcript_id: str,
                             enhanced_error_logger: EnhancedErrorLogger) -> Optional[Dict]:
     """
-    Use LLM to detect analyst breakpoint in configurable-size window.
+    Use LLM to detect the LAST block of current analyst's turn in configurable-size window.
     Returns dict with action ("skip" or "breakpoint") and optional index.
+    Breakpoint index indicates the LAST block belonging to current analyst.
     """
     global llm_client
     
@@ -1529,22 +1533,17 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     sliding_state["processing_complete"] = True
                     continue
                 
-                log_execution(f"Breakpoint detected at index {breakpoint_index} (speaker block {breakpoint_speaker_block_id})")
+                log_execution(f"Current analyst ends at index {breakpoint_index} (speaker block {breakpoint_speaker_block_id})")
                 log_execution(f"Current window speaker blocks: {current_window_block_ids}, held blocks count: {len(sliding_state['held_blocks'])}")
                 
-                # Get speaker_block_ids up to (but not including) breakpoint for current qa_id
-                # breakpoint_index is 1-based, so if it's 3, we want indices 0,1 (blocks 1,2)
-                if breakpoint_index > 1:
-                    current_qa_block_ids = current_window_block_ids[:breakpoint_index-1]
-                    current_window_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_qa_block_ids)
-                else:
-                    # Breakpoint at index 1 means no blocks from current window belong to current QA
-                    current_qa_block_ids = []
-                    current_window_blocks = []
+                # Get speaker_block_ids up to AND including breakpoint for current qa_id
+                # breakpoint_index is 1-based, so if it's 3, we want indices 0,1,2 (blocks 1,2,3)
+                current_qa_block_ids = current_window_block_ids[:breakpoint_index]
+                current_window_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, current_qa_block_ids)
                 proposed_qa_blocks = sliding_state["held_blocks"] + current_window_blocks
                 
                 # Remaining speaker_block_ids in window (for validation context)
-                remaining_block_ids = current_window_block_ids[breakpoint_index-1:]
+                remaining_block_ids = current_window_block_ids[breakpoint_index:]
                 remaining_window_blocks = get_blocks_for_speaker_block_ids(qa_speaker_blocks, remaining_block_ids)
                 
                 # Prepare for validation
@@ -1553,8 +1552,8 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     # Edge case: no blocks for this qa_id 
                     # This can happen when breakpoint is at index 1 with no held blocks
                     log_execution(f"WARNING: No blocks proposed for QA ID {sliding_state['current_qa_id']} (breakpoint at index {breakpoint_index}, held blocks: {len(sliding_state['held_blocks'])})")
-                    # Don't create an empty group - just advance
-                    sliding_state["current_block_id_index"] = breakpoint_block_id_index
+                    # Don't create an empty group - just advance to after the breakpoint
+                    sliding_state["current_block_id_index"] = breakpoint_block_id_index + 1
                     # Don't increment QA ID since we didn't create a group
                     continue
                 else:
@@ -1588,8 +1587,8 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                     sliding_state["current_qa_id"] += 1
                     sliding_state["held_blocks"] = []  # Clear held blocks
                     
-                    # Advance window to breakpoint speaker_block_id (where next analyst starts)
-                    sliding_state["current_block_id_index"] = breakpoint_block_id_index
+                    # Advance window to after the breakpoint (next analyst starts after current one ends)
+                    sliding_state["current_block_id_index"] = breakpoint_block_id_index + 1
                     
                     # Window advanced
                     
@@ -1618,8 +1617,8 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                         sliding_state["current_qa_id"] += 1
                         sliding_state["held_blocks"] = []  # Clear held blocks
                         
-                        # Advance window to breakpoint speaker_block_id (where next analyst starts)
-                        sliding_state["current_block_id_index"] = breakpoint_block_id_index
+                        # Advance window to after the breakpoint (next analyst starts after current one ends)
+                        sliding_state["current_block_id_index"] = breakpoint_block_id_index + 1
                         
                         # Force advanced window
                     
