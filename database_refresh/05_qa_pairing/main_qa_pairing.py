@@ -1843,6 +1843,66 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     return enhanced_records
 
 
+def append_records_to_output(nas_conn: SMBConnection, file_path: str, records: List[Dict], is_first: bool) -> bool:
+    """
+    Append records to an existing JSON array file on NAS.
+    Handles comma placement for proper JSON array formatting.
+    """
+    try:
+        # Prepare JSON content
+        if not is_first:
+            # Add comma before new records if not the first entry
+            records_json = ",\n" + json.dumps(records, indent=2)[1:-1]  # Remove [ and ]
+        else:
+            # First entry, no leading comma
+            records_json = json.dumps(records, indent=2)[1:-1]  # Remove [ and ]
+        
+        # Download existing file to append
+        existing_content = nas_download_file(nas_conn, file_path)
+        if existing_content is None:
+            log_error(f"Failed to download file for append: {file_path}", "output_save", {"path": file_path})
+            return False
+        
+        # Combine content
+        new_content = existing_content + records_json.encode('utf-8')
+        
+        # Upload back
+        content_bytes = io.BytesIO(new_content)
+        content_bytes.seek(0)
+        
+        if nas_upload_file(nas_conn, content_bytes, file_path):
+            return True
+        else:
+            log_error(f"Failed to upload appended content: {file_path}", "output_save", {"path": file_path})
+            return False
+            
+    except Exception as e:
+        log_error(f"Failed to append records: {e}", "output_save", {"path": file_path, "error": str(e)})
+        return False
+
+
+def close_json_array(nas_conn: SMBConnection, file_path: str) -> bool:
+    """Close a JSON array file by appending the closing bracket."""
+    try:
+        # Download existing content
+        existing_content = nas_download_file(nas_conn, file_path)
+        if existing_content is None:
+            return False
+        
+        # Add closing bracket
+        new_content = existing_content + b"\n]"
+        
+        # Upload back
+        content_bytes = io.BytesIO(new_content)
+        content_bytes.seek(0)
+        
+        return nas_upload_file(nas_conn, content_bytes, file_path)
+        
+    except Exception as e:
+        log_error(f"Failed to close JSON array: {e}", "output_save", {"path": file_path, "error": str(e)})
+        return False
+
+
 def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> Tuple[List[Dict], int]:
     """
     Process a single transcript for Q&A pairing using state-based approach with per-transcript OAuth refresh.
@@ -1985,92 +2045,98 @@ def main() -> None:
 
         stage_summary["total_transcripts_processed"] = len(transcripts)
 
-        # Step 10: Process each transcript
-        log_console("Step 10: Processing Q&A pairing...")
-        all_enhanced_records = []
+        # Step 10: Set up output files
+        log_console("Step 10: Setting up output files...")
+        output_path = config["stage_05_qa_pairing"]["output_data_path"]
+        output_filename = "stage_05_qa_paired_content.json"
+        output_file_path = nas_path_join(output_path, output_filename)
+        
+        failed_filename = "stage_05_qa_pairing_failed_transcripts.json"
+        failed_file_path = nas_path_join(output_path, failed_filename)
+        
+        nas_create_directory_recursive(nas_conn, output_path)
+        
+        # Initialize output files with empty arrays
+        try:
+            # Main output file
+            output_bytes = io.BytesIO(b"[\n")
+            if not nas_upload_file(nas_conn, output_bytes, output_file_path):
+                log_console("Failed to initialize output file", "ERROR")
+                stage_summary["status"] = "failed"
+                return
+                
+            # Failed transcripts file
+            failed_bytes = io.BytesIO(b"[\n")
+            if not nas_upload_file(nas_conn, failed_bytes, failed_file_path):
+                log_console("Failed to initialize failed transcripts file", "ERROR")
+                stage_summary["status"] = "failed"
+                return
+                
+        except Exception as e:
+            log_console(f"Failed to initialize output files: {e}", "ERROR")
+            stage_summary["status"] = "failed"
+            return
+        
+        # Step 11: Process each transcript
+        log_console("Step 11: Processing Q&A pairing...")
         total_qa_groups_count = 0
+        successful_transcripts = 0
+        failed_transcripts = 0
+        first_successful = True
+        first_failed = True
 
         for i, (transcript_id, transcript_records) in enumerate(transcripts.items(), 1):
             log_console(f"Processing transcript {i}/{len(transcripts)}: {transcript_id}")
             
-            enhanced_records, qa_groups_count = process_transcript_qa_pairing(
-                transcript_records, transcript_id, enhanced_error_logger
-            )
-            
-            all_enhanced_records.extend(enhanced_records)
-            total_qa_groups_count += qa_groups_count
+            try:
+                enhanced_records, qa_groups_count = process_transcript_qa_pairing(
+                    transcript_records, transcript_id, enhanced_error_logger
+                )
+                
+                if qa_groups_count > 0 or len(enhanced_records) > 0:
+                    # Append to main output file
+                    if append_records_to_output(nas_conn, output_file_path, enhanced_records, first_successful):
+                        successful_transcripts += 1
+                        total_qa_groups_count += qa_groups_count
+                        first_successful = False
+                        log_console(f"✓ Transcript {transcript_id} saved ({len(enhanced_records)} records, {qa_groups_count} Q&A groups)")
+                    else:
+                        # If append fails, add to failed transcripts
+                        if append_records_to_output(nas_conn, failed_file_path, transcript_records, first_failed):
+                            failed_transcripts += 1
+                            first_failed = False
+                            log_console(f"✗ Transcript {transcript_id} moved to failed file (append error)", "WARNING")
+                else:
+                    log_console(f"⚠ Transcript {transcript_id} skipped (no records)", "WARNING")
+                    
+            except Exception as e:
+                # Add failed transcript to failed file
+                log_console(f"✗ Transcript {transcript_id} failed: {e}", "ERROR")
+                log_error(f"Transcript processing failed: {e}", "processing", {"transcript_id": transcript_id})
+                
+                if append_records_to_output(nas_conn, failed_file_path, transcript_records, first_failed):
+                    failed_transcripts += 1
+                    first_failed = False
 
+        # Step 12: Close JSON arrays in output files
+        log_console("Step 12: Finalizing output files...")
+        
+        # Close main output file
+        if successful_transcripts > 0:
+            if not close_json_array(nas_conn, output_file_path):
+                log_console("Warning: Failed to properly close main output file", "WARNING")
+        
+        # Close failed transcripts file
+        if failed_transcripts > 0:
+            if not close_json_array(nas_conn, failed_file_path):
+                log_console("Warning: Failed to properly close failed transcripts file", "WARNING")
+        
+        # Update stage summary
         stage_summary["total_qa_groups_identified"] = total_qa_groups_count
         stage_summary["total_llm_cost"] = enhanced_error_logger.total_cost
         stage_summary["total_tokens_used"] = enhanced_error_logger.total_tokens
-
-        # Step 11: Save output (just records array, no metadata wrapper)
-        log_console("Step 11: Saving Q&A paired content...")
-
-        # Save to NAS following Stage 4 pattern
-        output_path = config["stage_05_qa_pairing"]["output_data_path"]
-        output_filename = "stage_05_qa_paired_content.json"
-        output_file_path = nas_path_join(output_path, output_filename)
-
-        nas_create_directory_recursive(nas_conn, output_path)
-
-        # Output just the records array, no metadata wrapper
-        try:
-            output_json = json.dumps(all_enhanced_records, indent=2)
-            json_size_mb = len(output_json) / (1024 * 1024)
-            log_console(f"Output JSON size: {json_size_mb:.2f} MB")
-            
-            output_bytes = io.BytesIO(output_json.encode("utf-8"))
-            output_bytes.seek(0)  # Reset to beginning of stream
-            
-            log_console(f"Uploading output file to NAS...")
-        except Exception as e:
-            stage_summary["status"] = "failed"
-            log_console(f"Failed to create output JSON: {e}", "ERROR")
-            log_error(f"JSON creation failed: {e}", "output_save", {"records_count": len(all_enhanced_records)})
-            return
-
-        if nas_upload_file(nas_conn, output_bytes, output_file_path):
-            log_execution("Q&A paired content saved successfully", {
-                "output_path": output_file_path,
-                "total_records": len(all_enhanced_records)
-            })
-            log_console(f"Output saved successfully: {output_filename}")
-        else:
-            # Try alternative: save without pretty printing to reduce size
-            log_console("Primary save failed, trying compact format...", "WARNING")
-            try:
-                compact_json = json.dumps(all_enhanced_records, separators=(',', ':'))
-                compact_size_mb = len(compact_json) / (1024 * 1024)
-                log_console(f"Compact JSON size: {compact_size_mb:.2f} MB")
-                
-                compact_bytes = io.BytesIO(compact_json.encode("utf-8"))
-                compact_bytes.seek(0)
-                
-                if nas_upload_file(nas_conn, compact_bytes, output_file_path):
-                    log_console(f"Output saved successfully in compact format: {output_filename}")
-                    log_execution("Q&A paired content saved (compact format)", {
-                        "output_path": output_file_path,
-                        "total_records": len(all_enhanced_records),
-                        "format": "compact"
-                    })
-                else:
-                    stage_summary["status"] = "failed"
-                    stage_summary["errors"]["output_save"] += 1
-                    log_console("Failed to save output file even in compact format", "ERROR")
-                    
-                    # Log summary of what we tried to save for debugging
-                    log_error("Output save failed after both attempts", "output_save", {
-                        "records_count": len(all_enhanced_records),
-                        "pretty_size_mb": json_size_mb,
-                        "compact_size_mb": compact_size_mb,
-                        "transcripts_processed": len(transcripts)
-                    })
-                    return
-            except Exception as e:
-                stage_summary["status"] = "failed"
-                log_console(f"Failed to create compact JSON: {e}", "ERROR")
-                return
+        stage_summary["successful_transcripts"] = successful_transcripts
+        stage_summary["failed_transcripts"] = failed_transcripts
 
         # Calculate execution time
         end_time = datetime.now()
@@ -2086,14 +2152,20 @@ def main() -> None:
 
         # Final summary
         log_console("=== STAGE 5 Q&A PAIRING COMPLETE ===")
-        log_console(f"Transcripts processed: {stage_summary['total_transcripts_processed']}")
+        log_console(f"Total transcripts: {stage_summary['total_transcripts_processed']}")
+        log_console(f"Successful transcripts: {successful_transcripts}")
+        log_console(f"Failed transcripts: {failed_transcripts}")
         log_console(f"Total records processed: {stage_summary['total_records_processed']}")
         log_console(f"Q&A groups identified: {stage_summary['total_qa_groups_identified']}")
         log_console(f"Total LLM cost: ${stage_summary['total_llm_cost']:.4f}")
         log_console(f"Total tokens used: {stage_summary['total_tokens_used']:,}")
         log_console(f"Total errors: {sum(stage_summary['errors'].values())}")
         log_console(f"Execution time: {execution_time}")
-        log_console(f"Output file: {output_filename}")
+        log_console(f"Output files:")
+        if successful_transcripts > 0:
+            log_console(f"  - Main output: {output_filename}")
+        if failed_transcripts > 0:
+            log_console(f"  - Failed transcripts: {failed_filename}")
 
     except Exception as e:
         stage_summary["status"] = "failed"
