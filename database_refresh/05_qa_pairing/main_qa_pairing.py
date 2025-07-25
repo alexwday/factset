@@ -864,6 +864,11 @@ EXCLUDE from current analyst (these start the NEXT analyst's turn):
 - Operator saying "Thank you. Our next question..." (the "thank you" doesn't override the introduction)
 - Any block that primarily introduces a new analyst, even if it includes a brief thank you
 
+SPECIAL CASE - End of Q&A Session:
+- If operator indicates this is the LAST analyst question (e.g., "last question", "final question")
+- After the final analyst's Q&A completes, any subsequent executive closing remarks or operator concluding statements should be grouped as a SEPARATE QA ID
+- These final statements (executive wrap-up, operator sign-off) form their own distinct group, not part of the last analyst's turn
+
 CONTINUE signals (current analyst's turn is still ongoing):
 - Analyst asking another follow-up question
 - Executive still answering the current analyst
@@ -876,6 +881,7 @@ CONTINUE signals (current analyst's turn is still ongoing):
 🚨 EXCLUDE INTRODUCTIONS: Operator blocks introducing "Next question from..." belong to the NEXT analyst, NOT current
 🚨 COMPLETE SESSIONS: Make sure all of the current analyst's questions have been answered
 🚨 NATURAL BOUNDARIES: End at the executive's final response or operator's simple "thank you" (without next introduction)
+🚨 END OF Q&A: Executive closing remarks and operator sign-offs after the last analyst form a SEPARATE final QA ID
 </critical_reminders>
 </instructions>
 
@@ -938,12 +944,14 @@ ACCEPT if:
 - Includes all follow-up questions and responses for this analyst
 - Ends at a natural conversation boundary
 - Next blocks clearly belong to a different analyst or conversation
+- OR contains executive closing remarks/operator sign-off after the final analyst (should be its own separate QA ID)
 
 REJECT if:
 - Cuts off mid-conversation (analyst questions not fully addressed)
 - Includes parts of different analysts' sessions
 - Stops too early (more questions from same analyst follow)
 - Breakpoint seems arbitrary or unnatural
+- Mixes analyst Q&A with post-Q&A executive closing remarks (these should be separate QA IDs)
 </validation_criteria>
 
 <proposed_qa_id_{qa_id}>
