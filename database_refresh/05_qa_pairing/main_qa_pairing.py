@@ -1764,7 +1764,7 @@ def extract_transcript_metadata(transcript_records: List[Dict]) -> Dict:
 def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) -> List[Dict]:
     """
     Apply Q&A group assignments to paragraph records.
-    Only adds: qa_group_id, qa_group_confidence, qa_group_method
+    Only adds: qa_group_id
     """
     
     # Create mapping from speaker block ID to Q&A group info
@@ -1793,9 +1793,7 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
             block_id = speaker_block.get("speaker_block_id")
             if block_id is not None:
                 block_to_qa_map[block_id] = {
-                    "qa_group_id": group["qa_group_id"],
-                    "qa_group_confidence": group["confidence"],
-                    "qa_group_method": group["method"]
+                    "qa_group_id": group["qa_group_id"]
                 }
                 block_ids_in_group.append(block_id)
             else:
@@ -1824,9 +1822,7 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
             else:
                 # No Q&A group assignment
                 enhanced_record.update({
-                    "qa_group_id": None,
-                    "qa_group_confidence": None,
-                    "qa_group_method": None
+                    "qa_group_id": None
                 })
                 if speaker_block_id is not None and speaker_block_id not in block_to_qa_map:
                     if speaker_block_id not in unassigned_speaker_block_ids:
@@ -1834,9 +1830,7 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
         else:
             # Non-Q&A sections don't get Q&A assignments
             enhanced_record.update({
-                "qa_group_id": None,
-                "qa_group_confidence": None,
-                "qa_group_method": None
+                "qa_group_id": None
             })
         
         enhanced_records.append(enhanced_record)
