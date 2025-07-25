@@ -855,9 +855,14 @@ When you choose BREAKPOINT: All blocks up to AND INCLUDING your chosen index bel
 <endpoint_indicators>
 STRONG endpoint signals (the LAST block of current analyst's turn):
 - Executive's final response to the current analyst's questions
-- Operator thanking the current analyst (e.g., "Thank you, Mr. Smith")
-- Operator transitioning to next analyst (this belongs to CURRENT analyst as their conclusion)
+- Operator ONLY thanking the current analyst WITHOUT introducing next (e.g., "Thank you, Mr. Smith")
 - Current analyst's final thank you or closing remarks
+- Any final clarification or wrap-up from the executive
+
+EXCLUDE from current analyst (these start the NEXT analyst's turn):
+- Operator introducing the next analyst (e.g., "Our next question is from...")
+- Operator saying "Thank you. Our next question..." (the "thank you" doesn't override the introduction)
+- Any block that primarily introduces a new analyst, even if it includes a brief thank you
 
 CONTINUE signals (current analyst's turn is still ongoing):
 - Analyst asking another follow-up question
@@ -868,9 +873,9 @@ CONTINUE signals (current analyst's turn is still ongoing):
 
 <critical_reminders>
 🚨 LAST BLOCK: You're finding the LAST block of the current analyst's turn
-🚨 INCLUDE TRANSITIONS: Operator comments like "Next question from..." that conclude the current analyst belong to the CURRENT analyst
+🚨 EXCLUDE INTRODUCTIONS: Operator blocks introducing "Next question from..." belong to the NEXT analyst, NOT current
 🚨 COMPLETE SESSIONS: Make sure all of the current analyst's questions have been answered
-🚨 BE INCLUSIVE: When in doubt, include transitional blocks with the current analyst
+🚨 NATURAL BOUNDARIES: End at the executive's final response or operator's simple "thank you" (without next introduction)
 </critical_reminders>
 </instructions>
 
@@ -997,7 +1002,7 @@ def create_breakpoint_detection_tool():
                         "index": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "Required when action is 'breakpoint'. The 1-based index of the LAST block belonging to the current analyst. This includes any operator transitions that conclude their session."
+                            "description": "Required when action is 'breakpoint'. The 1-based index of the LAST block belonging to the current analyst. This excludes operator blocks that introduce the next analyst."
                         }
                     },
                     "required": ["action"]
