@@ -611,7 +611,7 @@ def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes
 
 
 def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_path: str) -> bool:
-    """Upload a file object to NAS."""
+    """Upload a file object to NAS with enhanced error handling for large files."""
 
     if not validate_nas_path(nas_file_path):
         log_error(f"Invalid NAS file path: {nas_file_path}", "path_validation", 
@@ -624,11 +624,37 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
         if parent_dir:
             nas_create_directory_recursive(conn, parent_dir)
 
+        # Get file size for logging
+        current_pos = local_file_obj.tell()
+        local_file_obj.seek(0, 2)  # Seek to end
+        file_size = local_file_obj.tell()
+        local_file_obj.seek(current_pos)  # Reset to original position
+        
+        log_execution(f"Uploading file to NAS", {
+            "path": nas_file_path,
+            "size_mb": round(file_size / (1024 * 1024), 2)
+        })
+
         conn.storeFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, local_file_obj)
         return True
     except Exception as e:
-        log_error(f"Failed to upload file to NAS: {nas_file_path}", "nas_upload", 
-                 {"path": nas_file_path, "error": str(e)})
+        # Enhanced error logging with more context
+        error_details = {
+            "path": nas_file_path,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+        
+        # Try to get file size if possible
+        try:
+            current_pos = local_file_obj.tell()
+            local_file_obj.seek(0, 2)
+            error_details["file_size_mb"] = round(local_file_obj.tell() / (1024 * 1024), 2)
+            local_file_obj.seek(current_pos)
+        except:
+            pass
+            
+        log_error(f"Failed to upload file to NAS: {nas_file_path}", "nas_upload", error_details)
         return False
 
 
@@ -1995,8 +2021,20 @@ def main() -> None:
         nas_create_directory_recursive(nas_conn, output_path)
 
         # Output just the records array, no metadata wrapper
-        output_json = json.dumps(all_enhanced_records, indent=2)
-        output_bytes = io.BytesIO(output_json.encode("utf-8"))
+        try:
+            output_json = json.dumps(all_enhanced_records, indent=2)
+            json_size_mb = len(output_json) / (1024 * 1024)
+            log_console(f"Output JSON size: {json_size_mb:.2f} MB")
+            
+            output_bytes = io.BytesIO(output_json.encode("utf-8"))
+            output_bytes.seek(0)  # Reset to beginning of stream
+            
+            log_console(f"Uploading output file to NAS...")
+        except Exception as e:
+            stage_summary["status"] = "failed"
+            log_console(f"Failed to create output JSON: {e}", "ERROR")
+            log_error(f"JSON creation failed: {e}", "output_save", {"records_count": len(all_enhanced_records)})
+            return
 
         if nas_upload_file(nas_conn, output_bytes, output_file_path):
             log_execution("Q&A paired content saved successfully", {
@@ -2005,9 +2043,40 @@ def main() -> None:
             })
             log_console(f"Output saved successfully: {output_filename}")
         else:
-            stage_summary["status"] = "failed"
-            log_console("Failed to save output file", "ERROR")
-            return
+            # Try alternative: save without pretty printing to reduce size
+            log_console("Primary save failed, trying compact format...", "WARNING")
+            try:
+                compact_json = json.dumps(all_enhanced_records, separators=(',', ':'))
+                compact_size_mb = len(compact_json) / (1024 * 1024)
+                log_console(f"Compact JSON size: {compact_size_mb:.2f} MB")
+                
+                compact_bytes = io.BytesIO(compact_json.encode("utf-8"))
+                compact_bytes.seek(0)
+                
+                if nas_upload_file(nas_conn, compact_bytes, output_file_path):
+                    log_console(f"Output saved successfully in compact format: {output_filename}")
+                    log_execution("Q&A paired content saved (compact format)", {
+                        "output_path": output_file_path,
+                        "total_records": len(all_enhanced_records),
+                        "format": "compact"
+                    })
+                else:
+                    stage_summary["status"] = "failed"
+                    stage_summary["errors"]["output_save"] += 1
+                    log_console("Failed to save output file even in compact format", "ERROR")
+                    
+                    # Log summary of what we tried to save for debugging
+                    log_error("Output save failed after both attempts", "output_save", {
+                        "records_count": len(all_enhanced_records),
+                        "pretty_size_mb": json_size_mb,
+                        "compact_size_mb": compact_size_mb,
+                        "transcripts_processed": len(transcripts)
+                    })
+                    return
+            except Exception as e:
+                stage_summary["status"] = "failed"
+                log_console(f"Failed to create compact JSON: {e}", "ERROR")
+                return
 
         # Calculate execution time
         end_time = datetime.now()
