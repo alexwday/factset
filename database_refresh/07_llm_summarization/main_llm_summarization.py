@@ -401,7 +401,7 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict:
         config_data = nas_download_file(nas_conn, os.getenv("CONFIG_PATH"))
 
         if config_data:
-            full_config = json.loads(config_data.decode("utf-8"))
+            full_config = yaml.safe_load(config_data.decode("utf-8"))
             log_execution("Successfully loaded shared configuration from NAS")
 
             if "stage_07_llm_summarization" not in full_config:
