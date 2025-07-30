@@ -924,7 +924,7 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
     global llm_client, config
     
     # Group Q&A records by qa_group_id
-    qa_records = [r for r in transcript_records if r.get("section_type") == "Investor Q&A" and r.get("qa_group_id")]
+    qa_records = [r for r in transcript_records if r.get("section_name") == "Q&A" and r.get("qa_group_id")]
     if not qa_records:
         return []
     
@@ -1041,7 +1041,7 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
     global llm_client, config
     
     # Get Management Discussion records
-    mgmt_records = [r for r in transcript_records if r.get("section_type") == "Management Discussion"]
+    mgmt_records = [r for r in transcript_records if r.get("section_name") == "MANAGEMENT DISCUSSION SECTION"]
     if not mgmt_records:
         return []
     
@@ -1140,7 +1140,7 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
 
 def process_other_records(transcript_records: List[Dict], transcript_id: str) -> List[Dict]:
     """Process records that are not Management Discussion or Q&A."""
-    other_records = [r for r in transcript_records if r.get("section_type") not in ["Management Discussion", "Investor Q&A"]]
+    other_records = [r for r in transcript_records if r.get("section_name") not in ["MANAGEMENT DISCUSSION SECTION", "Q&A"]]
     
     if not other_records:
         return []
@@ -1150,12 +1150,12 @@ def process_other_records(transcript_records: List[Dict], transcript_id: str) ->
     for record in other_records:
         # Create basic summary for other content
         content = record.get("paragraph_content", "")
-        section_type = record.get("section_type", "Unknown")
+        section_name = record.get("section_name", "Unknown")
         
         if len(content) > 100:
-            summary = f"[{section_type.upper()}] {content[:100]}..."
+            summary = f"[{section_name.upper()}] {content[:100]}..."
         else:
-            summary = f"[{section_type.upper()}] {content}"
+            summary = f"[{section_name.upper()}] {content}"
         
         record["paragraph_summary"] = summary
         record["paragraph_importance"] = 0.3  # Low importance for other content
