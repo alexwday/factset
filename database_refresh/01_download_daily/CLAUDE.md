@@ -1,6 +1,6 @@
 # Stage 1: Daily Transcript Sync - Context for Claude
 
-> **Template Version**: 1.0 | **Created**: 2024-07-21  
+> **Template Version**: 1.3 | **Updated**: 2025-07-30  
 > **Purpose**: Complete context for Stage 1 Daily Transcript Sync system
 
 ---
@@ -39,7 +39,7 @@ from datetime import datetime, timedelta  # Date calculations
 
 ### Environment Requirements
 ```bash
-# Required .env variables (14 total)
+# Required .env variables (15 total including NAS_PORT)
 API_USERNAME=                # FactSet API credentials
 API_PASSWORD=
 PROXY_USER=                  # Corporate proxy (MAPLE domain)
@@ -51,9 +51,10 @@ NAS_PASSWORD=
 NAS_SERVER_IP=
 NAS_SERVER_NAME=
 NAS_SHARE_NAME=
-CONFIG_PATH=                 # NAS path to configuration YAML
-CLIENT_MACHINE_NAME=         # Client identification for NAS
-SSL_CERT_PATH=              # NAS path to SSL certificate
+NAS_BASE_PATH=              # Base path on NAS
+NAS_PORT=                   # NAS port (defaults to 445)
+CONFIG_PATH=                # NAS path to configuration YAML
+CLIENT_MACHINE_NAME=        # Client identification for NAS
 ```
 
 ---
@@ -68,8 +69,8 @@ SSL_CERT_PATH=              # NAS path to SSL certificate
 
 ### File Structure
 ```
-stage_1_daily_sync/
-├── 1_transcript_daily_sync.py         # Primary execution script (1,753 lines)
+01_download_daily/
+├── main_daily_sync.py                 # Primary execution script (1,628 lines)
 ├── CLAUDE.md                          # This context file
 ├── old/                               # Previous version archive
 │   ├── 1_transcript_daily_sync.py     # Legacy script
@@ -81,7 +82,7 @@ stage_1_daily_sync/
 
 ### Key Components
 1. **Security & Authentication Manager**: Environment validation, NAS connection, SSL setup (identical to Stage 0)
-2. **Configuration Loader & Validator**: YAML schema validation including stage_1 section
+2. **Configuration Loader & Validator**: YAML schema validation including stage_01_download_daily section
 3. **Daily Date Calculator**: Configurable date range calculation based on sync_date_range
 4. **Date-Based API Query Engine**: Efficient single API call per date across all institutions
 5. **Institution Transcript Processor**: Groups discovered transcripts by ticker for processing
@@ -102,16 +103,21 @@ api_settings:
     - "IN:FNLSVC"     # Financial services  
     - "IN:INS"        # Insurance companies
     - "IN:SECS"       # Securities/Asset management
-  transcript_types: ["Corrected", "Raw"]  # Raw excluded by business rule
-  request_delay: 3.0                      # Seconds between API calls
-  max_retries: 8                          # Maximum retry attempts
-  use_exponential_backoff: true           # Enable backoff strategy
+  transcript_types: ["Corrected", "Raw"]  # Transcript types to download
+  sort_order: "-storyDateTime"            # Sort order for API results
+  pagination_limit: 500                   # Max results per API call
+  pagination_offset: 0                    # Starting offset for pagination
+  request_delay: 2.0                      # Seconds between API calls
+  max_retries: 3                          # Maximum retry attempts
+  retry_delay: 5.0                        # Seconds between retry attempts
+  use_exponential_backoff: true           # Enable exponential backoff
+  max_backoff_delay: 120.0               # Maximum backoff delay in seconds
   
-stage_1:
+stage_01_download_daily:
   description: "Daily incremental sync of recent transcripts"
   sync_date_range: 1                      # Days to look back (0=today only, 1=today+yesterday)
   output_data_path: "Outputs/Data"        # NAS data output path (same as Stage 0)
-  output_logs_path: "Outputs/Logs"       # NAS logs output path (same as Stage 0)
+  output_logs_path: "Outputs/Logs"        # NAS logs output path (same as Stage 0)
   
 monitored_institutions:
   # Same 90+ institutions as Stage 0
@@ -134,7 +140,7 @@ monitored_institutions:
 
 ### Primary Workflow Steps
 1. **Environment & Security Setup**: Validate credentials, establish NAS connection, download SSL certificate
-2. **Configuration Loading**: Download and validate YAML config including stage_1 section
+2. **Configuration Loading**: Download and validate YAML config including stage_01_download_daily section
 3. **Directory Structure Verification**: Ensure NAS directory structure exists (same as Stage 0)
 4. **Existing Transcript Inventory**: Scan NAS for existing files with version management
 5. **Daily Date Range Calculation**: Calculate target dates based on configurable sync_date_range
@@ -147,7 +153,7 @@ monitored_institutions:
 ### Key Business Rules
 - **Anti-Contamination Rule**: Only process transcripts where monitored ticker is SOLE primary company ID
 - **Earnings Filter Rule**: Only process transcripts with "Earnings" event type
-- **Title Validation Rule**: Strict fiscal quarter parsing (Q1-Q4 20XX format validation)
+- **Title Validation Rule**: Strict fiscal quarter parsing - only accepts exact "Qx 20xx Earnings Call" format
 - **Version Management Rule**: Remove old versions ONLY when new versions are downloaded
 - **No Rolling Window Cleanup**: Stage 1 does NOT remove files outside any date window (Stage 0's responsibility)
 - **Rate Limiting Rule**: Respect API rate limits with configurable delays
@@ -171,6 +177,105 @@ monitored_institutions:
 - **Processing**: Date-based discovery → Institution grouping → Download processing
 - **Output**: Same fiscal quarter-organized file structure as Stage 0 (YYYY/QX/Type/Company/TranscriptType/)
 - **Validation**: Same XML title parsing and transcript validation as Stage 0
+
+---
+
+## Key Functions & Implementation
+
+### Core Functions
+
+#### Environment & Setup Functions
+```python
+def setup_logging() -> logging.Logger:
+    """Set up minimal console logging configuration."""
+
+def validate_environment_variables() -> None:
+    """Validate all required environment variables are present."""
+
+def get_nas_connection() -> Optional[SMBConnection]:
+    """Create and return an SMB connection to the NAS."""
+
+def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
+    """Download SSL certificate from NAS and set up for API use."""
+
+def setup_proxy_configuration() -> str:
+    """Configure proxy URL for API authentication."""
+
+def setup_factset_api_client(proxy_url: str, ssl_cert_path: str):
+    """Configure FactSet API client with proxy and SSL settings."""
+```
+
+#### Configuration & Validation Functions
+```python
+def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
+    """Load and validate YAML configuration from NAS."""
+
+def validate_config_structure(config: Dict[str, Any]) -> None:
+    """Validate that configuration contains required sections and fields."""
+
+def validate_api_response_structure(response) -> bool:
+    """Validate basic API response structure."""
+```
+
+#### NAS Operations Functions
+```python
+def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes]:
+    """Download a file from NAS and return as bytes."""
+
+def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_path: str) -> bool:
+    """Upload a file object to NAS."""
+
+def nas_create_directory_recursive(nas_conn: SMBConnection, dir_path: str) -> bool:
+    """Create directory on NAS with recursive parent creation."""
+
+def nas_list_directories(conn: SMBConnection, directory_path: str) -> List[str]:
+    """List subdirectories in a NAS directory."""
+
+def nas_list_files(conn: SMBConnection, directory_path: str) -> List[str]:
+    """List XML files in a NAS directory."""
+
+def remove_nas_file(nas_conn: SMBConnection, file_path: str) -> bool:
+    """Remove file from NAS."""
+```
+
+#### Business Logic Functions
+```python
+def calculate_daily_sync_dates() -> List[datetime.date]:
+    """Calculate list of dates to sync based on configuration."""
+
+def get_daily_transcripts_by_date(api_instance, target_date: datetime.date, monitored_tickers: List[str]) -> List[Tuple[Dict[str, Any], str]]:
+    """Get all transcripts for target date, filter to monitored institutions."""
+
+def create_api_transcript_list(api_transcripts: List[Dict[str, Any]], ticker: str, institution_info: Dict[str, str]) -> List[Dict[str, str]]:
+    """Convert API transcripts to standardized format for comparison."""
+
+def compare_transcripts(api_transcripts: List[Dict[str, str]], nas_transcripts: List[Dict[str, str]]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+    """Compare API vs NAS transcripts and determine what to download/remove."""
+
+def download_transcript_with_title_filtering(nas_conn: SMBConnection, transcript: Dict[str, Any], ticker: str, institution_info: Dict[str, str], api_configuration) -> Optional[Dict[str, str]]:
+    """Download transcript and validate title format."""
+
+def parse_quarter_and_year_from_xml(xml_content: bytes) -> Tuple[Optional[str], Optional[str]]:
+    """Parse quarter and fiscal year from transcript XML title."""
+```
+
+#### Logging & Audit Functions
+```python
+def log_console(message: str, level: str = "INFO"):
+    """Log minimal message to console."""
+
+def log_execution(message: str, details: Dict[str, Any] = None):
+    """Log detailed execution information for main log file."""
+
+def log_error(message: str, error_type: str, details: Dict[str, Any] = None):
+    """Log error information for error log file."""
+
+def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any]):
+    """Save execution and error logs to NAS at completion."""
+
+def sanitize_url_for_logging(url: str) -> str:
+    """Remove auth tokens from URLs before logging."""
+```
 
 ---
 
@@ -211,29 +316,29 @@ def validate_api_response_structure(response) -> bool:
 ### Primary Commands
 ```bash
 # Development and testing
-python 1_transcript_daily_sync.py              # Run daily sync
-python -m py_compile 1_transcript_daily_sync.py  # Syntax check
-pylint 1_transcript_daily_sync.py              # Linting (if configured)
+python main_daily_sync.py              # Run daily sync
+python -m py_compile main_daily_sync.py  # Syntax check
+pylint main_daily_sync.py              # Linting (if configured)
 
 # Configuration validation
-python -c "import yaml; yaml.safe_load(open('../config.yaml'))"  # Validate YAML
+python -c "import yaml; yaml.safe_load(open('config.yaml'))"  # Validate YAML
 ```
 
 ### Execution Modes
-- **Terminal Mode**: `python 1_transcript_daily_sync.py` - Standard daily execution
+- **Terminal Mode**: `python main_daily_sync.py` - Standard daily execution
 - **Notebook Mode**: Import and run from Jupyter notebooks for testing
 - **Scheduled Mode**: Designed for daily cron/scheduled execution
 
 ### Testing Commands
 ```bash
 # Configuration testing
-python -c "from 1_transcript_daily_sync import validate_configuration_schema; validate_configuration_schema()"
+python -c "from main_daily_sync import validate_config_structure; validate_config_structure()"
 
 # NAS connectivity testing  
-python -c "from 1_transcript_daily_sync import get_nas_connection; print('NAS OK' if get_nas_connection() else 'NAS FAIL')"
+python -c "from main_daily_sync import get_nas_connection; print('NAS OK' if get_nas_connection() else 'NAS FAIL')"
 
 # Date calculation testing
-python -c "from 1_transcript_daily_sync import calculate_daily_sync_dates; print(calculate_daily_sync_dates())"
+python -c "from main_daily_sync import calculate_daily_sync_dates; print(calculate_daily_sync_dates())"
 ```
 
 ---
@@ -241,7 +346,7 @@ python -c "from 1_transcript_daily_sync import calculate_daily_sync_dates; print
 ## Error Handling & Recovery
 
 ### Error Categories
-- **Configuration Errors**: Missing stage_1 section, invalid sync_date_range, schema validation failures
+- **Configuration Errors**: Missing stage_01_download_daily section, invalid sync_date_range, schema validation failures
 - **Network Errors**: API connectivity issues, NAS connection failures, proxy authentication problems  
 - **Data Errors**: Invalid transcript formats, title parsing failures, duplicate detection issues
 - **File System Errors**: NAS write permissions, disk space, file locking issues
@@ -264,7 +369,7 @@ except ValueError as e:
 ```
 
 ### Recovery Mechanisms
-- **Retry Logic**: 3 attempts with exponential backoff for API calls
+- **Retry Logic**: Configurable attempts with exponential backoff for API calls
 - **Fallback Strategies**: Continue processing other dates/institutions if individual failures occur
 - **Error Reporting**: Detailed error logs uploaded to NAS Outputs/Logs/Errors/ directory
 
@@ -275,12 +380,12 @@ except ValueError as e:
 ### Upstream Dependencies
 - **Stage 0**: Requires initial historical transcript foundation (not a direct dependency)
 - **FactSet API**: EventsAndTranscripts API for date-based transcript queries
-- **Configuration Sources**: NAS-based YAML configuration with stage_1 section
+- **Configuration Sources**: NAS-based YAML configuration with stage_01_download_daily section
 
 ### Downstream Outputs  
 - **Stage 2+**: Provides updated transcript files in same format as Stage 0 for downstream processing
 - **File Outputs**: Same fiscal quarter-organized structure (YYYY/QX/Type/Company/TranscriptType/)
-- **Log Outputs**: Daily execution logs in Outputs/Logs/ with stage_1_daily_transcript_sync naming
+- **Log Outputs**: Daily execution logs in Outputs/Logs/ with stage_01_download_daily_transcript_sync naming
 
 ### External System Integration
 - **FactSet API**: Uses get_transcripts_dates() endpoint instead of get_transcripts_ids()
@@ -332,9 +437,9 @@ except ValueError as e:
 ## Development Workflow
 
 ### Pre-Development Checklist
-- [✅] Environment variables configured in .env (same 14 as Stage 0)
+- [✅] Environment variables configured in .env (15 total including NAS_PORT)
 - [✅] NAS access confirmed and tested
-- [✅] Configuration file updated with stage_1 section
+- [✅] Configuration file updated with stage_01_download_daily section
 - [✅] Dependencies installed and verified
 
 ### Development Process
@@ -348,7 +453,7 @@ except ValueError as e:
 - [✅] **Security Review**: All Stage 0 input validation patterns inherited
 - [✅] **Error Handling Review**: No bare except clauses, specific error handling implemented
 - [✅] **Resource Management Review**: Same cleanup patterns as Stage 0
-- [✅] **Configuration Validation**: stage_1 section validation implemented
+- [✅] **Configuration Validation**: stage_01_download_daily section validation implemented
 - [✅] **Logic Review**: Critical bugs fixed, daily sync behavior verified
 - [✅] **Code Quality**: Dead code removed, function signatures corrected
 - [ ] **Integration Testing**: Requires testing with NAS environment and FactSet API
@@ -375,10 +480,10 @@ except ValueError as e:
 ## Troubleshooting Guide
 
 ### Common Issues
-**Issue**: "Missing required stage_1 setting: sync_date_range"
-**Cause**: Configuration file not updated with stage_1 section
+**Issue**: "Missing required stage_01_download_daily setting: sync_date_range"
+**Cause**: Configuration file not updated with stage_01_download_daily section
 **Solution**: 
-1. Update config.yaml with stage_1 section
+1. Update config.yaml with stage_01_download_daily section
 2. Upload updated config to NAS
 3. Verify sync_date_range is non-negative integer
 
@@ -399,17 +504,17 @@ except ValueError as e:
 ### Debugging Commands
 ```bash
 # Debug configuration loading
-python -c "from 1_transcript_daily_sync import load_config_from_nas; print(load_config_from_nas()['stage_1'])"
+python -c "from main_daily_sync import load_config_from_nas; print(load_config_from_nas()['stage_01_download_daily'])"
 
 # Test date calculation
-python -c "from 1_transcript_daily_sync import calculate_daily_sync_dates; print(calculate_daily_sync_dates())"
+python -c "from main_daily_sync import calculate_daily_sync_dates; print(calculate_daily_sync_dates())"
 
 # Validate environment
-python -c "from 1_transcript_daily_sync import validate_environment_variables; validate_environment_variables()"
+python -c "from main_daily_sync import validate_environment_variables; validate_environment_variables()"
 ```
 
 ### Log Analysis
-- **Execution Logs**: Located in NAS Outputs/Logs/ with stage_1_daily_transcript_sync_ prefix
+- **Execution Logs**: Located in NAS Outputs/Logs/ with stage_01_download_daily_transcript_sync_ prefix
 - **Error Logs**: Located in NAS Outputs/Logs/Errors/ if errors occur during execution
 - **Debug Logs**: Console output shows date discovery progress and institution processing
 
@@ -461,6 +566,14 @@ python -c "from 1_transcript_daily_sync import validate_environment_variables; v
   - Early exit when no transcripts found ("No transcripts to process - skipping institution processing")
   - Rate limiting only applied between institutions being processed
   - Performance now scales with actual work: 0 transcripts = ~10 seconds, 1-3 transcripts = ~15-20 seconds
+- **Version 1.3**: Documentation update (2025-07-30):
+  - Updated script name from `1_transcript_daily_sync.py` to `main_daily_sync.py`
+  - Updated configuration references from `stage_1` to `stage_01_download_daily`
+  - Added NAS_PORT to environment variables (15 total)
+  - Updated all function references to match current implementation
+  - Added comprehensive function documentation section
+  - Updated file structure to reflect current directory layout
+  - Corrected all import and testing commands to use actual script name
 
 ---
 
@@ -487,6 +600,7 @@ python -c "from 1_transcript_daily_sync import validate_environment_variables; v
 > 1. Built on proven Stage 0 architecture for maximum reliability
 > 2. Optimized for daily operations with date-based discovery pattern
 > 3. Maintains 100% compatibility with downstream stages
-> 4. Requires updated config.yaml with stage_1 section
+> 4. Requires updated config.yaml with stage_01_download_daily section
 > 5. Ready for production deployment after configuration update
 > 6. Inherits all security, error handling, and quality standards from Stage 0
+> 7. Script name: `main_daily_sync.py` (not `1_transcript_daily_sync.py`)

@@ -1,6 +1,6 @@
 # Stage 3: Transcript Content Extraction & Paragraph-Level Breakdown
 
-> **Version**: 2.1 | **Updated**: 2024-07-22  
+> **Version**: 3.0 | **Updated**: 2025-07-30  
 > **Purpose**: XML content extraction and paragraph-level breakdown with enhanced field extraction and JSON validation
 
 ---
@@ -10,7 +10,7 @@
 - **Stage**: Stage 3 - Transcript Content Extraction & Paragraph-Level Breakdown
 - **Primary Purpose**: Process Stage 2 queue files, extract metadata from paths/XML, and create paragraph-level database records
 - **Pipeline Position**: Between Stage 2 (Consolidation) and Stage 4 (LLM Classification)
-- **Production Status**: PRODUCTION READY
+- **Production Status**: PRODUCTION READY ✅
 
 ---
 
@@ -47,14 +47,14 @@ API_PASSWORD=
 PROXY_USER=                  # Corporate proxy (MAPLE domain)
 PROXY_PASSWORD=
 PROXY_URL=
-PROXY_DOMAIN=
+PROXY_DOMAIN=               # Defaults to 'MAPLE' if not set
 NAS_USERNAME=                # NAS authentication
 NAS_PASSWORD=
 NAS_SERVER_IP=
 NAS_SERVER_NAME=
 NAS_SHARE_NAME=
 NAS_BASE_PATH=
-NAS_PORT=
+NAS_PORT=                    # Defaults to 445 if not set
 CONFIG_PATH=                 # NAS configuration path
 CLIENT_MACHINE_NAME=
 ```
@@ -71,12 +71,10 @@ CLIENT_MACHINE_NAME=
 
 ### File Structure
 ```
-stage_3_content_processing/
-├── 3_transcript_content_extraction.py   # Primary execution script
-├── CLAUDE.md                           # This context file
-└── old/                               # Backup of previous implementation
-    ├── 3_transcript_content_extraction.py
-    └── CLAUDE.md
+03_extract_content/
+├── main_content_extraction.py      # Primary execution script
+├── CLAUDE.md                      # This context file
+└── old/                          # Backup of previous implementation
 ```
 
 ### Key Components
@@ -92,7 +90,7 @@ stage_3_content_processing/
 ### Configuration Schema
 ```yaml
 # NAS configuration structure for Stage 3
-stage_3:
+stage_03_extract_content:
   description: "XML content extraction and paragraph-level breakdown"
   input_queue_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/files_to_process.json"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
@@ -102,7 +100,7 @@ stage_3:
 ```
 
 ### Validation Requirements
-- **Schema Validation**: Validates all required stage_3 parameters exist
+- **Schema Validation**: Validates all required stage_03_extract_content parameters exist
 - **Security Validation**: NAS path validation, file path security checks, XML parsing safety
 - **Business Rule Validation**: Monitored institutions structure validation for company name lookups
 
@@ -119,24 +117,32 @@ stage_3:
 6. **File Processing Loop**: For each file, extract metadata, download XML, parse content, create paragraph records
 7. **Content Aggregation**: Combine all paragraph records across all processed files
 8. **JSON Validation & Preview**: Validate JSON structure and preview first 3 records before saving
-9. **Output Generation**: Save extracted_transcript_sections.json to NAS
+9. **Output Generation**: Save stage_03_extracted_content.json to NAS
 10. **Log Cleanup**: Save execution logs and clean up temporary files
 
 ### Key Business Rules
 - **Enhanced Field Extraction**: Extract all required fields that were simplified out of Stage 2's output
-- **Filename Parsing**: Correctly extracts transcript_type, event_id, version_id from ticker_quarter_year_type_eventid_versionid.xml format
+- **Filename Parsing**: Correctly extracts ticker, transcript_type, event_id, version_id from filenames
+- **Path Metadata**: Extracts fiscal_year, fiscal_quarter, institution_type from NAS folder structure
 - **Metadata Completion**: Combine Stage 2 data with extracted path metadata, XML titles, and config lookups  
 - **Sequential Numbering**: Maintain paragraph IDs and speaker block IDs for document reconstruction
-- **Speaker Attribution**: Format participants into readable "Name, Title, Company" strings
-- **Q&A Detection**: Use XML speaker type attributes to flag questions vs answers
+- **Speaker Attribution**: Format participants into readable speaker strings using name, title, affiliation
+- **Q&A Detection**: Use XML speaker type attributes ("q" for question, "a" for answer) to flag Q&A content
 - **JSON Validation**: Pre-save validation with record preview and comprehensive error detection
 
 ### Data Processing Logic
 - **Input**: Stage 2's simplified files_to_process.json (file_path + date_last_modified)
-- **Field Extraction**: Parse paths for fiscal_year/quarter/type/ticker, lookup company names, extract filename components
-- **XML Processing**: Download XML from NAS, parse with namespace handling, extract title/participants/sections
+- **Field Extraction**: 
+  - Parse paths for fiscal_year/quarter/type/ticker from Data/YYYY/QX/Type/Company structure
+  - Extract filename components: ticker_quarter_year_type_eventid_versionid.xml
+  - Lookup company names from monitored_institutions configuration
+- **XML Processing**: 
+  - Download XML from NAS, parse with namespace handling
+  - Extract title from meta section
+  - Build participant mapping from meta/participants section
+  - Process body/section/speaker/plist/p structure for content
 - **Content Breakdown**: Convert XML paragraphs into individual database records with full metadata
-- **Output**: extracted_transcript_sections.json with paragraph-level records ready for Stage 4
+- **Output**: stage_03_extracted_content.json with paragraph-level records ready for Stage 4
 
 ---
 
@@ -175,25 +181,25 @@ def sanitize_url_for_logging(url: str) -> str:
 ### Primary Commands
 ```bash
 # Development and testing
-python 3_transcript_content_extraction.py           # Run Stage 3
-python -m py_compile 3_transcript_content_extraction.py  # Syntax check
+python main_content_extraction.py           # Run Stage 3
+python -m py_compile main_content_extraction.py  # Syntax check
 
 # Configuration validation
 python -c "import yaml; yaml.safe_load(open('config.yaml'))"  # Validate YAML
 ```
 
 ### Execution Modes
-- **Terminal Mode**: `python 3_transcript_content_extraction.py` - Standard command-line execution
+- **Terminal Mode**: `python main_content_extraction.py` - Standard command-line execution
 - **Notebook Mode**: Import and run from Jupyter notebooks
 - **Development Mode**: Configurable via `dev_mode: true` for limited file processing
 
 ### Testing Commands
 ```bash
 # Syntax validation
-python -m py_compile 3_transcript_content_extraction.py
+python -m py_compile main_content_extraction.py
 
 # Configuration testing
-python -c "from 3_transcript_content_extraction import validate_config_structure"
+python -c "from main_content_extraction import validate_config_structure"
 ```
 
 ---
@@ -204,11 +210,11 @@ python -c "from 3_transcript_content_extraction import validate_config_structure
 - **Environment Validation**: Missing .env variables, invalid configurations
 - **NAS Connection**: SMB/CIFS connectivity issues, authentication failures  
 - **Config Load**: YAML parsing errors, missing configuration sections
+- **SSL Setup**: Certificate download or configuration failures
 - **Queue Load**: Stage 2 output file missing or corrupted
 - **Metadata Extraction**: File path parsing failures, config lookup failures
 - **XML Processing**: XML parsing errors, malformed content, namespace issues
 - **Content Extraction**: Missing participants, empty sections, content structure failures
-- **Output Save**: File generation and upload failures
 
 ### Error Handling Standards (MANDATORY)
 ```python
@@ -220,8 +226,8 @@ except:
 except ET.ParseError as e:
     log_error(f"XML parsing error: {e}", "xml_parsing", {...})
     
-except (OSError, FileNotFoundError) as e:
-    log_error(f"File operation failed: {e}", "file_operation", {...})
+except yaml.YAMLError as e:
+    log_error(f"Invalid YAML in configuration file: {e}", "config_parse", {...})
 ```
 
 ### Recovery Mechanisms
@@ -239,7 +245,7 @@ except (OSError, FileNotFoundError) as e:
 - **SSL Certificates**: Downloaded from NAS for consistent authentication setup
 
 ### Downstream Outputs  
-- **extracted_transcript_sections.json**: Paragraph-level database records for Stage 4+ consumption
+- **stage_03_extracted_content.json**: Paragraph-level database records for Stage 4+ consumption
 - **Enhanced Metadata**: All fields required by downstream stages now included in each record
 - **Sequential IDs**: Paragraph and speaker block IDs for document reconstruction
 
@@ -293,7 +299,7 @@ except (OSError, FileNotFoundError) as e:
 ### Pre-Development Checklist
 - [x] Environment variables configured in .env
 - [x] NAS access confirmed and tested
-- [x] Configuration file validated with stage_3 section
+- [x] Configuration file validated with stage_03_extract_content section
 - [x] Stage 2 output files available for testing
 
 ### Development Process
@@ -312,6 +318,50 @@ except (OSError, FileNotFoundError) as e:
 
 ---
 
+## Function Reference
+
+### Core Functions
+
+#### Configuration & Setup
+- `validate_environment_variables()`: Validates all required environment variables
+- `get_nas_connection()`: Creates and returns SMB connection to NAS
+- `load_config_from_nas()`: Loads and validates YAML configuration from NAS
+- `validate_config_structure()`: Validates configuration schema and requirements
+- `setup_ssl_certificate()`: Downloads SSL certificate from NAS to temporary file
+- `setup_proxy_configuration()`: Configures proxy with proper credential escaping
+
+#### File Operations
+- `nas_path_join()`: Joins path parts for NAS paths using forward slashes
+- `nas_download_file()`: Downloads file from NAS and returns as bytes
+- `nas_upload_file()`: Uploads file object to NAS
+- `nas_file_exists()`: Checks if file exists on NAS
+- `nas_create_directory_recursive()`: Creates directory on NAS with safe iterative parent creation
+
+#### Security Functions
+- `validate_file_path()`: Validates file path for security (directory traversal prevention)
+- `validate_nas_path()`: Validates NAS path structure for security
+- `sanitize_url_for_logging()`: Removes auth tokens from URLs before logging
+
+#### Content Processing
+- `load_processing_queue()`: Loads Stage 2 processing queue from NAS
+- `extract_metadata_from_file_path()`: Extracts metadata from file path structure and filename
+- `parse_transcript_xml()`: Parses transcript XML and extracts structured data
+- `format_speaker_string()`: Formats speaker information into clean readable string
+- `determine_qa_flag()`: Determines Q&A flag from XML speaker type attribute
+- `extract_transcript_paragraphs()`: Extracts paragraph-level content from XML transcript
+- `process_transcript_file()`: Processes single transcript file and returns paragraph records
+- `validate_and_preview_json()`: Validates JSON structure and previews first few records
+- `save_extracted_content()`: Saves extracted paragraph records to NAS
+
+#### Logging Functions
+- `setup_logging()`: Sets up minimal console logging configuration
+- `log_console()`: Logs minimal message to console
+- `log_execution()`: Logs detailed execution information for main log file
+- `log_error()`: Logs error information for error log file
+- `save_logs_to_nas()`: Saves execution and error logs to NAS at completion
+
+---
+
 ## Known Issues & Limitations
 
 ### Current Limitations
@@ -320,9 +370,11 @@ except (OSError, FileNotFoundError) as e:
 - **Development Mode Only**: Currently configured for development mode by default
 
 ### Known Issues - RESOLVED ✅
-- **Filename Parsing**: ✅ **FIXED** - transcript_type, event_id, version_id extraction from ticker_quarter_year_type_eventid_versionid.xml format
-- **Speaker Lookup**: ✅ **FIXED** - Participant mapping now correctly extracts names instead of "Unknown Speaker"
-- **JSON Formatting**: ✅ **FIXED** - Special character cleaning prevents JSON corruption and VS Code opening issues
+- **Configuration Key**: ✅ Uses `stage_03_extract_content` (not `stage_3`)
+- **Output Filename**: ✅ Saves as `stage_03_extracted_content.json`
+- **Filename Parsing**: ✅ Correctly extracts components from ticker_quarter_year_type_eventid_versionid.xml
+- **Speaker Lookup**: ✅ Participant mapping correctly uses 'id' attribute and formats speaker strings
+- **JSON Formatting**: ✅ Special character cleaning prevents JSON corruption
 
 ### Future Enhancements
 - **Parallel Processing**: Multi-threaded file processing for better performance
@@ -345,30 +397,26 @@ except (OSError, FileNotFoundError) as e:
 
 **Issue**: Missing participant/speaker information
 **Cause**: XML participant structure changes or missing speaker ID mappings
-**Solution**: Review XML structure, check participant extraction logic
+**Solution**: Review XML structure, check participant extraction logic uses 'id' attribute
 
 **Issue**: Incorrect metadata extraction
 **Cause**: File path structure changes or filename parsing issues
-**Solution**: Verify file path format matches expected ticker_quarter_year_type_eventid_versionid.xml structure
+**Solution**: Verify file path format matches expected Data/YYYY/QX/Type/Company/filename.xml structure
 
 **Issue**: JSON validation fails
 **Cause**: Invalid JSON structure due to unescaped characters or formatting issues
 **Solution**: Check validation output for specific error location and character issues
 
-**Issue**: VS Code cannot open JSON file
-**Cause**: File size, encoding, or VS Code-specific limitations
-**Solution**: Use alternative JSON viewers (jq, Python, online validators) or split into smaller files
-
 ### Debugging Commands
 ```bash
 # Debug configuration loading
-python -c "from 3_transcript_content_extraction import load_config_from_nas; print('Config loaded')"
+python -c "from main_content_extraction import load_config_from_nas; print('Config loaded')"
 
 # Test NAS connectivity
-python -c "from 3_transcript_content_extraction import get_nas_connection; conn = get_nas_connection(); print('Connected' if conn else 'Failed')"
+python -c "from main_content_extraction import get_nas_connection; conn = get_nas_connection(); print('Connected' if conn else 'Failed')"
 
 # Validate environment
-python -c "from 3_transcript_content_extraction import validate_environment_variables; validate_environment_variables(); print('Valid')"
+python -c "from main_content_extraction import validate_environment_variables; validate_environment_variables(); print('Valid')"
 ```
 
 ### Log Analysis
@@ -388,7 +436,7 @@ python -c "from 3_transcript_content_extraction import validate_environment_vari
 ### Stage-Specific Patterns
 - **Stage 2 Compatibility**: Processes simplified Stage 2 output format (file_path + date_last_modified)
 - **Path-Based Metadata**: Extracts fiscal year/quarter, institution type, ticker from NAS folder structure
-- **Filename Parsing**: Handles complex filename patterns with underscore-containing tickers
+- **Filename Parsing**: Handles ticker_quarter_year_type_eventid_versionid.xml format
 - **Config Integration**: Looks up company names from monitored_institutions configuration
 
 ### Integration Notes
@@ -402,8 +450,8 @@ python -c "from 3_transcript_content_extraction import validate_environment_vari
 
 ### Internal Documentation
 - **Main Project CLAUDE.md**: `/CLAUDE.md` - Project overview and context
-- **Configuration Schema**: Stage 3 section in config.yaml
-- **Template Reference**: `/CLAUDE_MD_TEMPLATE.md` - Documentation template
+- **Configuration Schema**: Stage 03 section in config.yaml
+- **Script Location**: `database_refresh/03_extract_content/main_content_extraction.py`
 
 ### External References
 - **XML Processing**: Python ElementTree documentation for XML parsing
@@ -413,7 +461,8 @@ python -c "from 3_transcript_content_extraction import validate_environment_vari
 ### Change Log
 - **Version 1.0**: Original implementation with JSON config
 - **Version 2.0**: Updated to follow Stage 0/1/2 patterns with YAML config and enhanced field extraction
-- **Version 2.1**: Added JSON validation/preview, fixed filename parsing (ticker_quarter_year_type_eventid_versionid.xml), resolved speaker lookup issues
+- **Version 2.1**: Added JSON validation/preview, fixed filename parsing, resolved speaker lookup issues
+- **Version 3.0**: Updated documentation to reflect actual implementation (main_content_extraction.py, stage_03_extract_content config key)
 
 ---
 
@@ -442,3 +491,6 @@ python -c "from 3_transcript_content_extraction import validate_environment_vari
 > 3. Maintains all Stage 0/1/2 architectural patterns and security standards
 > 4. Output records include complete metadata ready for Stage 4 LLM classification
 > 5. Development mode enables safe testing with limited file volumes
+> 6. Script name is `main_content_extraction.py` (not `3_transcript_content_extraction.py`)
+> 7. Configuration key is `stage_03_extract_content` (not `stage_3`)
+> 8. Output file is `stage_03_extracted_content.json`

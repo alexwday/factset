@@ -1,15 +1,17 @@
 # Stage 0: Historical Transcript Sync - Context for Claude
 
-> **Template Version**: 1.0 | **Created**: 2024-07-21  
+> **Template Version**: 2.0 | **Updated**: 2025-01-30  
 > **Purpose**: Complete context for Stage 0 Historical Transcript Sync system
+> **Script**: `main_historical_sync.py`
 
 ---
 
 ## Project Context
-- **Stage**: 0 - Historical Transcript Sync
-- **Primary Purpose**: Bulk download of historical earnings transcripts from FactSet API (3-year rolling window)
+- **Stage**: 0 - Historical Transcript Sync (Bulk Download)
+- **Primary Purpose**: Download ALL historical earnings transcripts from FactSet API (3-year rolling window)
 - **Pipeline Position**: Initial stage that creates the foundation transcript repository
 - **Production Status**: PRODUCTION READY ✅ (All critical issues resolved)
+- **Run Frequency**: Monthly/Quarterly for maintenance, Initial run for setup
 
 ---
 
@@ -25,16 +27,19 @@
 ### Required Dependencies
 ```python
 # Core dependencies for Stage 0
-import fds.sdk.EventsandTranscripts      # FactSet Events & Transcripts API
+import os, tempfile, logging, json, time, io, re
+from datetime import datetime
+from urllib.parse import quote
+from typing import Dict, Any, Optional, List, Tuple
+import xml.etree.ElementTree as ET
+
+# External packages
+import yaml                                          # Configuration parsing
+import fds.sdk.EventsandTranscripts                  # FactSet Events & Transcripts API
 from fds.sdk.EventsandTranscripts.api import transcripts_api
-import requests                          # Network operations & proxy handling
-from smb.SMBConnection import SMBConnection  # NAS connectivity
-import yaml                             # Configuration parsing
-from dotenv import load_dotenv          # Environment variables
-import xml.etree.ElementTree as ET      # XML parsing for title validation
-import tempfile                         # SSL certificate management
-import os, sys, re, time               # Core utilities
-from datetime import datetime, timedelta  # Date calculations
+import requests                                      # Network operations & proxy handling
+from smb.SMBConnection import SMBConnection          # NAS connectivity
+from dotenv import load_dotenv                       # Environment variables
 ```
 
 ### Environment Requirements
@@ -51,9 +56,10 @@ NAS_PASSWORD=
 NAS_SERVER_IP=
 NAS_SERVER_NAME=
 NAS_SHARE_NAME=
-CONFIG_PATH=                 # NAS path to configuration YAML
-CLIENT_MACHINE_NAME=         # Client identification for NAS
-SSL_CERT_PATH=              # NAS path to SSL certificate
+NAS_BASE_PATH=
+NAS_PORT=                   # Default: 445
+CONFIG_PATH=                # NAS path to configuration YAML
+CLIENT_MACHINE_NAME=        # Client identification for NAS
 ```
 
 ---
@@ -68,13 +74,10 @@ SSL_CERT_PATH=              # NAS path to SSL certificate
 
 ### File Structure
 ```
-stage_0_bulk_refresh/
-├── 0_historical_transcript_sync.py    # Primary execution script (1,638 lines)
-├── CLAUDE.md                          # This context file
-├── old/                               # Previous version archive
-│   ├── 0_transcript_bulk_sync.py      # Legacy script
-│   └── CLAUDE.md                      # Legacy documentation
-└── tests/                             # Future test implementations
+00_download_historical/
+├── main_historical_sync.py    # Primary execution script (1,639 lines)
+├── CLAUDE.md                  # This context file
+└── old/                       # Previous version archive (for reference)
 ```
 
 ### Key Components
@@ -90,56 +93,61 @@ stage_0_bulk_refresh/
 
 ## Configuration Management
 
-### Configuration Schema
+### Configuration Schema (config.yaml on NAS)
 ```yaml
-# NAS configuration structure (config.yaml)
-ssl_cert_path: "Inputs/certificate/rbc-ca-bundle.cer"
+# NAS configuration structure
+ssl_cert_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/certificate/rbc-ca-bundle.cer"
+
 api_settings:
   industry_categories: 
     - "IN:BANKS"      # Banking institutions
     - "IN:FNLSVC"     # Financial services  
     - "IN:INS"        # Insurance companies
     - "IN:SECS"       # Securities/Asset management
-  transcript_types: ["Corrected", "Raw"]  # Raw excluded by business rule
+  transcript_types: ["Corrected", "Raw"]  # NearRealTime excluded
+  sort_order: "-storyDateTime"            # Latest first
+  pagination_limit: 1000
+  pagination_offset: 0
   request_delay: 3.0                      # Seconds between API calls
   max_retries: 8                          # Maximum retry attempts
+  retry_delay: 5.0
   use_exponential_backoff: true           # Enable backoff strategy
+  max_backoff_delay: 120.0
   
-stage_0:
-  output_data_path: "Outputs/Data"        # NAS data output path
-  output_logs_path: "Outputs/Logs"       # NAS logs output path
+stage_00_download_historical:
+  description: "Historical bulk download of earnings transcripts"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   
 monitored_institutions:
-  # Canadian Financial (6 institutions)
-  RY-CA: {name: "Royal Bank of Canada", type: "Canadian"}
-  TD-CA: {name: "Toronto-Dominion Bank", type: "Canadian"}
-  BNS-CA: {name: "Bank of Nova Scotia", type: "Canadian"}
-  BMO-CA: {name: "Bank of Montreal", type: "Canadian"}
-  CM-CA: {name: "Canadian Imperial Bank of Commerce", type: "Canadian"}
-  NA-CA: {name: "National Bank of Canada", type: "Canadian"}
+  # Canadian Financial (30+ institutions)
+  RY-CA: {name: "Royal Bank of Canada", type: "Canadian", path_safe_name: "Royal_Bank_of_Canada"}
+  TD-CA: {name: "Toronto-Dominion Bank", type: "Canadian", path_safe_name: "Toronto_Dominion_Bank"}
+  BNS-CA: {name: "Bank of Nova Scotia", type: "Canadian", path_safe_name: "Bank_of_Nova_Scotia"}
+  BMO-CA: {name: "Bank of Montreal", type: "Canadian", path_safe_name: "Bank_of_Montreal"}
+  CM-CA: {name: "Canadian Imperial Bank of Commerce", type: "Canadian", path_safe_name: "CIBC"}
+  NA-CA: {name: "National Bank of Canada", type: "Canadian", path_safe_name: "National_Bank_of_Canada"}
   
-  # US Financial (15 institutions)
-  JPM-US: {name: "JPMorgan Chase & Co", type: "US"}
-  BAC-US: {name: "Bank of America Corporation", type: "US"}
-  WFC-US: {name: "Wells Fargo & Company", type: "US"}
-  USB-US: {name: "U.S. Bancorp", type: "US"}
-  PNC-US: {name: "PNC Financial Services Group", type: "US"}
-  TFC-US: {name: "Truist Financial Corporation", type: "US"}
-  BLK-US: {name: "BlackRock Inc", type: "US"}
-  # ... [Additional US institutions]
+  # US Financial (35+ institutions)
+  JPM-US: {name: "JPMorgan Chase", type: "US", path_safe_name: "JPMorgan_Chase"}
+  BAC-US: {name: "Bank of America", type: "US", path_safe_name: "Bank_of_America"}
+  WFC-US: {name: "Wells Fargo", type: "US", path_safe_name: "Wells_Fargo"}
+  C-US: {name: "Citigroup", type: "US", path_safe_name: "Citigroup"}
+  GS-US: {name: "Goldman Sachs", type: "US", path_safe_name: "Goldman_Sachs"}
+  MS-US: {name: "Morgan Stanley", type: "US", path_safe_name: "Morgan_Stanley"}
   
-  # European Financial (14 institutions)  
-  BCS-GB: {name: "Barclays PLC", type: "European"}
-  LLOY-GB: {name: "Lloyds Banking Group plc", type: "European"}
-  UBS-CH: {name: "UBS Group AG", type: "European"}
-  CS-CH: {name: "Credit Suisse Group AG", type: "European"}
-  # ... [Additional European institutions]
+  # European Financial (30+ institutions)  
+  BCS-GB: {name: "Barclays", type: "European", path_safe_name: "Barclays"}
+  LLOY-GB: {name: "Lloyds Banking Group", type: "European", path_safe_name: "Lloyds"}
+  HSBC-GB: {name: "HSBC", type: "European", path_safe_name: "HSBC"}
+  UBS-CH: {name: "UBS", type: "European", path_safe_name: "UBS"}
+  CS-CH: {name: "Credit Suisse", type: "European", path_safe_name: "Credit_Suisse"}
   
-  # Insurance (4 institutions)
-  MFC-CA: {name: "Manulife Financial Corporation", type: "Insurance"}
-  SLF-CA: {name: "Sun Life Financial Inc", type: "Insurance"}
-  IFC-CA: {name: "Intact Financial Corporation", type: "Insurance"}
-  FFH-CA: {name: "Fairfax Financial Holdings Limited", type: "Insurance"}
+  # Insurance (5+ institutions)
+  MFC-CA: {name: "Manulife Financial", type: "Insurance", path_safe_name: "Manulife"}
+  SLF-CA: {name: "Sun Life Financial", type: "Insurance", path_safe_name: "Sun_Life"}
+  IFC-CA: {name: "Intact Financial", type: "Insurance", path_safe_name: "Intact"}
+  FFH-CA: {name: "Fairfax Financial", type: "Insurance", path_safe_name: "Fairfax"}
 ```
 
 ### Validation Requirements
@@ -152,26 +160,28 @@ monitored_institutions:
 ## Business Logic & Workflow
 
 ### Primary Workflow Steps
-1. **Security & Authentication Setup**: Validate 14 environment variables, establish NAS connection, download SSL certificate
-2. **Configuration Loading & Validation**: Download YAML from NAS, validate comprehensive schema
-3. **Directory Structure Creation**: Create fiscal quarter-organized folders with Windows compatibility
-4. **Existing Inventory Scanning**: Scan all existing files, parse standardized filenames, identify unparseable files
-5. **Rolling Window Calculation**: Calculate exact 3-year window from current date
-6. **Institution Processing Loop**: Process 90+ institutions with anti-contamination filtering
-7. **Transcript Comparison & Version Management**: Compare API vs NAS inventory, handle version updates
-8. **Download Processing with Title Validation**: Download with strict title format validation
-9. **File Management Operations**: Upload, remove out-of-scope files, handle version cleanup
-10. **Completion & Audit**: Generate execution summary, save logs to NAS, cleanup resources
+1. **Security & Authentication Setup** (validate_environment_variables, get_nas_connection)
+2. **Configuration Loading & Validation** (load_config_from_nas, validate_config_structure)
+3. **SSL & Proxy Setup** (setup_ssl_certificate, setup_proxy_configuration)
+4. **FactSet API Client Setup** (setup_factset_api_client)
+5. **Directory Structure Creation** (create_data_directory_structure)
+6. **Existing Inventory Scanning** (scan_existing_transcripts)
+7. **Rolling Window Calculation** (calculate_rolling_window - 3 years)
+8. **Institution Processing Loop** (Process 100+ institutions with filtering)
+9. **Transcript Comparison & Version Management** (compare_transcripts)
+10. **Download & Title Validation** (download_transcript_with_title_filtering)
+11. **Completion & Audit Trail** (save_logs_to_nas, cleanup_temporary_files)
 
 ### Key Business Rules
-- **Anti-Contamination Rule**: Only process transcripts where target ticker is SOLE primary company
-- **Rolling Window Rule**: Download all transcripts from exactly 3 years ago to present
+- **Anti-Contamination Rule**: Only process transcripts where target ticker is SOLE primary company ID
+- **3-Year Rolling Window**: Download all transcripts from exactly 3 years ago to present
 - **Title Validation Rule**: Only accept transcripts with exact format "Qx 20xx Earnings Call"
 - **Version Management Rule**: API version is always authoritative, remove old versions automatically
 - **Earnings Only Rule**: Filter to "Earnings" event types only (excludes M&A, special events)
+- **Filename Standardization**: `{ticker}_{quarter}_{year}_{transcript_type}_{event_id}_{version_id}.xml`
 
 ### Data Processing Logic
-- **Input**: FactSet Events & Transcripts API responses
+- **Input**: FactSet Events & Transcripts API (get_transcripts_ids endpoint)
 - **Processing**: Anti-contamination filtering, title validation, version comparison
 - **Output**: Standardized XML files in fiscal quarter-organized directory structure
 - **Validation**: Title format validation, filename standardization, path length checking
@@ -182,21 +192,44 @@ monitored_institutions:
 
 ### Security Requirements (MANDATORY)
 ```python
-# Required security functions implemented:
+# Required security functions - ALL IMPLEMENTED in script:
+
 def validate_file_path(path: str) -> bool:
     """Prevent directory traversal attacks."""
-    return not (".." in path or path.startswith("/") or ":" in path[1:])
+    if not path or not isinstance(path, str):
+        return False
+    if ".." in path or path.startswith("/"):
+        return False
+    # Check for invalid characters
+    invalid_chars = ["<", ">", ":", '"', "|", "?", "*", "\x00"]
+    if any(char in path for char in invalid_chars):
+        return False
+    if len(path) > 260:  # Windows MAX_PATH limitation
+        return False
+    return True
     
 def validate_nas_path(path: str) -> bool:
     """Ensure safe NAS paths only."""
-    allowed_prefixes = ["Inputs/", "Outputs/"]
-    return any(path.startswith(prefix) for prefix in allowed_prefixes)
+    if not path or not isinstance(path, str):
+        return False
+    normalized = path.strip("/")
+    if not normalized:
+        return False
+    parts = normalized.split("/")
+    for part in parts:
+        if not part or part in [".", ".."]:
+            return False
+        if not validate_file_path(part):
+            return False
+    return True
     
 def sanitize_url_for_logging(url: str) -> str:
     """Remove auth tokens from URLs before logging."""
-    if "?" in url:
-        return url.split("?")[0] + "?[PARAMETERS_REDACTED]"
-    return url
+    if not url:
+        return url
+    sanitized = re.sub(r"(password|token|auth)=[^&]*", r"\1=***", url, flags=re.IGNORECASE)
+    sanitized = re.sub(r"://[^@]*@", "://***:***@", sanitized)
+    return sanitized
 ```
 
 ### Security Standards Checklist
@@ -218,29 +251,31 @@ def sanitize_url_for_logging(url: str) -> str:
 ### Primary Commands
 ```bash
 # Development and testing
-python 0_historical_transcript_sync.py           # Run Stage 0 bulk sync
-python -m py_compile 0_historical_transcript_sync.py  # Syntax validation
-python -c "import yaml; print('Config valid')"   # YAML syntax check
+python main_historical_sync.py                    # Run Stage 0 bulk sync
+python -m py_compile main_historical_sync.py     # Syntax validation
 
 # Environment validation
-python -c "from dotenv import load_dotenv; load_dotenv(); import os; print('Required vars:', [k for k in ['API_USERNAME', 'API_PASSWORD', 'NAS_USERNAME', 'NAS_PASSWORD'] if k in os.environ])"
+python -c "from dotenv import load_dotenv; load_dotenv(); import os; print('ENV vars loaded')"
+
+# Configuration validation
+python -c "import yaml; yaml.safe_load(open('config.yaml'))"
 ```
 
 ### Execution Modes
-- **Terminal Mode**: `python 0_historical_transcript_sync.py` - Standard execution
+- **Terminal Mode**: `python main_historical_sync.py` - Standard execution
 - **Notebook Mode**: Import and run functions from Jupyter notebooks
 - **Scheduled Mode**: Can be executed via cron or task scheduler
 
 ### Testing Commands
 ```bash
-# Configuration testing
-python -c "import yaml; yaml.safe_load(open('config.yaml'))"
-
 # NAS connectivity test  
 python -c "from smb.SMBConnection import SMBConnection; print('SMB import successful')"
 
-# Environment completeness check
-python -c "import os; required=['API_USERNAME','API_PASSWORD','NAS_USERNAME','NAS_PASSWORD','PROXY_USER','PROXY_PASSWORD','PROXY_URL','NAS_SERVER_IP','NAS_SERVER_NAME','NAS_SHARE_NAME','CONFIG_PATH','CLIENT_MACHINE_NAME','SSL_CERT_PATH']; missing=[k for k in required if not os.getenv(k)]; print(f'Missing: {missing}' if missing else 'All required env vars present')"
+# Environment completeness check (all 14 required)
+python -c "import os; from dotenv import load_dotenv; load_dotenv(); required=['API_USERNAME','API_PASSWORD','NAS_USERNAME','NAS_PASSWORD','PROXY_USER','PROXY_PASSWORD','PROXY_URL','NAS_SERVER_IP','NAS_SERVER_NAME','NAS_SHARE_NAME','NAS_BASE_PATH','NAS_PORT','CONFIG_PATH','CLIENT_MACHINE_NAME']; missing=[k for k in required if not os.getenv(k)]; print(f'Missing: {missing}' if missing else 'All required env vars present')"
+
+# FactSet SDK test
+python -c "import fds.sdk.EventsandTranscripts; print('FactSet SDK imported successfully')"
 ```
 
 ---
@@ -248,12 +283,14 @@ python -c "import os; required=['API_USERNAME','API_PASSWORD','NAS_USERNAME','NA
 ## Error Handling & Recovery
 
 ### Error Categories
-- **api_query**: FactSet API connection failures, authentication errors, rate limiting
-- **download**: Individual transcript download failures, network timeouts
-- **nas_connection**: NAS connectivity issues, authentication failures, path errors
-- **directory_creation**: File system operation failures, permission errors
-- **unparseable_filename**: Non-conforming filename formats requiring manual review
-- **xml_parsing**: XML structure issues, title extraction failures
+- **environment_validation**: Missing environment variables
+- **nas_connection**: NAS connectivity issues, authentication failures
+- **config_validation**: Configuration schema errors, missing sections
+- **api_query**: FactSet API failures, rate limiting
+- **download**: Individual transcript download failures
+- **directory_creation**: File system operation failures
+- **unparseable_filename**: Non-conforming filename formats
+- **xml_parsing**: Title extraction failures
 
 ### Error Handling Standards (MANDATORY)
 ```python
@@ -267,16 +304,16 @@ except Exception:
 # ALWAYS DO THIS - SPECIFIC ERROR HANDLING:
 except (OSError, FileNotFoundError) as e:
     log_error(f"File operation failed: {e}", "file_operation", {
-        "institution": current_institution,
-        "operation": "file_upload",
-        "path": target_path
+        "path": file_path,
+        "operation": "download",
+        "error_details": str(e)
     })
     
 except (requests.ConnectionError, requests.Timeout) as e:
     log_error(f"Network error: {e}", "network", {
-        "institution": current_institution,
-        "retry_attempt": retry_count,
-        "url": sanitize_url_for_logging(api_url)
+        "url": sanitize_url_for_logging(url),
+        "retry_attempt": attempt,
+        "error_details": str(e)
     })
 ```
 
@@ -306,7 +343,7 @@ except (requests.ConnectionError, requests.Timeout) as e:
   - Filtering: Primary ID filtering, earnings-only, 3-year window
 - **NAS File System**: SMB/CIFS operations with NTLM v2 authentication
   - Operations: Upload, download, directory creation, file removal
-  - Path Structure: `Data/YYYY/QX/Type/Company/TranscriptType/`
+  - Path Structure: `Data/YYYY/QX/Type/Company/filename.xml`
 - **Corporate Proxy**: NTLM authentication with domain escaping
   - Domain escaping for special characters in credentials
   - SSL certificate validation via downloaded certificate
@@ -332,10 +369,10 @@ except (requests.ConnectionError, requests.Timeout) as e:
 ## Code Style & Standards
 
 ### Code Organization
-- **Function Naming**: `snake_case` with descriptive names (e.g., `download_ssl_certificate_from_nas`)
-- **Class Structure**: Not applicable (functional design)
-- **Module Organization**: Single monolithic script (1,638 lines) with clear section comments
+- **Function Naming**: `snake_case` with descriptive names (e.g., `download_transcript_with_title_filtering`)
+- **Module Organization**: Single comprehensive script with clear section comments
 - **Documentation**: Comprehensive inline comments and function docstrings
+- **Type Hints**: Used throughout for better code clarity
 
 ### Security Standards (NON-NEGOTIABLE)
 - **Input Validation**: ALL paths, URLs, and API responses validated
@@ -344,35 +381,35 @@ except (requests.ConnectionError, requests.Timeout) as e:
 - **Resource Management**: Proper cleanup in finally blocks, no resource leaks
 
 ### Quality Standards
-- **Line Length**: Maximum 120 characters for readability
-- **Function Length**: Most functions under 50 lines, complex business logic functions up to 100 lines
+- **Line Length**: Reasonable lengths for readability
+- **Function Length**: Most functions under 50 lines, complex business logic up to 100 lines
 - **Complexity**: Clear separation of concerns with comprehensive error handling
-- **Documentation**: All major functions have descriptive docstrings and inline comments
+- **Documentation**: All major functions have descriptive docstrings
 
 ---
 
 ## Development Workflow
 
 ### Pre-Development Checklist
-- [x] Environment variables configured in .env (14 required)
-- [x] NAS access confirmed and tested
-- [x] FactSet API credentials validated
-- [x] Corporate proxy authentication configured
-- [x] SSL certificate accessible from NAS
+- [ ] Environment variables configured in .env (14 required)
+- [ ] NAS access confirmed and tested
+- [ ] FactSet API credentials validated
+- [ ] Corporate proxy authentication configured
+- [ ] SSL certificate accessible from NAS
 
 ### Development Process
 1. **Setup**: Load environment, validate credentials, establish connections
 2. **Development**: Implement business logic with security validation
-3. **Testing**: Unit testing for individual functions, integration testing with external systems
-4. **Validation**: Configuration schema validation, security review, performance testing
+3. **Testing**: Test with small institution subset first
+4. **Validation**: Configuration schema validation, security review
 5. **Deployment**: Production deployment with comprehensive audit trail
 
 ### Pre-Production Checklist (MANDATORY)
-- [x] **Security Review**: All input validation implemented and tested
-- [x] **Error Handling Review**: No bare except clauses, specific exception handling
-- [x] **Resource Management Review**: Proper cleanup and connection management
-- [x] **Configuration Validation**: Schema validation working with clear error messages
-- [x] **Integration Testing**: FactSet API, NAS connectivity, proxy authentication tested
+- [x] **Security Review**: All input validation implemented
+- [x] **Error Handling Review**: No bare except clauses
+- [x] **Resource Management Review**: Proper cleanup in finally blocks
+- [x] **Configuration Validation**: Schema validation working
+- [x] **Integration Testing**: FactSet API, NAS connectivity tested
 
 ---
 
@@ -400,58 +437,37 @@ except (requests.ConnectionError, requests.Timeout) as e:
 ### Common Issues
 
 **Issue**: SSL certificate validation errors
-**Cause**: Expired or missing certificate on NAS
-**Solution**: 
-1. Verify certificate exists at configured NAS path
-2. Check certificate expiration date
-3. Update certificate file on NAS if needed
-4. Restart script to download fresh certificate
+- **Cause**: Expired or missing certificate on NAS
+- **Solution**: Verify certificate exists at configured NAS path, check expiration, update if needed
 
 **Issue**: Corporate proxy authentication failures  
-**Cause**: Changed proxy credentials or domain configuration
-**Solution**:
-1. Verify PROXY_USER, PROXY_PASSWORD, PROXY_DOMAIN in .env
-2. Test proxy connectivity with simple HTTP request
-3. Check for special characters requiring URL encoding
-4. Verify domain escaping (e.g., MAPLE\\username)
+- **Cause**: Changed proxy credentials or domain configuration
+- **Solution**: Verify PROXY_USER, PROXY_PASSWORD, PROXY_DOMAIN in .env
 
 **Issue**: NAS connection timeouts
-**Cause**: Network connectivity or authentication issues
-**Solution**:
-1. Verify NAS credentials in .env file
-2. Test network connectivity to NAS_SERVER_IP
-3. Check NTLM v2 authentication configuration
-4. Verify CLIENT_MACHINE_NAME matches expected value
+- **Cause**: Network connectivity or authentication issues
+- **Solution**: Verify NAS credentials, test network connectivity to NAS_SERVER_IP
 
 **Issue**: Title validation failures for transcripts
-**Cause**: Transcript titles don't match expected format "Qx 20xx Earnings Call"
-**Solution**:
-1. Review error logs for specific title formats
-2. Check if transcript type is correctly identified
-3. Verify earnings call filtering is working
-4. Consider expanding title validation patterns if needed
+- **Cause**: Transcript titles don't match expected format "Qx 20xx Earnings Call"
+- **Solution**: Review error logs for specific title formats, verify earnings call filtering
 
 ### Debugging Commands
 ```bash
 # Debug configuration loading
-python -c "import yaml; config = yaml.safe_load(open('/path/to/config.yaml')); print('Config loaded:', list(config.keys()))"
+python -c "import yaml; config = yaml.safe_load(open('config.yaml')); print('Config sections:', list(config.keys()))"
 
 # Test NAS connectivity
-python -c "from smb.SMBConnection import SMBConnection; conn = SMBConnection('user', 'pass', 'client', 'server'); print('NAS connection:', conn.connect('server_ip', 139))"
+python -c "from smb.SMBConnection import SMBConnection; import os; from dotenv import load_dotenv; load_dotenv(); conn = SMBConnection(os.getenv('NAS_USERNAME'), os.getenv('NAS_PASSWORD'), os.getenv('CLIENT_MACHINE_NAME'), os.getenv('NAS_SERVER_NAME')); print('NAS connection test:', conn.connect(os.getenv('NAS_SERVER_IP'), int(os.getenv('NAS_PORT', 445))))"
 
-# Validate environment completeness
-python -c "import os; required=['API_USERNAME','API_PASSWORD','NAS_USERNAME','NAS_PASSWORD']; print({k: 'SET' if os.getenv(k) else 'MISSING' for k in required})"
-
-# Test FactSet API connectivity
-python -c "import fds.sdk.EventsandTranscripts; print('FactSet SDK imported successfully')"
+# Validate specific environment variable
+python -c "import os; from dotenv import load_dotenv; load_dotenv(); print('API_USERNAME:', 'SET' if os.getenv('API_USERNAME') else 'NOT SET')"
 ```
 
 ### Log Analysis
-- **Execution Logs**: `Outputs/Logs/stage_0_historical_transcript_sync_YYYY-MM-DD_HH-MM-SS.json`
-  - Contains detailed execution timeline, success/failure counts, performance metrics
-- **Error Logs**: `Outputs/Logs/Errors/stage_0_historical_transcript_sync_errors_YYYY-MM-DD_HH-MM-SS.json`  
-  - Categorized error entries with context, recovery suggestions, affected institutions
-- **Debug Information**: Console output during execution with real-time progress updates
+- **Execution Logs**: `Outputs/Logs/stage_00_download_historical_transcript_sync_YYYY-MM-DD_HH-MM-SS.json`
+- **Error Logs**: `Outputs/Logs/Errors/stage_00_download_historical_transcript_sync_errors_YYYY-MM-DD_HH-MM-SS.json`
+- **Console Output**: Real-time progress updates during execution
 
 ---
 
@@ -467,7 +483,7 @@ python -c "import fds.sdk.EventsandTranscripts; print('FactSet SDK imported succ
 ### Stage-Specific Patterns
 - **Standardized Filename Format**: `{ticker}_{quarter}_{year}_{transcript_type}_{event_id}_{version_id}.xml`
 - **Institution Category Organization**: Separate folders for Canadian, US, European, and Insurance companies
-- **Comprehensive Error Categorization**: 6 distinct error types with specific handling and recovery
+- **Comprehensive Error Categorization**: Multiple distinct error types with specific handling
 - **Inventory Management**: Pre-processing scan of existing files with version-aware duplicate detection
 
 ### Integration Notes
@@ -481,16 +497,15 @@ python -c "import fds.sdk.EventsandTranscripts; print('FactSet SDK imported succ
 
 ### Internal Documentation
 - **Main Project CLAUDE.md**: `/CLAUDE.md` - Complete pipeline overview and standards
-- **Template Reference**: `/CLAUDE_MD_TEMPLATE.md` - Universal template for all stages
 - **Legacy Documentation**: `old/CLAUDE.md` - Previous version context and lessons learned
 
 ### External References
 - **FactSet SDK Documentation**: Events and Transcripts API reference
-- **Anthropic CLAUDE.md Best Practices**: Official Claude Code documentation
 - **SMB/CIFS Protocol**: Python SMB library documentation
 - **Corporate Security Standards**: Internal security validation requirements
 
 ### Change Log
+- **Version 2.0** (2025-01-30): Updated filename to main_historical_sync.py, aligned with current codebase
 - **Version 1.0**: Complete rewrite with security hardening and comprehensive error handling
 - **Legacy Version**: Archived in `old/` folder with historical context
 
@@ -520,4 +535,4 @@ python -c "import fds.sdk.EventsandTranscripts; print('FactSet SDK imported succ
 > This script represents a mature, production-ready implementation with comprehensive security,
 > error handling, and business logic validation. It successfully addresses the complexities of
 > financial data processing while maintaining high standards for security and reliability.
-> All 9 critical production issues have been resolved through rigorous development standards.
+> All critical production issues have been resolved through rigorous development standards.

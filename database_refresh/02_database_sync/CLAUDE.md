@@ -1,16 +1,16 @@
 # Stage 2: Transcript Consolidation & Master Database Synchronization
 
-> **Version**: 2.0 | **Created**: 2024-07-21  
-> **Purpose**: File synchronization stage that makes master database match NAS file system
+> **Version**: 2.1 | **Created**: 2024-07-30  
+> **Purpose**: Pure file synchronization stage that synchronizes master database with NAS file system
 
 ---
 
 ## Project Context
 
-- **Stage**: Stage 2 - Transcript Consolidation & Master Database Synchronization
+- **Stage**: Stage 2 - Transcript Consolidation & Master Database Synchronization  
 - **Primary Purpose**: Synchronize master database with NAS file system - pure file sync, no selection logic
 - **Pipeline Position**: Between Stage 1 (Daily Sync) and Stage 3 (Content Processing)
-- **Production Status**: PRODUCTION READY
+- **Production Status**: PRODUCTION READY ✅
 
 ---
 
@@ -33,6 +33,7 @@ from smb.SMBConnection import SMBConnection  # NAS connectivity
 from dotenv import load_dotenv      # Environment variables
 from datetime import datetime       # Timestamp handling
 from typing import Dict, Any, Optional, List, Tuple  # Type hints
+import xml.etree.ElementTree as ET  # XML parsing for transcript content
 ```
 
 ### Environment Requirements
@@ -43,14 +44,14 @@ API_PASSWORD=
 PROXY_USER=                  # Corporate proxy (MAPLE domain)
 PROXY_PASSWORD=
 PROXY_URL=
-PROXY_DOMAIN=
+PROXY_DOMAIN=               # Default: MAPLE if not specified
 NAS_USERNAME=                # NAS authentication
 NAS_PASSWORD=
 NAS_SERVER_IP=
 NAS_SERVER_NAME=
 NAS_SHARE_NAME=
 NAS_BASE_PATH=
-NAS_PORT=
+NAS_PORT=                    # Default: 445 if not specified
 CONFIG_PATH=                 # NAS configuration path
 CLIENT_MACHINE_NAME=
 ```
@@ -67,19 +68,17 @@ CLIENT_MACHINE_NAME=
 
 ### File Structure
 ```
-stage_2_processing/
-├── 2_transcript_consolidation.py   # Primary execution script
-├── CLAUDE.md                      # This context file
-└── old/                          # Backup of previous implementation
-    ├── 2_transcript_consolidation.py
-    └── CLAUDE.md
+02_database_sync/
+├── main_sync_updates.py    # Primary execution script
+├── CLAUDE.md              # This context file
+└── [old backup versions if applicable]
 ```
 
 ### Key Components
 1. **NAS File Scanner**: Scans Data/YYYY/QX/Type/Company/ structure for all XML files
 2. **Master Database Loader**: Loads existing master database or returns None if doesn't exist
 3. **Delta Detector**: Compares NAS vs database to identify new/modified/deleted files
-4. **Queue Generator**: Creates files_to_process.json and files_to_remove.json outputs
+4. **Queue Generator**: Creates stage_02_process_queue.json and stage_02_removal_queue.json outputs
 
 ---
 
@@ -88,16 +87,27 @@ stage_2_processing/
 ### Configuration Schema
 ```yaml
 # NAS configuration structure for Stage 2
-stage_2:
+ssl_cert_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/certificate/certificate.cer"
+
+api_settings:
+  base_url: "https://api.factset.com"
+  endpoints:
+    transcripts: "/events-and-transcripts/v1/transcripts"
+
+stage_02_database_sync:
   description: "Transcript consolidation and master database management"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   master_database_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Database/master_database.json"
   refresh_output_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+
+monitored_institutions:
+  # 100+ financial institutions with structure:
+  # TICKER-COUNTRY: {name: "Full Name", type: "Institution Type", path_safe_name: "Path_Safe_Name"}
 ```
 
 ### Validation Requirements
-- **Schema Validation**: Validates all required stage_2 parameters exist
+- **Schema Validation**: Validates all required stage_02_database_sync parameters exist
 - **Security Validation**: NAS path validation, file path security checks
 - **Business Rule Validation**: Monitored institutions structure validation
 
@@ -112,7 +122,7 @@ stage_2:
 4. **NAS File Scanning**: Scan all transcript files in Data/YYYY/QX/Type/Company/ structure
 5. **Master Database Check**: Load existing master database or return None if doesn't exist
 6. **Delta Detection**: Compare NAS inventory vs database to identify changes
-7. **Queue Generation**: Create files_to_process.json and files_to_remove.json
+7. **Queue Generation**: Create stage_02_process_queue.json and stage_02_removal_queue.json
 8. **Log Cleanup**: Save execution logs and clean up temporary files
 
 ### Key Business Rules
@@ -124,7 +134,7 @@ stage_2:
 ### Data Processing Logic
 - **Input**: NAS file system (Data/YYYY/QX/Type/Company/*.xml) + existing master database
 - **Processing**: File path comparison + date modification checking
-- **Output**: files_to_process.json (new/modified files) + files_to_remove.json (outdated/deleted)
+- **Output**: stage_02_process_queue.json (new/modified files) + stage_02_removal_queue.json (outdated/deleted)
 - **Validation**: File path security validation, NAS connectivity checks
 
 ---
@@ -133,15 +143,18 @@ stage_2:
 
 ### Security Requirements (MANDATORY)
 ```python
-# Required security functions - implemented:
+# Required security functions - ALL IMPLEMENTED ✅:
 def validate_file_path(path: str) -> bool:
     """Prevent directory traversal attacks."""
+    # Implemented at line 495-513
     
 def validate_nas_path(path: str) -> bool:
     """Ensure safe NAS paths only."""
+    # Implemented at line 516-534
     
 def sanitize_url_for_logging(url: str) -> str:
     """Remove auth tokens from URLs before logging."""
+    # Implemented at line 537-544
 ```
 
 ### Security Standards Checklist
@@ -163,25 +176,25 @@ def sanitize_url_for_logging(url: str) -> str:
 ### Primary Commands
 ```bash
 # Development and testing
-python 2_transcript_consolidation.py           # Run Stage 2
-python -m py_compile 2_transcript_consolidation.py  # Syntax check
+python main_sync_updates.py              # Run Stage 2
+python -m py_compile main_sync_updates.py  # Syntax check
 
 # Configuration validation
 python -c "import yaml; yaml.safe_load(open('config.yaml'))"  # Validate YAML
 ```
 
 ### Execution Modes
-- **Terminal Mode**: `python 2_transcript_consolidation.py` - Standard command-line execution
+- **Terminal Mode**: `python main_sync_updates.py` - Standard command-line execution
 - **Notebook Mode**: Import and run from Jupyter notebooks
 - **Scheduled Mode**: Automated execution after Stage 0/1 completion
 
 ### Testing Commands
 ```bash
 # Syntax validation
-python -m py_compile 2_transcript_consolidation.py
+python -m py_compile main_sync_updates.py
 
 # Configuration testing
-python -c "from 2_transcript_consolidation import validate_config_structure"
+python -c "from main_sync_updates import validate_config_structure"
 ```
 
 ---
@@ -189,12 +202,23 @@ python -c "from 2_transcript_consolidation import validate_config_structure"
 ## Error Handling & Recovery
 
 ### Error Categories
-- **Environment Validation**: Missing .env variables, invalid configurations
-- **NAS Connection**: SMB/CIFS connectivity issues, authentication failures  
-- **Config Load**: YAML parsing errors, missing configuration sections
-- **Database Load**: Master database corruption, JSON parsing failures
-- **File Operations**: NAS file access errors, path validation failures
-- **Queue Save**: Output file generation failures
+- **environment_validation**: Missing .env variables, invalid configurations
+- **nas_connection**: SMB/CIFS connectivity issues, authentication failures  
+- **config_load**: YAML parsing errors, missing configuration sections
+- **config_parse**: Invalid YAML syntax in configuration file
+- **config_validation**: Missing required parameters or invalid structure
+- **ssl_setup**: SSL certificate download or setup failures
+- **proxy_setup**: Proxy configuration errors
+- **nas_download**: File download failures from NAS
+- **nas_upload**: File upload failures to NAS
+- **nas_list_files**: Directory listing errors
+- **nas_list_directories**: Subdirectory listing errors
+- **directory_creation**: NAS directory creation failures
+- **file_metadata**: File attribute retrieval errors
+- **database_load**: Master database corruption, JSON parsing failures
+- **queue_save**: Output file generation failures
+- **path_validation**: Invalid file path security violations
+- **main_execution**: Top-level execution errors
 
 ### Error Handling Standards (MANDATORY)
 ```python
@@ -225,8 +249,8 @@ except (requests.ConnectionError, requests.Timeout) as e:
 - **Configuration Sources**: NAS-based YAML configuration
 
 ### Downstream Outputs  
-- **files_to_process.json**: List of files for Stage 3 content processing
-- **files_to_remove.json**: List of outdated database entries to clean up
+- **stage_02_process_queue.json**: List of file records for Stage 3 content processing
+- **stage_02_removal_queue.json**: List of outdated database entries to clean up
 - **Master Database**: Synchronized inventory for pipeline tracking
 
 ### External System Integration
@@ -274,12 +298,52 @@ except (requests.ConnectionError, requests.Timeout) as e:
 
 ---
 
+## Key Functions Reference
+
+### Core Functions
+
+#### Environment & Configuration
+- `setup_logging()` (34-42): Initialize minimal console logging
+- `validate_environment_variables()` (131-170): Validate all required .env variables
+- `load_config_from_nas()` (214-241): Load and parse YAML configuration from NAS
+- `validate_config_structure()` (244-298): Validate configuration schema and structure
+
+#### NAS Operations
+- `get_nas_connection()` (173-211): Establish SMB connection to NAS
+- `nas_download_file()` (373-389): Download file from NAS as bytes
+- `nas_upload_file()` (392-411): Upload file object to NAS
+- `nas_file_exists()` (414-420): Check if file exists on NAS
+- `nas_list_files()` (423-435): List XML files in directory
+- `nas_list_directories()` (438-450): List subdirectories
+- `nas_create_directory_recursive()` (453-481): Create directory with parent creation
+- `get_file_modified_time()` (484-492): Get file last modified timestamp
+
+#### Security Functions
+- `validate_file_path()` (495-513): Prevent directory traversal attacks
+- `validate_nas_path()` (516-534): Validate NAS path structure
+- `sanitize_url_for_logging()` (537-544): Remove credentials from URLs
+
+#### Business Logic
+- `scan_nas_for_all_transcripts()` (547-595): Scan entire NAS for transcript files
+- `load_master_database()` (598-621): Load existing master database
+- `database_to_comparison_format()` (624-634): Convert database to path-keyed dict
+- `detect_changes()` (637-680): Compare NAS vs database inventories
+- `save_processing_queues()` (683-737): Generate output queue JSON files
+
+#### Logging Functions
+- `log_console()` (44-53): Minimal console logging
+- `log_execution()` (55-63): Detailed execution logging
+- `log_error()` (66-75): Categorized error logging
+- `save_logs_to_nas()` (78-129): Save all logs to NAS
+
+---
+
 ## Development Workflow
 
 ### Pre-Development Checklist
 - [x] Environment variables configured in .env
 - [x] NAS access confirmed and tested
-- [x] Configuration file validated with stage_2 section
+- [x] Configuration file validated with stage_02_database_sync section
 - [x] Dependencies installed and verified
 
 ### Development Process
@@ -318,28 +382,29 @@ except (requests.ConnectionError, requests.Timeout) as e:
 ## Troubleshooting Guide
 
 ### Common Issues
-**Issue**: No files found for processing
-**Cause**: Empty NAS Data directory or invalid configuration paths
+
+**Issue**: No files found for processing  
+**Cause**: Empty NAS Data directory or invalid configuration paths  
 **Solution**: Verify Stage 0/1 have run successfully and populated NAS
 
-**Issue**: Master database loading fails
-**Cause**: Corrupted JSON file or invalid schema
+**Issue**: Master database loading fails  
+**Cause**: Corrupted JSON file or invalid schema  
 **Solution**: Check error logs for specific JSON parsing errors, validate database manually
 
-**Issue**: NAS connection failures
-**Cause**: Network connectivity or authentication issues
+**Issue**: NAS connection failures  
+**Cause**: Network connectivity or authentication issues  
 **Solution**: Verify NAS credentials in .env file and network connectivity
 
 ### Debugging Commands
 ```bash
 # Debug configuration loading
-python -c "from 2_transcript_consolidation import load_config_from_nas; print('Config loaded')"
+python -c "from main_sync_updates import load_config_from_nas; print('Config loaded')"
 
 # Test NAS connectivity
-python -c "from 2_transcript_consolidation import get_nas_connection; conn = get_nas_connection(); print('Connected' if conn else 'Failed')"
+python -c "from main_sync_updates import get_nas_connection; conn = get_nas_connection(); print('Connected' if conn else 'Failed')"
 
 # Validate environment
-python -c "from 2_transcript_consolidation import validate_environment_variables; validate_environment_variables(); print('Valid')"
+python -c "from main_sync_updates import validate_environment_variables; validate_environment_variables(); print('Valid')"
 ```
 
 ### Log Analysis
@@ -363,7 +428,7 @@ python -c "from 2_transcript_consolidation import validate_environment_variables
 
 ### Integration Notes
 - **Stage 0/1 Interface**: Consumes standardized NAS folder structure (Data/YYYY/QX/Type/Company/)
-- **Stage 3 Interface**: Produces files_to_process.json for content extraction processing
+- **Stage 3 Interface**: Produces stage_02_process_queue.json for content extraction processing
 - **No Parallel Processing**: Sequential execution sufficient for file synchronization operations
 
 ---
@@ -372,8 +437,9 @@ python -c "from 2_transcript_consolidation import validate_environment_variables
 
 ### Internal Documentation
 - **Main Project CLAUDE.md**: `/CLAUDE.md` - Project overview and context
-- **Configuration Schema**: Stage 2 section in config.yaml
-- **Template Reference**: `/CLAUDE_MD_TEMPLATE.md` - Documentation template
+- **Configuration Schema**: Stage 02_database_sync section in config.yaml
+- **Stage 0 Documentation**: `/database_refresh/00_download_historical/CLAUDE.md`
+- **Stage 1 Documentation**: `/database_refresh/01_download_daily/CLAUDE.md`
 
 ### External References
 - **SMB/CIFS Protocol**: Python pysmb library documentation
@@ -383,6 +449,7 @@ python -c "from 2_transcript_consolidation import validate_environment_variables
 ### Change Log
 - **Version 1.0**: Initial complex implementation with selection logic
 - **Version 2.0**: Simplified to pure file synchronization approach
+- **Version 2.1**: Updated documentation to match current codebase implementation
 
 ---
 
@@ -408,6 +475,8 @@ python -c "from 2_transcript_consolidation import validate_environment_variables
 > **Implementation Notes:**
 > 1. Stage 2 is now a pure file synchronization system
 > 2. No transcript selection logic - Stage 0/1 handle that complexity
-> 3. Master database schema: {file_path, date_last_modified} only
+> 3. Master database schema: {file_path, date_last_modified} minimal structure
 > 4. Output files provide actionable queues for downstream processing
 > 5. Maintains all Stage 0/1 security and logging standards
+> 6. Configuration uses YAML format (not JSON as in Stages 0/1)
+> 7. Script name is main_sync_updates.py (not 2_transcript_consolidation.py)

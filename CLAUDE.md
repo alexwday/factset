@@ -4,16 +4,16 @@
 This is a multi-stage pipeline for downloading, processing, and analyzing earnings transcripts from FactSet's Events & Transcripts API. The pipeline is designed with standalone stage-based scripts that can run independently from terminal or notebook environments.
 
 ## Current Status
-- **Stage 0**: `database_refresh/stage_0_bulk_refresh/0_transcript_bulk_sync.py` - PRODUCTION READY ✅ (All 9 critical issues resolved)
-- **Stage 1**: `database_refresh/stage_1_daily_sync/1_transcript_daily_sync.py` - PRODUCTION READY ✅ (Daily incremental sync)
-- **Stage 2**: `database_refresh/stage_2_processing/2_transcript_consolidation.py` - PRODUCTION READY ✅ (Transcript consolidation)
-- **Stage 3**: `database_refresh/stage_3_content_processing/3_transcript_content_extraction.py` - PRODUCTION READY ✅ (Content extraction)
-- **Stage 4**: `database_refresh/stage_4_llm_classification/4_transcript_llm_classification.py` - PRODUCTION READY ✅ (LLM classification)
-- **Stage 5**: `database_refresh/stage_5_qa_pairing/5_transcript_qa_pairing.py` - PRODUCTION READY ✅ (Q&A boundary detection)
+- **Stage 0**: `database_refresh/00_download_historical/main_historical_sync.py` - PRODUCTION READY ✅ (All 9 critical issues resolved)
+- **Stage 1**: `database_refresh/01_download_daily/main_daily_sync.py` - PRODUCTION READY ✅ (Daily incremental sync)
+- **Stage 2**: `database_refresh/02_database_sync/main_sync_updates.py` - PRODUCTION READY ✅ (Master database synchronization)
+- **Stage 3**: `database_refresh/03_extract_content/main_content_extraction.py` - PRODUCTION READY ✅ (Content extraction)
+- **Stage 4**: `database_refresh/04_validate_structure/4_transcript_llm_classification.py` - PRODUCTION READY ✅ (Structure validation)
+- **Stage 5**: `database_refresh/05_qa_pairing/main_qa_pairing.py` - PRODUCTION READY ✅ (Q&A boundary detection)
 - **Reference Implementation**: Production-ready code with comprehensive validation, security hardening, and proper error handling
 - **Architecture**: Stage-based approach where each stage is completely independent and follows security standards
 - **Storage**: All data stored on NAS (no local storage) using pysmb with NTLM v2 authentication
-- **Authentication**: Corporate proxy authentication required for API access, LLM OAuth for Stage 4 & 5
+- **Authentication**: Corporate proxy authentication required for API access, LLM OAuth for Stage 5
 
 ### Stage 0 Key Business Rules
 1. **Anti-Contamination**: Only downloads transcripts where target ticker is SOLE primary company
@@ -22,7 +22,7 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 4. **Incremental Safe**: Checks existing files, safe to re-run without re-downloading
 5. **Version Management**: Automatically handles vendor version ID updates, keeps only latest version
 6. **Institution Coverage**: 100+ global financial institutions across multiple regions and types
-7. **File Organization**: Organized by institution type → company → transcript type
+7. **File Organization**: Organized by fiscal quarter → institution type → company → transcript type
 8. **Standardized Naming**: Consistent filename format for easy identification and processing
 
 ## Key Technical Requirements
@@ -32,29 +32,32 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
   - API_USERNAME, API_PASSWORD (FactSet API)
   - PROXY_USER, PROXY_PASSWORD, PROXY_URL, PROXY_DOMAIN (Corporate proxy - PROXY_DOMAIN defaults to 'MAPLE')
   - NAS_USERNAME, NAS_PASSWORD, NAS_SERVER_IP, NAS_SERVER_NAME (NAS connection)
-  - NAS_SHARE_NAME, NAS_BASE_PATH (NAS paths)
+  - NAS_SHARE_NAME, NAS_BASE_PATH, NAS_PORT (NAS paths - NAS_PORT defaults to 445)
   - CONFIG_PATH, CLIENT_MACHINE_NAME (Configuration)
-  - LLM_CLIENT_ID, LLM_CLIENT_SECRET (LLM API for Stage 4 & 5)
-- **NAS Config Files**: Single `config.json` with stage-specific sections (stage_0 through stage_5)
+  - LLM_CLIENT_ID, LLM_CLIENT_SECRET (LLM API for Stage 5)
+- **NAS Config Files**: YAML configuration with stage-specific sections (stage_00_download_historical through stage_05_qa_pairing)
 - **SSL Certificate**: Downloaded from NAS at runtime for FactSet API and LLM connections
 - **Proxy**: Corporate proxy with NTLM authentication required
 
 ### FactSet API Integration
 - **API**: EventsandTranscripts API using fds.sdk.EventsandTranscripts
-- **Endpoints**: transcripts_api.TranscriptsApi for transcript downloads
+- **Endpoints**: 
+  - `transcripts_api.TranscriptsApi.get_transcripts_ids()` for institution-based queries (Stage 0)
+  - `transcripts_api.TranscriptsApi.get_transcripts_dates()` for date-based queries (Stage 1)
 - **Filtering**: Primary ID filtering to prevent cross-contamination between related companies
-- **Rate Limiting**: 2-second delays between requests, 3 retry attempts with 5-second delays
+- **Rate Limiting**: 2-3 second delays between requests, 3-8 retry attempts with exponential backoff
 
 ### NAS Integration Details
 - **Protocol**: SMB/CIFS using pysmb.SMBConnection
 - **Authentication**: NTLM v2 with domain credentials
 - **Enhanced Folder Structure** (Fiscal Quarter Organization):
   - `Inputs/certificate/` - SSL certificates
-  - `Inputs/config/` - Configuration files (single config.json)
+  - `Inputs/config/` - Configuration files (config.yaml)
   - `Outputs/Data/YYYY/QX/Type/Company/TranscriptType/` - Transcripts organized by fiscal year and quarter
   - `Outputs/Logs/` - Execution logs
   - `Outputs/Logs/Errors/` - Separate error logs (parsing, download, filesystem, validation)
-  - `Outputs/listing/` - Inventory JSON files (future use)
+  - `Outputs/Database/` - Master database JSON
+  - `Outputs/Refresh/` - Stage processing queues and outputs
 
 ### Monitored Institutions (100+ Total)
 **Key Institution Categories**:
@@ -66,263 +69,125 @@ This is a multi-stage pipeline for downloading, processing, and analyzing earnin
 *Examples*: RY-CA, TD-CA, JPM-US, BAC-US, BCS-GB, UBS-CH, MFC-CA, BLK-US, and many more
 
 ### File Naming Convention
-`{primary_id}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
+**Stage 0 Format**: `{ticker}_{quarter}_{year}_{transcript_type}_{event_id}_{version_id}.xml`
 
-**Example**: `RY-CA_2024-01-25_Earnings_Corrected_12345_67890_1.xml`
+**Example**: `RY-CA_Q1_2024_Corrected_12345_1.xml`
 - **RY-CA**: Royal Bank of Canada ticker
-- **2024-01-25**: Earnings call date
-- **Earnings**: Event type (filtered to earnings only)
-- **Corrected**: Transcript type (Raw/Corrected/NearRealTime)
+- **Q1**: Fiscal quarter
+- **2024**: Fiscal year
+- **Corrected**: Transcript type (Raw/Corrected)
 - **12345**: Unique event identifier
-- **67890**: Report identifier
 - **1**: Version identifier
 
-**Storage Path**: `Data/2024/Q1/Canadian/RY-CA_Royal_Bank_of_Canada/Corrected/RY-CA_2024-01-25_Earnings_Corrected_12345_67890_1.xml`
-
-## Stage 0 Business Logic & Process Flow
-
-### Complete Step-by-Step Process
-
-#### **1. Security & Authentication Setup**
-- Validates all required credentials from `.env` file (13 environment variables)
-- Connects to NAS using secure NTLM v2 authentication
-- Downloads SSL certificate from NAS for secure FactSet API connections
-- Configures corporate proxy authentication for API access with domain escaping
-
-#### **2. Configuration Loading & Validation**
-- Downloads `config.json` from NAS at runtime (never stored locally)
-- Validates comprehensive configuration schema:
-  - Institution list validation (ticker format, institution types)
-  - API parameter validation (dates, transcript types, rate limits)
-  - Security path validation to prevent directory traversal attacks
-  - Data type validation for all configuration parameters
-
-#### **3. Enhanced Directory Structure Creation**
-Creates fiscal quarter-organized folder structure on NAS:
-```
-Outputs/Data/
-├── 2024/                    # Fiscal year folders
-│   ├── Q1/                  # Fiscal quarter folders
-│   │   ├── Canadian/        # Institution type
-│   │   │   └── RY-CA_Royal_Bank_of_Canada/
-│   │   │       ├── Raw/     # Transcript type subfolders
-│   │   │       ├── Corrected/
-│   │   │       └── NearRealTime/
-│   │   ├── US/
-│   │   │   └── JPM-US_JPMorgan_Chase/
-│   │   └── Insurance/
-│   │       └── MFC-CA_Manulife_Financial/
-│   ├── Q2/ Q3/ Q4/         # Other quarters in same structure
-├── 2023/                   # Previous years
-└── Unknown/                # Fallback for unparseable transcripts
-    └── Unknown/
-```
-
-#### **4. Institution Processing Loop (100+ Total)**
-For each monitored institution:
-
-**a) API Query with Critical Filters**
-- Queries FactSet Events & Transcripts API for ALL transcripts from 2023-present
-- Applies earnings filter (only "Earnings" event types)
-- **CRITICAL Anti-Contamination Filter**: Only processes transcripts where the target ticker is the SOLE primary company
-  - Prevents cross-contamination (e.g., NA-CA pulling CWB-CA transcripts)
-  - Ensures clean data for individual institution analysis
-
-**b) Transcript Type Processing**
-- **Raw**: Original transcript as received from live call
-- **Corrected**: Manually edited for accuracy, completeness, and formatting
-- **NearRealTime**: Real-time transcript captured during live earnings call
-
-**c) Duplicate Prevention Logic**
-- Scans existing files on NAS for each institution/transcript-type combination
-- Creates standardized filename: `{ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
-- Only downloads transcripts that don't already exist (safe to re-run)
-
-**d) Download & Storage Process**
-- Downloads transcript XML via FactSet API with corporate proxy authentication
-- Validates file integrity and logs file sizes for audit
-- Uploads directly to NAS (no local storage for security)
-- Implements retry logic: 3 attempts with 5-second delays
-- Rate limiting: 2-second delays between requests (API protection)
-
-#### **5. Progress Tracking & Audit Trail**
-- Tracks downloads by institution and transcript type
-- Logs detailed progress, successes, and failures
-- Maintains counts for reporting and audit purposes
-- Generates comprehensive execution summary
-
-#### **6. Final Reporting & Cleanup**
-- Provides detailed summary:
-  - Total transcripts downloaded
-  - Execution time
-  - Institutions with/without transcripts found
-  - Breakdown by transcript type and institution
-- Uploads timestamped execution log to NAS for permanent audit trail
-- Cleans up temporary SSL certificate files
-- Properly closes all network connections
-
-### Core Functionality Features
-- Downloads all earnings transcripts from 2023-present for monitored institutions
-- **Enhanced Fiscal Quarter Organization**: Automatically organizes transcripts by fiscal year and quarter parsed from XML titles
-- **Robust Title Parsing**: 4 regex patterns handle various formats ("Q1 2024 Earnings Call", "First Quarter 2024", "2024 Q1")
-- Filters transcripts where target ticker is the ONLY primary ID (prevents cross-contamination)
-- Supports all transcript types: Corrected, Raw, NearRealTime
-- **Comprehensive Error Logging**: Separate JSON files for parsing, download, filesystem, and validation errors
-- **Smart Fallbacks**: Uses "Unknown/Unknown" folder for unparseable transcripts with operator guidance
-- **Windows Path Compatibility**: Validates path lengths and automatically shortens when needed
-- Implements intelligent version management to handle vendor version ID updates
-- Automatically removes old versions and keeps only latest version of each transcript
-- Uses version-agnostic keys for duplicate detection (prevents duplicate downloads)
-- Rate limiting with retry logic for API protection
-- Comprehensive error handling and security validation
-- Uploads all data directly to NAS (no local storage)
-
-### Technical Implementation
-- **Import Pattern**: `from fds.sdk.EventsandTranscripts.api import transcripts_api`
-- **Enhanced Folder Structure**: Dynamic creation based on parsed fiscal quarter/year from XML titles
-- **Quarter/Year Parsing**: Key functions for extracting temporal information:
-  - `parse_quarter_and_year_from_xml()`: Parses XML content to extract Q1-Q4 and 20XX from titles
-  - `validate_path_length()`: Ensures Windows compatibility (260 char limit)
-  - `get_fallback_quarter_year()`: Returns "Unknown/Unknown" for unparseable transcripts
-  - `create_enhanced_directory_structure()`: Creates fiscal quarter-organized paths
-- **Enhanced Error Logging**: Separate tracking and JSON export for different error types
-  - `EnhancedErrorLogger`: Manages parsing, download, filesystem, and validation errors
-  - Saves actionable error reports to `Outputs/Logs/Errors/` with recovery instructions
-- **Proxy Setup**: Uses requests proxies with MAPLE domain authentication
-- **SSL Handling**: Downloads certificate from NAS to temp file, sets environment variables
-- **Version Management**: Key functions for handling vendor version updates:
-  - `create_version_agnostic_key()`: Creates duplicate detection keys without version_id
-  - `parse_version_from_filename()`: Extracts version numbers from filenames
-  - `get_existing_files_with_version_management()`: Automatically manages versions, removes old ones
-  - `nas_remove_file()`: Safely removes old versions from NAS
-- **Error Handling**: Pandas warnings suppressed, comprehensive try/catch blocks
-- **Logging**: Simplified logging without email notifications (removed in latest version)
-
-## Known Issues & Fixes Applied
-
-### Historical Problems Solved
-1. **Import Error**: Fixed `calendar_api` vs `calendar_events_api` import confusion
-2. **Sort Parameter**: Changed from `"-event_date"` to `"-storyDateTime"`
-3. **Pandas Warnings**: Fixed SettingWithCopyWarning with explicit `.copy()`
-4. **Cross-contamination**: NA-CA pulling CWB-CA transcripts fixed with primary ID filtering
-5. **Proxy URL**: Fixed proxy construction for requests library format
-6. **Environment Variables**: Attempted but reverted - broke functionality, restored from git
-7. **Version ID Duplicates**: Fixed duplicate downloads when vendors update version IDs by implementing version-agnostic duplicate detection and automatic cleanup of old versions
-8. **Enhanced Folder Structure**: Implemented fiscal quarter organization with robust title parsing and comprehensive error logging (2024-07-12)
-
-### Git History Context
-- **Last Working Commit**: 1d0ceba (before environment variable changes)
-- **Email Removal**: Commit removed email functionality, added type annotations, simplified logging
-- **Line Count**: Reduced from 855 to 551 lines in cleanup
+**Storage Path**: `Data/2024/Q1/Canadian/RY-CA_Royal_Bank_of_Canada/Corrected/RY-CA_Q1_2024_Corrected_12345_1.xml`
 
 ## Dependencies (requirements.txt)
 ```
-fds.sdk.EventsandTranscripts
-pandas
-requests
-python-dotenv
-pysmb
-python-dateutil
-openai  # Required for Stage 4 LLM classification
-pytz    # Required for test scripts
-# Enhanced folder structure parsing:
-xml.etree.ElementTree  # Built-in Python library for XML parsing
+# Core Dependencies
+fds.sdk.EventsandTranscripts  # FactSet API SDK
+requests                      # Network operations
+python-dotenv                 # Environment variables
+pysmb                        # NAS connectivity
+yaml                         # Configuration parsing
+pytz                         # Timezone handling
+
+# Data Processing
+pandas                       # Data manipulation (Stage 0)
+python-dateutil             # Date parsing
+xml.etree.ElementTree       # Built-in XML parsing
+
+# LLM Integration (Stage 5)
+openai                      # OpenAI API client
 ```
 
 ## Stage Architecture Plan
 
-### Stage 0: Bulk Refresh ✅ PRODUCTION READY
-- **Purpose**: Download ALL historical earnings transcripts from 2023-present for 100+ monitored financial institutions
-- **Script**: `database_refresh/stage_0_bulk_refresh/0_transcript_bulk_sync.py`
-- **Config**: `Inputs/config/config.json` on NAS
-- **When**: Initial setup or complete repository refresh
+### Stage 0: Historical Transcript Sync ✅ PRODUCTION READY
+- **Purpose**: Download ALL historical earnings transcripts (3-year rolling window) for 100+ monitored financial institutions
+- **Script**: `database_refresh/00_download_historical/main_historical_sync.py`
+- **Config**: `config.yaml` on NAS (uses stage_00_download_historical section)
+- **When**: Monthly/Quarterly for maintenance, Initial run for setup
 - **Status**: All 9 critical issues resolved, security validated, production ready
 - **Key Features**:
-  - **Enhanced Fiscal Quarter Organization**: Automatically organizes by fiscal year/quarter parsed from XML titles
-  - **Robust Title Parsing**: 4 regex patterns handle "Q1 2024 Earnings Call", "First Quarter 2024", "2024 Q1" formats
+  - **3-Year Rolling Window**: Maintains exactly 3 years of historical data with automatic cleanup
+  - **Title Format Validation**: Strict validation of "Qx 20xx Earnings Call" format
+  - **Anti-Contamination Filter**: Only downloads transcripts where target ticker is SOLE primary company
+  - **Version Management**: Automatically handles vendor version ID updates, removes old versions
+  - **Fiscal Quarter Organization**: Dynamic folder structure based on parsed transcript titles
   - **Comprehensive Error Logging**: Separate JSON files for parsing, download, filesystem, validation errors
   - **Smart Fallbacks**: Uses "Unknown/Unknown" folder for unparseable transcripts with operator guidance
-  - Anti-contamination filter: Only downloads transcripts where target ticker is SOLE primary company
-  - Version management: Automatically handles vendor version ID updates, prevents duplicate downloads
-  - Duplicate prevention: Uses version-agnostic keys for intelligent duplicate detection
-  - Automatic cleanup: Removes old versions and keeps only latest version of each transcript
   - **Windows Path Compatibility**: Validates path lengths and automatically shortens when needed
-  - Comprehensive audit trail: Timestamped logs uploaded to NAS
-  - Standardized naming: `{ticker}_{date}_{event_type}_{transcript_type}_{event_id}_{report_id}_{version_id}.xml`
+  - **Standardized Naming**: `{ticker}_{quarter}_{year}_{transcript_type}_{event_id}_{version_id}.xml`
 
-### Stage 1: Daily Sync ✅ PRODUCTION READY
-- **Purpose**: Incremental daily downloads  
-- **Script**: `database_refresh/stage_1_daily_sync/1_transcript_daily_sync.py`
-- **Config**: `Inputs/config/config.json` on NAS (uses stage_1 section)
+### Stage 1: Daily Transcript Sync ✅ PRODUCTION READY
+- **Purpose**: Incremental daily downloads of recent earnings transcripts  
+- **Script**: `database_refresh/01_download_daily/main_daily_sync.py`
+- **Config**: `config.yaml` on NAS (uses stage_01_download_daily section)
 - **When**: Scheduled daily operations or earnings day monitoring
 - **Key Features**:
-  - **Enhanced Fiscal Quarter Organization**: Same dynamic folder structure as Stage 0 (YYYY/QX/Type/Company/TranscriptType/)
-  - **Comprehensive Error Logging**: Inherits all error tracking and JSON export capabilities
-  - Date-based queries using `get_transcripts_dates()` API
-  - Single API call per date (efficient vs Stage 0's 15 calls)
-  - Inherits ALL version management from Stage 0
-  - **Smart Title Parsing**: Same 4 regex patterns and fallback logic as Stage 0
-  - Optional `earnings_monitor.py` for real-time notifications
-  - Configurable lookback period (sync_date_range)
+  - **Date-Based Discovery**: Uses get_transcripts_dates() API for efficient recent transcript discovery
+  - **Configurable Lookback**: sync_date_range parameter allows flexible date range configuration
+  - **Two-Phase Processing**: Date discovery phase followed by institution processing phase
+  - **Performance Optimized**: Only processes institutions with actual transcripts (not all 100+)
+  - **Same Organization**: Uses identical fiscal quarter folder structure as Stage 0
+  - **Version Management**: Inherits all version management capabilities from Stage 0
+  - **Optional Monitoring**: earnings_monitor.py for real-time notifications
 
-### Stage 2: Transcript Consolidation ✅ PRODUCTION READY
-- **Purpose**: Consolidate and organize downloaded transcripts, create master database  
-- **Script**: `database_refresh/stage_2_processing/2_transcript_consolidation.py`
-- **Config**: `Inputs/config/config.json` on NAS (uses stage_2 section)
-- **When**: After bulk download or periodic consolidation
+### Stage 2: Master Database Synchronization ✅ PRODUCTION READY
+- **Purpose**: Pure file synchronization between NAS file system and master database
+- **Script**: `database_refresh/02_database_sync/main_sync_updates.py`
+- **Config**: `config.yaml` on NAS (uses stage_02_database_sync section)
+- **When**: After Stage 0/1 completes, before Stage 3 processing
 - **Key Features**:
-  - Enhanced file selection algorithm with intelligent duplicate handling
-  - Multi-call earnings transcript consolidation (e.g., preliminary + corrected calls)
-  - Master database creation with comprehensive transcript metadata
-  - Version-aware file processing with automatic latest version selection
-  - Comprehensive error logging with separate JSON files for different error types
-  - Read-only approach - validates and consolidates without modifying original files
-  - Smart fallback handling for edge cases and parsing failures
+  - **Pure File Sync**: No selection logic - simply mirrors NAS to database
+  - **Delta Detection**: Identifies new, modified, and deleted files
+  - **Queue Generation**: Creates stage_02_process_queue.json and stage_02_removal_queue.json
+  - **Path-Based Comparison**: Uses file_path as primary key for synchronization
+  - **Date-Modified Checking**: Detects file modifications via timestamps
+  - **No Database Creation**: Returns None if master database doesn't exist
+  - **Minimal Schema**: {file_path, date_last_modified} structure
 
-### Stage 3: Content Processing ✅ PRODUCTION READY
-- **Purpose**: Extract and structure content from XML transcripts
-- **Script**: `database_refresh/stage_3_content_processing/3_transcript_content_extraction.py`
-- **Config**: `Inputs/config/config.json` on NAS (uses stage_3 section)
-- **When**: After transcript consolidation
+### Stage 3: Content Extraction & Processing ✅ PRODUCTION READY
+- **Purpose**: Extract and structure content from XML transcripts at paragraph level
+- **Script**: `database_refresh/03_extract_content/main_content_extraction.py`
+- **Config**: `config.yaml` on NAS (uses stage_03_extract_content section)
+- **When**: After Stage 2 generates processing queue
 - **Key Features**:
-  - Paragraph-level content extraction from XML transcripts
-  - Speaker attribution and role identification (Operator, Executive, Analyst)
-  - Q&A session detection and separation
-  - Structured content output with speaker metadata
-  - Comprehensive error logging and validation
-  - Preserves original XML structure while extracting meaningful content
+  - **Enhanced Field Extraction**: Extracts all metadata from paths, XML, and config lookups
+  - **Paragraph-Level Breakdown**: Creates individual records for each paragraph
+  - **Speaker Attribution**: Formats participants with name, title, and affiliation
+  - **Q&A Detection**: Uses XML speaker type attributes ("q" for question, "a" for answer)
+  - **Sequential Numbering**: Maintains paragraph and speaker block IDs
+  - **JSON Validation**: Pre-save validation with record preview
+  - **Development Mode**: Configurable file limits for testing
 
-### Stage 4: LLM Classification ✅ PRODUCTION READY
-- **Purpose**: LLM-based transcript section classification and analysis
-- **Script**: `database_refresh/stage_4_llm_classification/4_transcript_llm_classification.py`
-- **Config**: `Inputs/config/config.json` on NAS (uses stage_4 section)
-- **When**: After content extraction for detailed analysis
+### Stage 4: Transcript Structure Validation ✅ PRODUCTION READY
+- **Purpose**: Validate transcript content structure (exactly 2 sections with expected names)
+- **Script**: `database_refresh/04_validate_structure/4_transcript_llm_classification.py`
+- **Config**: `config.yaml` on NAS (uses stage_4 section)
+- **When**: After Stage 3 content extraction
 - **Key Features**:
-  - 3-level progressive classification system (Management Discussion vs Investor Q&A)
-  - OAuth 2.0 authentication for secure LLM API access
-  - CO-STAR prompt framework for consistent, structured responses
-  - Comprehensive cost tracking with configurable token rates and real-time budget monitoring
-  - Full section context with paragraph-level character limits (750 chars per paragraph)
-  - Comprehensive error handling with retry logic and rate limiting
-  - JSON-structured output with confidence scoring
-  - Production-ready with full security validation and cost tracking
+  - **Structure Validation**: Validates exactly 2 sections per transcript
+  - **Expected Sections**: "MANAGEMENT DISCUSSION SECTION" and "Q&A"
+  - **Binary Classification**: Separates valid from invalid transcripts
+  - **Review Queue**: Creates invalid_content_for_review.json for manual inspection
+  - **Complete Validation**: All sections must match expected names
+  - **Development Mode**: Process limited transcripts for testing
 
-### Stage 5: Q&A Pairing System ✅ PRODUCTION READY
-- **Purpose**: Q&A conversation boundary detection and pairing using speaker block analysis
-- **Script**: `database_refresh/stage_5_qa_pairing/5_transcript_qa_pairing.py`
-- **Config**: `Inputs/config/config.json` on NAS (uses stage_5 section)
-- **When**: After Stage 4 section classification for Q&A relationship mapping
+### Stage 5: Q&A Boundary Detection & Pairing ✅ PRODUCTION READY
+- **Purpose**: Detect conversation boundaries and pair questions with answers using LLM
+- **Script**: `database_refresh/05_qa_pairing/main_qa_pairing.py`
+- **Config**: `config.yaml` on NAS (uses stage_05_qa_pairing section)
+- **When**: After Stage 4 validation for Q&A relationship mapping
 - **Key Features**:
-  - Speaker block-based sliding window analysis (not paragraph-level)
-  - Dynamic context windows that extend back to question starts when needed
-  - Enhanced speaker formatting with role indicators ([ANALYST], [EXECUTIVE], [OPERATOR])
-  - Per-transcript OAuth token refresh (eliminates expiration issues)
-  - LLM boundary detection with comprehensive fallback strategies
-  - Minimal schema extension (only 3 new fields: qa_group_id, qa_group_confidence, qa_group_method)
-  - Cost tracking and reporting (usage summary, no budget limits)
-  - Sophisticated CO-STAR prompting with clear decision boundaries
-  - Progressive fallback hierarchy: LLM detection → XML type attributes → conservative grouping
-  - Production-ready with full security validation and error handling
+  - **Speaker Block Analysis**: Groups paragraphs by speaker (not individual paragraphs)
+  - **Sliding Window Processing**: Analyzes configurable windows of speaker blocks
+  - **LLM Boundary Detection**: Uses GPT-4 with structured tool calls
+  - **Per-Transcript OAuth**: Refreshes token for each transcript
+  - **Progressive Fallbacks**: LLM detection → XML attributes → conservative grouping
+  - **Minimal Schema Extension**: Only adds qa_group_id field
+  - **Cost Tracking**: Real-time token usage and cost monitoring
+  - **Visualization Tool**: visualize_qa_pairing.py for result inspection
 
 ## MANDATORY Development Standards
 
@@ -416,7 +281,7 @@ Every script MUST pass ALL checks:
 - Copy-paste shared functions (don't import between stages)
 
 #### Configuration Management
-- **.env file**: Authentication only (API, proxy, NAS credentials)
+- **.env file**: Authentication only (API, proxy, NAS, LLM credentials)
 - **NAS config files**: Operational settings (monitored institutions, API parameters, processing settings)
 - **Schema validation**: ALL configuration must be validated against defined schemas
 
@@ -449,11 +314,10 @@ The stage 0 script underwent comprehensive security and reliability review, reso
 9. **Input Validation** (LOW): Added validation for API responses, file paths, and configuration
 
 ### Reference Implementation
-- **Historical Reference**: Previous version removed during cleanup (commit 1b3ff6c)
-- **Production-Ready Script**: `database_refresh/stage_0_bulk_refresh/0_transcript_bulk_sync.py` - follows all security standards
-- **Development Standards**: See `database_refresh/stage_0_bulk_refresh/CLAUDE.md` for detailed lessons learned
+- **Production-Ready Scripts**: All scripts in database_refresh/ follow security standards
+- **Development Standards**: See individual stage CLAUDE.md files for detailed implementation notes
 
 ### Code Quality Transformation
 - **Before**: Basic functionality with security vulnerabilities and reliability issues
 - **After**: Production-ready code with comprehensive validation, security hardening, and proper error handling
-- **Standards**: All future scripts must follow the patterns established in Stage 0
+- **Standards**: All scripts follow the patterns established in Stage 0
