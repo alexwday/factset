@@ -1365,6 +1365,10 @@ def main():
         end_time = datetime.now()
         execution_time = end_time - start_time
         
+        # Calculate summary statistics
+        records_with_summaries = len([r for r in all_enhanced_records if r.get("paragraph_summary")])
+        records_without_summaries = len(all_enhanced_records) - records_with_summaries
+        
         stage_summary = {
             "total_transcripts": len(transcripts),
             "successful_transcripts": len(transcripts) - len(failed_transcripts),
@@ -1375,10 +1379,6 @@ def main():
             "total_cost": enhanced_error_logger.total_cost,
             "total_tokens": enhanced_error_logger.total_tokens
         }
-        
-        # Calculate summary statistics
-        records_with_summaries = len([r for r in all_enhanced_records if r.get("paragraph_summary")])
-        records_without_summaries = len(all_enhanced_records) - records_with_summaries
         
         # Final summary
         log_console("="*60)
