@@ -144,13 +144,17 @@ def analyze_transcript_structure(transcript_records: List[Dict]) -> Dict:
         elif section == "Q&A":
             qa_words += block_words
         
+        # Get sample text for gaps (first 100 chars)
+        sample_text = block_text[:200] + "..." if len(block_text) > 200 else block_text
+        
         blocks_analysis.append({
             "block_id": block_id,
             "section": section,
             "qa_id": qa_id,
             "speaker": speaker,
             "word_count": block_words,
-            "paragraph_count": len(block_records)
+            "paragraph_count": len(block_records),
+            "sample_text": sample_text
         })
     
     # Identify issues
@@ -207,65 +211,146 @@ def analyze_transcript_structure(transcript_records: List[Dict]) -> Dict:
 def generate_transcript_bar(transcript_id: str, analysis: Dict, max_words: int) -> str:
     """
     Generate HTML for a single transcript visualization bar.
+    Consolidates Management Discussion by speaker and Q&A by QA ID.
     """
     blocks = analysis["blocks"]
     total_words = analysis["total_words"]
     issues = analysis["issues"]
+    qa_groups = analysis["qa_groups"]
     
     # Calculate scale factor (bar will be 800px max width)
     scale_factor = 800 / max_words if max_words > 0 else 1
     bar_width = total_words * scale_factor
     
-    # Build the bar segments
+    # Build consolidated segments
     segments_html = []
-    current_position = 0
     
-    # Color palette
-    colors = {
-        "Management Discussion": "#4a90e2",  # Blue
-        "Q&A": "#f5a623",  # Orange base
-        "qa_gap": "#e74c3c",  # Red for gaps
-    }
+    # Enhanced color palette for better visual distinction
+    mgmt_color = "#2980b9"  # Darker blue
+    qa_colors = [
+        "#e74c3c",  # Red
+        "#e67e22",  # Orange
+        "#f39c12",  # Yellow
+        "#27ae60",  # Green
+        "#16a085",  # Teal
+        "#2980b9",  # Blue
+        "#8e44ad",  # Purple
+        "#34495e",  # Dark gray
+        "#c0392b",  # Dark red
+        "#d35400",  # Dark orange
+    ]
+    gap_color = "#c0392b"  # Dark red for gaps
     
-    # QA ID colors (cycling through a palette)
-    qa_colors = ["#f39c12", "#e67e22", "#d68910", "#ca6f1e", "#ba4a00", "#a04000", "#873600"]
+    # First, consolidate Management Discussion blocks by speaker
+    current_section = None
+    current_speaker = None
+    current_segment = None
     
-    for block in blocks:
-        block_width = block["word_count"] * scale_factor
+    i = 0
+    while i < len(blocks):
+        block = blocks[i]
         
-        if block_width > 0:  # Only show blocks with content
-            # Determine color
-            if block["section"] == "Management Discussion":
-                color = colors["Management Discussion"]
-                label = "MD"
-            elif block["section"] == "Q&A":
-                if block["qa_id"] is None:
-                    color = colors["qa_gap"]
-                    label = "GAP"
+        if block["section"] == "Management Discussion":
+            # Check if we need to start a new segment
+            if current_section != "Management Discussion" or current_speaker != block["speaker"]:
+                # Save previous segment if exists
+                if current_segment:
+                    segments_html.append(current_segment)
+                
+                # Start new Management Discussion segment
+                segment_blocks = [block]
+                segment_words = block["word_count"]
+                
+                # Collect consecutive blocks from same speaker
+                j = i + 1
+                while j < len(blocks) and blocks[j]["section"] == "Management Discussion" and blocks[j]["speaker"] == block["speaker"]:
+                    segment_blocks.append(blocks[j])
+                    segment_words += blocks[j]["word_count"]
+                    j += 1
+                
+                # Create segment
+                segment_width = segment_words * scale_factor
+                if segment_width > 0:
+                    speaker_name = block["speaker"].replace("Executives", "Exec").replace("Operator", "Op")
+                    block_ids = [b["block_id"] for b in segment_blocks]
+                    
+                    current_segment = f'''
+                        <div class="segment" style="width: {segment_width}px; background-color: {mgmt_color};"
+                             title="Management Discussion: {block['speaker']} ({segment_words:,} words, blocks {min(block_ids)}-{max(block_ids)})">
+                            <span class="label">{speaker_name}</span>
+                        </div>
+                    '''
                 else:
-                    # Use cycling colors for QA IDs
-                    color = qa_colors[(block["qa_id"] - 1) % len(qa_colors)]
-                    label = f"Q{block['qa_id']}"
+                    current_segment = None
+                
+                current_section = "Management Discussion"
+                current_speaker = block["speaker"]
+                i = j - 1
+        
+        elif block["section"] == "Q&A":
+            # Save any pending management discussion segment
+            if current_segment and current_section == "Management Discussion":
+                segments_html.append(current_segment)
+                current_segment = None
+            
+            if block["qa_id"] is None:
+                # Handle gap blocks - show speaker and sample text
+                gap_width = block["word_count"] * scale_factor
+                if gap_width > 0:
+                    # Get sample text from the block
+                    sample_text = block.get("sample_text", "").replace('"', '&quot;').replace("'", '&#39;')
+                    speaker_label = block['speaker'].replace("Executives", "Exec").replace("Operator", "Op")
+                    
+                    gap_segment = f'''
+                        <div class="segment gap" style="width: {gap_width}px; background-color: {gap_color}; border: 2px solid #7f1f1f;"
+                             title="GAP - Block {block['block_id']} - {speaker_label}: {sample_text} ({block['word_count']} words)">
+                            <span class="label">GAP</span>
+                        </div>
+                    '''
+                    segments_html.append(gap_segment)
             else:
-                color = "#cccccc"
-                label = "?"
+                # Skip - we'll handle Q&A groups after all blocks
+                pass
             
-            # Check if this block has issues
-            block_issues = [i for i in issues if i.get("block_id") == block["block_id"]]
-            border_style = "border: 2px solid red;" if block_issues else ""
-            
-            segment_html = f'''
-                <div class="segment" style="width: {block_width}px; background-color: {color}; {border_style}"
-                     title="Block {block['block_id']}: {block['speaker']} ({block['word_count']} words)">
-                    <span class="label">{label}</span>
+            current_section = "Q&A"
+        
+        i += 1
+    
+    # Save last management segment if any
+    if current_segment and current_section == "Management Discussion":
+        segments_html.append(current_segment)
+    
+    # Now add Q&A groups as consolidated segments
+    for qa_id in sorted(qa_groups.keys()):
+        qa_group = qa_groups[qa_id]
+        qa_width = qa_group["word_count"] * scale_factor
+        
+        if qa_width > 0:
+            color = qa_colors[(qa_id - 1) % len(qa_colors)]
+            qa_segment = f'''
+                <div class="segment" style="width: {qa_width}px; background-color: {color};"
+                     title="Q&A Group {qa_id} ({qa_group['word_count']:,} words, {qa_group['block_count']} speaker blocks)">
+                    <span class="label">Q{qa_id}</span>
                 </div>
             '''
-            segments_html.append(segment_html)
+            segments_html.append(qa_segment)
     
-    # Build issues list
+    # Build issues list with gap text
     issues_html = ""
     if issues:
-        issue_items = [f"<li class='issue'>{issue['message']}</li>" for issue in issues]
+        issue_items = []
+        for issue in issues:
+            if issue["type"] == "qa_gap":
+                # Find the block to get sample text
+                gap_block = next((b for b in blocks if b["block_id"] == issue["block_id"]), None)
+                if gap_block and gap_block.get("sample_text"):
+                    sample = gap_block["sample_text"][:100] + "..." if len(gap_block.get("sample_text", "")) > 100 else gap_block.get("sample_text", "")
+                    issue_text = f"{issue['message']}<br><small style='color: #666;'>'{sample}'</small>"
+                else:
+                    issue_text = issue['message']
+            else:
+                issue_text = issue['message']
+            issue_items.append(f"<li class='issue'>{issue_text}</li>")
         issues_html = f"<ul class='issues'>{''.join(issue_items)}</ul>"
     
     # Calculate percentages
