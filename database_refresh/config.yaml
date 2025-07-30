@@ -203,6 +203,29 @@ stage_06_llm_classification:
       use_when: "Non-financial content, introductions, procedural matters, or unclear topics"
       example_phrases: "thank you, good morning, operator, next question"
 
+# Stage 07 specific settings (LLM Content Summarization)
+stage_07_llm_summarization:
+  description: "LLM-based content summarization"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_06_classified_content.json"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  dev_mode: true
+  dev_max_transcripts: 2
+  
+  # LLM configuration
+  llm_config:
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o-2024-08-06"
+    temperature: 0.1
+    max_tokens: 1000
+    cost_per_1k_prompt_tokens: 0.0025
+    cost_per_1k_completion_tokens: 0.01
+    timeout: 30
+    token_endpoint: "https://auth.example.com/oauth/token"  # Replace with actual OAuth endpoint
+  
+  # SSL certificate path on NAS (optional - defaults to Inputs/certificate/certificate.cer)
+  ssl_cert_nas_path: "Inputs/certificate/certificate.cer"
+
 # Monitored Financial Institutions
 # Format: ticker: {name, type}
 monitored_institutions:
