@@ -1206,7 +1206,6 @@ def save_failed_transcripts(failed_transcripts: List[Dict], nas_conn: SMBConnect
         }
         
         failed_path = nas_path_join(
-            os.getenv("NAS_BASE_PATH"),
             config["stage_07_llm_summarization"]["output_data_path"],
             f"stage_07_failed_transcripts_{timestamp}.json"
         )
@@ -1269,7 +1268,6 @@ def main():
         failed_transcripts = []
         
         output_path = nas_path_join(
-            os.getenv("NAS_BASE_PATH"),
             config["stage_07_llm_summarization"]["output_data_path"],
             "stage_07_summarized_content.json"
         )
