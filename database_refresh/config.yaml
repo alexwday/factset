@@ -222,9 +222,6 @@ stage_07_llm_summarization:
     cost_per_1k_completion_tokens: 0.01
     timeout: 30
     token_endpoint: "https://auth.example.com/oauth/token"  # Replace with actual OAuth endpoint
-  
-  # SSL certificate path on NAS (optional - defaults to Inputs/certificate/certificate.cer)
-  ssl_cert_nas_path: "Inputs/certificate/certificate.cer"
 
 # Monitored Financial Institutions
 # Format: ticker: {name, type}

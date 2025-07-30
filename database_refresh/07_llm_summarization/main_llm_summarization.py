@@ -430,35 +430,35 @@ def load_stage_config(nas_conn: SMBConnection) -> Dict:
         raise
 
 
-def setup_ssl_certificate(nas_conn: SMBConnection) -> Optional[str]:
-    """Download and setup SSL certificate for LLM API calls."""
+def setup_ssl_certificate(nas_conn: SMBConnection) -> str:
+    """Download SSL certificate from NAS to temporary file."""
     try:
-        # Download certificate from NAS
-        cert_data = nas_download_file(nas_conn, config.get('ssl_cert_nas_path', 'Inputs/certificate/certificate.cer'))
+        log_execution("Setting up SSL certificate", {"ssl_cert_path": config["ssl_cert_path"]})
         
+        cert_data = nas_download_file(nas_conn, config["ssl_cert_path"])
         if not cert_data:
-            error_msg = "Failed to download SSL certificate from NAS"
-            log_error(error_msg, "ssl_setup", {})
-            return None
+            error_msg = f"SSL certificate not found at {config['ssl_cert_path']}"
+            log_error(error_msg, "ssl_setup", {"path": config["ssl_cert_path"]})
+            raise FileNotFoundError(error_msg)
         
-        # Save to temporary file
-        cert_temp_file = tempfile.NamedTemporaryFile(
-            mode="wb", suffix=".cer", prefix="llm_cert_", delete=False
+        # Create temporary certificate file
+        temp_cert_file = tempfile.NamedTemporaryFile(
+            mode="wb", suffix=".cer", delete=False
         )
-        cert_temp_file.write(cert_data)
-        cert_temp_file.close()
+        temp_cert_file.write(cert_data)
+        temp_cert_file.close()
         
-        # Set SSL environment variables
-        os.environ["SSL_CERT_FILE"] = cert_temp_file.name
-        os.environ["REQUESTS_CA_BUNDLE"] = cert_temp_file.name
+        # Set SSL environment variable for requests
+        os.environ["REQUESTS_CA_BUNDLE"] = temp_cert_file.name
+        os.environ["SSL_CERT_FILE"] = temp_cert_file.name
         
-        log_execution(f"SSL certificate setup complete: {cert_temp_file.name}")
-        return cert_temp_file.name
+        log_execution("SSL certificate setup complete", {"temp_cert_path": temp_cert_file.name})
+        return temp_cert_file.name
         
     except Exception as e:
-        error_msg = f"SSL certificate setup failed: {e}"
-        log_error(error_msg, "ssl_setup", {"error": str(e)})
-        return None
+        error_msg = f"Error setting up SSL certificate: {e}"
+        log_error(error_msg, "ssl_setup", {"exception_type": type(e).__name__})
+        raise
 
 
 def get_oauth_token() -> Optional[str]:
@@ -1247,8 +1247,6 @@ def main():
         
         # Setup SSL certificate
         ssl_cert_path = setup_ssl_certificate(nas_conn)
-        if not ssl_cert_path:
-            raise RuntimeError("Failed to setup SSL certificate")
         
         # Load Stage 6 data
         stage6_records = load_stage6_data(nas_conn)
