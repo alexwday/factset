@@ -1241,13 +1241,31 @@ def process_transcript(transcript_key: str, transcript_data: Dict, enhanced_erro
     global logger
     
     try:
-        # Extract transcript info for OAuth refresh
-        ticker, fiscal_year, fiscal_quarter = transcript_key.split("_")
-        transcript_info = {
-            "ticker": ticker,
-            "fiscal_year": fiscal_year,
-            "fiscal_quarter": fiscal_quarter
-        }
+        # Extract transcript info for OAuth refresh (handle Stage 5's transcript key format)
+        if ".xml" in transcript_key:
+            # Filename format - extract info from first record
+            first_record = None
+            if transcript_data["management_discussion"]:
+                first_record = transcript_data["management_discussion"][0]
+            elif transcript_data["qa_groups"]:
+                first_record = list(transcript_data["qa_groups"].values())[0][0]
+            
+            if first_record:
+                transcript_info = {
+                    "ticker": first_record.get("ticker", "unknown"),
+                    "fiscal_year": first_record.get("fiscal_year", "unknown"),
+                    "fiscal_quarter": first_record.get("fiscal_quarter", "unknown")
+                }
+            else:
+                transcript_info = {"ticker": "unknown", "fiscal_year": "unknown", "fiscal_quarter": "unknown"}
+        else:
+            # ticker_event_id format - extract ticker
+            parts = transcript_key.split("_")
+            transcript_info = {
+                "ticker": parts[0] if parts else "unknown",
+                "fiscal_year": "unknown",
+                "fiscal_quarter": "unknown"
+            }
         
         # Refresh OAuth token per transcript
         refresh_oauth_token_for_transcript(transcript_info)
@@ -1332,10 +1350,10 @@ def main():
             max_transcripts = stage_config.get("dev_max_transcripts", 2)
             log_console(f"Development mode: limiting to {max_transcripts} transcripts")
             
-            # Group by transcript and take first N
+            # Group by transcript and take first N (using Stage 5's transcript key format)
             transcript_groups = defaultdict(list)
             for record in all_records:
-                transcript_key = f"{record.get('ticker')}_{record.get('fiscal_year')}_{record.get('fiscal_quarter')}"
+                transcript_key = record.get("filename", f"{record.get('ticker', 'unknown')}_{record.get('event_id', 'unknown')}")
                 transcript_groups[transcript_key].append(record)
             
             limited_records = []
@@ -1347,15 +1365,18 @@ def main():
             all_records = limited_records
             log_console(f"Limited to {len(all_records)} records from {min(max_transcripts, len(transcript_groups))} transcripts")
         
-        # Group records by transcript and section type
+        # Group records by transcript and section type (using Stage 5's field names)
         transcripts = defaultdict(lambda: {"management_discussion": [], "qa_groups": defaultdict(list)})
         
         for record in all_records:
-            transcript_key = f"{record.get('ticker')}_{record.get('fiscal_year')}_{record.get('fiscal_quarter')}"
+            # Use Stage 5's transcript key format: filename or ticker_event_id
+            transcript_key = record.get("filename", f"{record.get('ticker', 'unknown')}_{record.get('event_id', 'unknown')}")
             
-            if record.get("section_type") == "Management Discussion":
+            # Use Stage 5's section_name field and exact section names
+            section_name = record.get("section_name")
+            if section_name == "MANAGEMENT DISCUSSION SECTION":
                 transcripts[transcript_key]["management_discussion"].append(record)
-            elif record.get("section_type") == "Investor Q&A" and record.get("qa_group_id"):
+            elif section_name == "Q&A" and record.get("qa_group_id"):
                 qa_group_id = record["qa_group_id"]
                 transcripts[transcript_key]["qa_groups"][qa_group_id].append(record)
         
