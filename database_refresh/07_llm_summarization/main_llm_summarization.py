@@ -738,22 +738,16 @@ def create_qa_group_summary_tools() -> List[Dict]:
         "type": "function",
         "function": {
             "name": "summarize_qa_group",
-            "description": "Summarize complete Q&A group conversation with single summary and importance score",
+            "description": "Summarize complete Q&A group conversation",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string", 
                         "description": "Comprehensive summary of the complete Q&A conversation for reranking"
-                    },
-                    "importance": {
-                        "type": "number", 
-                        "minimum": 0.3, 
-                        "maximum": 1.0,
-                        "description": "Relative importance score compared to other Q&A topics (0.3-1.0 range for Q&A groups)"
                     }
                 },
-                "required": ["summary", "importance"]
+                "required": ["summary"]
             }
         }
     }]
@@ -764,23 +758,17 @@ def create_management_summary_tools() -> List[Dict]:
     return [{
         "type": "function",
         "function": {
-            "name": "summarize_management_discussion",
-            "description": "Summarize management discussion section with comprehensive summary and importance score",
+            "name": "summarize_management_speaker_block",
+            "description": "Summarize a single management speaker block",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string",
-                        "description": "Comprehensive summary of the management discussion for reranking"
-                    },
-                    "importance": {
-                        "type": "number",
-                        "minimum": 0.5,
-                        "maximum": 1.0,
-                        "description": "Relative importance score for management discussion (0.5-1.0 range)"
+                        "description": "Comprehensive summary of this speaker block for reranking"
                     }
                 },
-                "required": ["summary", "importance"]
+                "required": ["summary"]
             }
         }
     }]
@@ -806,10 +794,6 @@ def create_qa_group_summary_prompt(company_name: str, fiscal_info: str,
 You are creating a single summary for this complete Q&A conversation that will be assigned to ALL paragraphs in the group.
 This summary will be used for post-retrieval reranking to filter relevant content from earnings call transcripts.
 
-Create:
-1. SUMMARY: One comprehensive summary for the entire Q&A exchange
-2. IMPORTANCE: Single importance score relative to other Q&A topics in this earnings call (0.3-1.0)
-
 The summary should capture:
 - Analyst question and management response
 - Key financial metrics, guidance, or business developments mentioned
@@ -821,14 +805,6 @@ RERANKING OPTIMIZATION:
 - Preserve financial terminology and quantitative data for semantic search
 - Focus on searchable concepts that users might query
 - Write for relevance filtering by smaller models
-
-IMPORTANCE SCORING (0.3-1.0 for Q&A groups):
-- 0.8-1.0: Contains specific financial metrics, guidance, or material business decisions
-- 0.6-0.8: Discusses strategic initiatives, market outlook, or significant business developments
-- 0.4-0.6: Covers operational topics, general business context, or competitive positioning
-- 0.3-0.4: Addresses procedural topics, clarifications, or routine business matters
-
-Use the previous Q&A context and management themes to calibrate importance relative to other topics in this earnings call.
 </objective>
 
 <style>
@@ -847,16 +823,17 @@ A smaller model that will judge relevance to user queries about earnings calls a
 Use the summarize_qa_group function.
 - Provide one comprehensive summary for the entire Q&A conversation
 - Include speaker attribution and financial context for reranking
-- Score importance relative to other Q&A topics in this earnings call
 - Preserve quantitative data and forward-looking statements
 </response_format>
 """
 
 
-def create_management_summary_prompt(company_name: str, fiscal_info: str,
-                                   management_records: List[Dict],
-                                   financial_categories: List[str]) -> str:
-    """Create prompt for Management Discussion summarization."""
+def create_management_speaker_block_prompt(company_name: str, fiscal_info: str,
+                                          speaker_block_records: List[Dict],
+                                          speaker_name: str,
+                                          financial_categories: List[str],
+                                          block_position: str) -> str:
+    """Create prompt for Management speaker block summarization."""
     
     categories_str = ', '.join(financial_categories) if financial_categories else 'General Business'
     
@@ -865,56 +842,56 @@ def create_management_summary_prompt(company_name: str, fiscal_info: str,
   <institution>{company_name}</institution>
   <fiscal_period>{fiscal_info}</fiscal_period>
   <call_type>Earnings Call Management Discussion</call_type>
-  <section_size>{len(management_records)} paragraphs</section_size>
+  <speaker>{speaker_name}</speaker>
+  <block_size>{len(speaker_block_records)} paragraphs</block_size>
+  <block_position>{block_position}</block_position>
   <financial_focus>{categories_str}</financial_focus>
 </context>
 
 <objective>
-You are creating a comprehensive summary for the entire Management Discussion section.
+You are creating a summary for this specific management speaker block from a {fiscal_info} earnings call transcript.
 This summary will be used for post-retrieval reranking to filter relevant content from earnings call transcripts.
 
-Create:
-1. SUMMARY: One comprehensive summary for the entire Management Discussion
-2. IMPORTANCE: Importance score for management discussion (0.5-1.0)
-
 The summary should capture:
-- Key financial results and performance metrics
-- Strategic initiatives and business developments
-- Forward-looking guidance and outlook
-- Market conditions and competitive positioning
-- Operational highlights and challenges
+- Key points made by this specific executive
+- Financial metrics or guidance mentioned  
+- Strategic initiatives or decisions discussed
+- Forward-looking statements or outlook
+- Operational updates or challenges addressed
 
 RERANKING OPTIMIZATION:
-- Include [MANAGEMENT] attribution for executive statements
+- Start with speaker attribution: [EXECUTIVE: {speaker_name}]
 - Preserve financial terminology and quantitative data for semantic search
-- Focus on searchable concepts that users might query
-- Write for relevance filtering by smaller models
+- Focus on the main topics covered in THIS speaker block
+- Make summary distinctive from other speaker blocks
+- Include context about {company_name}'s {fiscal_info} performance
+- Consider how this block builds on or relates to the previous speaker block summaries provided
 
-IMPORTANCE SCORING (0.5-1.0 for Management Discussion):
-- 0.8-1.0: Contains specific financial results, guidance, or major strategic announcements
-- 0.7-0.8: Discusses significant business developments, market outlook, or performance drivers
-- 0.6-0.7: Covers operational updates, competitive positioning, or segment performance
-- 0.5-0.6: Addresses general business context or routine operational matters
+Consider the block's position in the earnings call:
+- Opening blocks often contain key financial highlights and quarterly results
+- Middle blocks typically provide detailed segment analysis and operational updates  
+- Closing blocks may contain forward guidance and strategic outlook
+- Use previous block summaries to understand the conversation flow and avoid repetition
 </objective>
 
 <style>
-Professional financial analysis. Summary should read like an executive briefing optimized for relevance filtering.
+Professional financial analysis. Summary should be concise yet comprehensive, optimized for distinguishing this block from others.
 </style>
 
 <tone>
-Analytical and comprehensive. Focus on financial substance and strategic insights.
+Analytical and focused. Capture the essence of what THIS executive said in THIS block.
 </tone>
 
 <audience>
-A smaller model that will judge relevance to user queries about earnings calls and filter results accordingly.
+A smaller model that will judge relevance to user queries and needs to distinguish between different speaker blocks.
 </audience>
 
 <response_format>
-Use the summarize_management_discussion function.
-- Provide one comprehensive summary for the entire Management Discussion
-- Include management attribution and financial context for reranking
-- Score importance relative to other content in this earnings call
-- Preserve quantitative data and forward-looking statements
+Use the summarize_management_speaker_block function.
+- Provide one summary for this specific speaker block  
+- Include speaker name and key topics
+- Make summary distinctive from other blocks
+- Focus on what makes this block unique and searchable
 </response_format>
 """
 
@@ -940,8 +917,18 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
         qa_group_records = qa_groups[qa_group_id]
         
         try:
-            # Build context for Q&A group
+            # Build context for Q&A group with company information
             context_parts = []
+            
+            # Add company and earnings call context
+            sample_record = qa_group_records[0]
+            company_name = sample_record.get("company_name", "Unknown")
+            fiscal_year = sample_record.get("fiscal_year", "Unknown")
+            fiscal_quarter = sample_record.get("fiscal_quarter", "Unknown")
+            
+            context_parts.append(f"=== {company_name} {fiscal_quarter} {fiscal_year} EARNINGS CALL TRANSCRIPT ===")
+            context_parts.append("=== Q&A SECTION ===")
+            context_parts.append("")
             context_parts.append("=== Q&A CONVERSATION TO SUMMARIZE ===")
             
             for record in qa_group_records:
@@ -980,13 +967,10 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
                 response_data = json.loads(tool_call.function.arguments)
                 
                 summary = response_data.get("summary", "")
-                importance = response_data.get("importance", 0.5)
                 
-                # Apply same summary and importance to ALL paragraphs in group
+                # Apply same summary to ALL paragraphs in group
                 for record in qa_group_records:
                     record["paragraph_summary"] = summary
-                    record["paragraph_importance"] = importance
-                    record["summary_method"] = "qa_group_llm"
                 
                 enhanced_records.extend(qa_group_records)
                 
@@ -1013,8 +997,6 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
                 # Set null values for failed group
                 for record in qa_group_records:
                     record["paragraph_summary"] = None
-                    record["paragraph_importance"] = None
-                    record["summary_method"] = "failed"
                 
                 enhanced_records.extend(qa_group_records)
         
@@ -1028,8 +1010,6 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
             # Set null values for failed group
             for record in qa_group_records:
                 record["paragraph_summary"] = None
-                record["paragraph_importance"] = None
-                record["summary_method"] = "failed"
             
             enhanced_records.extend(qa_group_records)
     
@@ -1037,7 +1017,7 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
 
 
 def process_transcript_management(transcript_records: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
-    """Process Management Discussion section for summarization."""
+    """Process Management Discussion section for summarization at speaker block level."""
     global llm_client, config
     
     # Get Management Discussion records
@@ -1045,97 +1025,163 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
     if not mgmt_records:
         return []
     
-    log_execution(f"Processing Management Discussion with {len(mgmt_records)} paragraphs for transcript {transcript_id}")
+    # Group by speaker blocks
+    speaker_blocks = defaultdict(list)
+    for record in mgmt_records:
+        block_id = record.get("speaker_block_id")
+        speaker_blocks[block_id].append(record)
     
-    try:
-        # Build context for Management Discussion
-        context_parts = []
-        context_parts.append("=== MANAGEMENT DISCUSSION TO SUMMARIZE ===")
+    # Sort blocks by ID
+    sorted_block_ids = sorted(speaker_blocks.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
+    
+    log_execution(f"Processing Management Discussion with {len(speaker_blocks)} speaker blocks for transcript {transcript_id}")
+    
+    enhanced_records = []
+    
+    for block_index, block_id in enumerate(sorted_block_ids):
+        block_records = speaker_blocks[block_id]
         
-        for record in mgmt_records:
-            speaker = record.get("speaker", "Management")
-            context_parts.append(f"[MANAGEMENT] {speaker}:")
-            context_parts.append(record.get("paragraph_content", ""))
+        try:
+            # Determine block position
+            if block_index == 0:
+                block_position = "opening"
+            elif block_index == len(sorted_block_ids) - 1:
+                block_position = "closing"
+            else:
+                block_position = "middle"
+            
+            # Build context with sliding window (current + previous context)
+            context_parts = []
+            
+            # Add company and earnings call context
+            sample_record = block_records[0]
+            company_name = sample_record.get("company_name", "Unknown")
+            fiscal_year = sample_record.get("fiscal_year", "Unknown")
+            fiscal_quarter = sample_record.get("fiscal_quarter", "Unknown")
+            
+            context_parts.append(f"=== {company_name} {fiscal_quarter} {fiscal_year} EARNINGS CALL TRANSCRIPT ===")
+            context_parts.append("=== MANAGEMENT DISCUSSION SECTION ===")
             context_parts.append("")
-        
-        context = "\n".join(context_parts)
-        
-        # Create Management Discussion summary prompt
-        system_prompt = create_management_summary_prompt(
-            company_name=mgmt_records[0].get("company_name", "Unknown"),
-            fiscal_info=f"{mgmt_records[0].get('fiscal_year')} {mgmt_records[0].get('fiscal_quarter')}",
-            management_records=mgmt_records,
-            financial_categories=mgmt_records[0].get("category_type", [])
-        )
-        
-        # LLM call for Management Discussion summarization
-        response = llm_client.chat.completions.create(
-            model=config["stage_07_llm_summarization"]["llm_config"]["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": context}
-            ],
-            tools=create_management_summary_tools(),
-            tool_choice="required",
-            temperature=config["stage_07_llm_summarization"]["llm_config"]["temperature"],
-            max_tokens=config["stage_07_llm_summarization"]["llm_config"]["max_tokens"],
-            timeout=config["stage_07_llm_summarization"]["llm_config"]["timeout"]
-        )
-        
-        # Process LLM response
-        if response.choices and response.choices[0].message.tool_calls:
-            tool_call = response.choices[0].message.tool_calls[0]
-            response_data = json.loads(tool_call.function.arguments)
             
-            summary = response_data.get("summary", "")
-            importance = response_data.get("importance", 0.7)
+            # Add previous context using previously generated summaries (up to 2 previous speaker blocks)
+            context_window_size = 2
+            start_index = max(0, block_index - context_window_size)
             
-            # Apply same summary and importance to ALL management paragraphs
-            for record in mgmt_records:
-                record["paragraph_summary"] = summary
-                record["paragraph_importance"] = importance
-                record["summary_method"] = "management_llm"
+            if start_index < block_index:
+                context_parts.append("--- PREVIOUS SPEAKER BLOCK SUMMARIES FOR CONTEXT ---")
+                for ctx_idx in range(start_index, block_index):
+                    ctx_block_id = sorted_block_ids[ctx_idx]
+                    ctx_records = speaker_blocks[ctx_block_id]
+                    ctx_speaker = ctx_records[0].get("speaker", "Management")
+                    
+                    # Check if we already have a summary for this previous block
+                    ctx_summary = None
+                    for enhanced_record in enhanced_records:
+                        if enhanced_record.get("speaker_block_id") == ctx_block_id:
+                            ctx_summary = enhanced_record.get("paragraph_summary")
+                            break
+                    
+                    if ctx_summary:
+                        context_parts.append(f"[PREVIOUS BLOCK {ctx_block_id}] {ctx_speaker}:")
+                        context_parts.append(f"SUMMARY: {ctx_summary}")
+                    else:
+                        # Fallback to truncated content if no summary yet (shouldn't happen in normal flow)
+                        context_parts.append(f"[PREVIOUS BLOCK {ctx_block_id}] {ctx_speaker}:")
+                        ctx_content = " ".join([r.get("paragraph_content", "") for r in ctx_records])
+                        if len(ctx_content) > 300:
+                            ctx_content = ctx_content[:300] + "..."
+                        context_parts.append(f"CONTENT: {ctx_content}")
+                    context_parts.append("")
+                context_parts.append("--- END PREVIOUS CONTEXT ---")
+                context_parts.append("")
             
-            # Track costs
-            if hasattr(response, 'usage') and response.usage:
-                cost_data = calculate_token_cost(
-                    response.usage.prompt_tokens, 
-                    response.usage.completion_tokens
-                )
-                enhanced_error_logger.accumulate_costs({
-                    "total_tokens": response.usage.total_tokens,
-                    "cost": cost_data
-                })
+            # Add current speaker block to summarize
+            context_parts.append("--- CURRENT SPEAKER BLOCK TO SUMMARIZE ---")
+            speaker_name = block_records[0].get("speaker", "Management")
+            context_parts.append(f"[CURRENT] {speaker_name}:")
+            for record in block_records:
+                context_parts.append(record.get("paragraph_content", ""))
+                context_parts.append("")
             
-            log_execution(f"Summarized Management Discussion with {len(mgmt_records)} paragraphs")
-        
-        else:
-            enhanced_error_logger.log_summarization_error(
-                transcript_id, 
-                "Management Discussion",
-                "No tool calls in Management Discussion LLM response"
+            context = "\n".join(context_parts)
+            
+            # Create speaker block summary prompt
+            system_prompt = create_management_speaker_block_prompt(
+                company_name=block_records[0].get("company_name", "Unknown"),
+                fiscal_info=f"{block_records[0].get('fiscal_year')} {block_records[0].get('fiscal_quarter')}",
+                speaker_block_records=block_records,
+                speaker_name=speaker_name,
+                financial_categories=block_records[0].get("category_type", []),
+                block_position=block_position
             )
             
-            # Set null values for failed section
-            for record in mgmt_records:
-                record["paragraph_summary"] = None
-                record["paragraph_importance"] = None
-                record["summary_method"] = "failed"
-    
-    except Exception as e:
-        enhanced_error_logger.log_summarization_error(
-            transcript_id,
-            "Management Discussion", 
-            f"Management Discussion processing failed: {e}"
-        )
+            # LLM call for speaker block summarization
+            response = llm_client.chat.completions.create(
+                model=config["stage_07_llm_summarization"]["llm_config"]["model"],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": context}
+                ],
+                tools=create_management_summary_tools(),
+                tool_choice="required",
+                temperature=config["stage_07_llm_summarization"]["llm_config"]["temperature"],
+                max_tokens=config["stage_07_llm_summarization"]["llm_config"]["max_tokens"],
+                timeout=config["stage_07_llm_summarization"]["llm_config"]["timeout"]
+            )
+            
+            # Process LLM response
+            if response.choices and response.choices[0].message.tool_calls:
+                tool_call = response.choices[0].message.tool_calls[0]
+                response_data = json.loads(tool_call.function.arguments)
+                
+                summary = response_data.get("summary", "")
+                
+                # Apply summary to all paragraphs in this speaker block
+                for record in block_records:
+                    record["paragraph_summary"] = summary
+                
+                enhanced_records.extend(block_records)
+                
+                # Track costs
+                if hasattr(response, 'usage') and response.usage:
+                    cost_data = calculate_token_cost(
+                        response.usage.prompt_tokens, 
+                        response.usage.completion_tokens
+                    )
+                    enhanced_error_logger.accumulate_costs({
+                        "total_tokens": response.usage.total_tokens,
+                        "cost": cost_data
+                    })
+                
+                log_execution(f"Summarized Management speaker block {block_id} with {len(block_records)} paragraphs")
+            
+            else:
+                enhanced_error_logger.log_summarization_error(
+                    transcript_id, 
+                    "Management Discussion",
+                    f"No tool calls in speaker block {block_id} LLM response"
+                )
+                
+                # Set null values for failed block
+                for record in block_records:
+                    record["paragraph_summary"] = None
+                
+                enhanced_records.extend(block_records)
         
-        # Set null values for failed section
-        for record in mgmt_records:
-            record["paragraph_summary"] = None
-            record["paragraph_importance"] = None
-            record["summary_method"] = "failed"
+        except Exception as e:
+            enhanced_error_logger.log_summarization_error(
+                transcript_id,
+                "Management Discussion", 
+                f"Speaker block {block_id} processing failed: {e}"
+            )
+            
+            # Set null values for failed block
+            for record in block_records:
+                record["paragraph_summary"] = None
+            
+            enhanced_records.extend(block_records)
     
-    return mgmt_records
+    return enhanced_records
 
 
 def process_other_records(transcript_records: List[Dict], transcript_id: str) -> List[Dict]:
@@ -1158,8 +1204,6 @@ def process_other_records(transcript_records: List[Dict], transcript_id: str) ->
             summary = f"[{section_name.upper()}] {content}"
         
         record["paragraph_summary"] = summary
-        record["paragraph_importance"] = 0.3  # Low importance for other content
-        record["summary_method"] = "basic_template"
     
     return other_records
 
@@ -1186,8 +1230,6 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
         # Return original records with null summary fields
         for record in transcript_records:
             record["paragraph_summary"] = None
-            record["paragraph_importance"] = None
-            record["summary_method"] = "failed"
         
         return transcript_records
 
@@ -1328,18 +1370,23 @@ def main():
             "successful_transcripts": len(transcripts) - len(failed_transcripts),
             "failed_transcripts": len(failed_transcripts),
             "total_records": len(all_enhanced_records),
-            "records_with_summaries": len([r for r in all_enhanced_records if r.get("paragraph_summary")]),
+            "records_with_summaries": records_with_summaries,
             "execution_time": str(execution_time),
             "total_cost": enhanced_error_logger.total_cost,
             "total_tokens": enhanced_error_logger.total_tokens
         }
+        
+        # Calculate summary statistics
+        records_with_summaries = len([r for r in all_enhanced_records if r.get("paragraph_summary")])
+        records_without_summaries = len(all_enhanced_records) - records_with_summaries
         
         # Final summary
         log_console("="*60)
         log_console("STAGE 7 SUMMARIZATION COMPLETE")
         log_console("="*60)
         log_console(f"Transcripts processed: {stage_summary['successful_transcripts']}/{stage_summary['total_transcripts']}")
-        log_console(f"Records summarized: {stage_summary['records_with_summaries']}/{stage_summary['total_records']}")
+        log_console(f"Records with summaries: {records_with_summaries}/{stage_summary['total_records']}")
+        log_console(f"Records without summaries: {records_without_summaries}")
         log_console(f"Total cost: ${stage_summary['total_cost']:.4f}")
         log_console(f"Total tokens: {stage_summary['total_tokens']:,}")
         log_console(f"Execution time: {stage_summary['execution_time']}")
