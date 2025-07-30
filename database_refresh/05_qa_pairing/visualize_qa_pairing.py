@@ -18,6 +18,7 @@ from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
 import io
 
+import yaml
 from dotenv import load_dotenv
 from smb.SMBConnection import SMBConnection
 
@@ -73,6 +74,26 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
     except Exception as e:
         print(f"Failed to upload file to NAS: {nas_file_path} - {e}")
         return False
+
+
+def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
+    """Load configuration from NAS."""
+    try:
+        config_path = os.getenv("CONFIG_PATH")
+        print(f"Loading config from: {config_path}")
+        
+        config_data = nas_download_file(nas_conn, config_path)
+        if not config_data:
+            print(f"Configuration file not found at {config_path}")
+            return None
+        
+        # Parse YAML configuration
+        config = yaml.safe_load(config_data.decode("utf-8"))
+        return config
+        
+    except Exception as e:
+        print(f"Error loading configuration: {e}")
+        return None
 
 
 def count_words(text: str) -> int:
@@ -491,14 +512,19 @@ def main():
         return
     
     try:
-        # Load Stage 5 output
-        output_path = os.path.join(
-            os.getenv("NAS_BASE_PATH"),
-            "Outputs/stage_05_qa_pairing/stage_05_qa_paired_content.json"
-        )
+        # Load configuration
+        config = load_config_from_nas(nas_conn)
+        if not config:
+            print("Failed to load configuration")
+            return
         
-        print(f"\nLoading Stage 5 output from: {output_path}")
-        content_data = nas_download_file(nas_conn, output_path)
+        # Get output path from config
+        output_path = config["stage_05_qa_pairing"]["output_data_path"]
+        output_filename = "stage_05_qa_paired_content.json"
+        output_file_path = f"{output_path}/{output_filename}"
+        
+        print(f"\nLoading Stage 5 output from: {output_file_path}")
+        content_data = nas_download_file(nas_conn, output_file_path)
         
         if not content_data:
             print("Failed to load Stage 5 output file")
@@ -519,10 +545,7 @@ def main():
         # Save HTML file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         html_filename = f"qa_pairing_visualization_{timestamp}.html"
-        html_path = os.path.join(
-            os.getenv("NAS_BASE_PATH"),
-            f"Outputs/stage_05_qa_pairing/{html_filename}"
-        )
+        html_path = f"{output_path}/{html_filename}"
         
         html_bytes = io.BytesIO(html_content.encode('utf-8'))
         html_bytes.seek(0)
