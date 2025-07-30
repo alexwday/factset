@@ -686,17 +686,17 @@ def sanitize_url_for_logging(url: str) -> str:
 def load_stage6_data(nas_conn: SMBConnection) -> List[Dict]:
     """Load Stage 6 classified content data from NAS."""
     try:
-        input_path = nas_path_join(
-            os.getenv("NAS_BASE_PATH"),
-            config["stage_07_llm_summarization"]["input_data_path"]
-        )
+        # Don't prepend NAS_BASE_PATH - it's already included in the config path
+        input_path = config["stage_07_llm_summarization"]["input_data_path"]
+        
+        log_execution(f"Loading Stage 6 data from: {input_path}")
         
         if not validate_nas_path(input_path):
-            raise ValueError("Invalid input file path")
+            raise ValueError(f"Invalid input file path: {input_path}")
             
         input_data = nas_download_file(nas_conn, input_path)
         if not input_data:
-            raise RuntimeError("Failed to download Stage 6 data")
+            raise RuntimeError(f"Failed to download Stage 6 data from: {input_path}")
         
         # Stage 6 outputs JSON array format
         stage6_records = json.loads(input_data.decode('utf-8'))
