@@ -579,7 +579,7 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> Dict:
 
 
 def save_results_incrementally(results: List[Dict], output_path: str, is_first_batch: bool = False):
-    """Save results incrementally after each transcript (following Stage 5 pattern)."""
+    """Save results incrementally after each transcript (following Stage 5 array pattern)."""
     global logger
     
     try:
@@ -587,49 +587,22 @@ def save_results_incrementally(results: List[Dict], output_path: str, is_first_b
         if not nas_conn:
             raise RuntimeError("Failed to connect to NAS for incremental save")
         
-        # For first batch, create new file with proper structure
         if is_first_batch:
-            output_data = {
-                "schema_version": "1.0",
-                "processing_timestamp": datetime.now().isoformat(),
-                "stage": "stage_06_llm_classification",
-                "description": "Financial content classification using LLM",
-                "records": results
-            }
-            mode = "w"
-            log_console(f"Creating new output file with {len(results)} records")
-        else:
-            # For subsequent batches, load existing and append
-            existing_data = nas_download_file(nas_conn, output_path)
-            if existing_data:
-                output_data = json.loads(existing_data.decode('utf-8'))
-                output_data["records"].extend(results)
-                output_data["processing_timestamp"] = datetime.now().isoformat()
-                mode = "a"
-                log_console(f"Appending {len(results)} records (total: {len(output_data['records'])})")
-            else:
-                # Fallback if file doesn't exist
-                output_data = {
-                    "schema_version": "1.0",
-                    "processing_timestamp": datetime.now().isoformat(),
-                    "stage": "stage_06_llm_classification",
-                    "description": "Financial content classification using LLM",
-                    "records": results
-                }
-                mode = "w"
+            # Initialize with opening bracket like Stage 5
+            output_bytes = io.BytesIO(b"[\n")
+            if not nas_upload_file(nas_conn, output_bytes, output_path):
+                raise RuntimeError("Failed to initialize output file")
+            log_console(f"Initialized output file for incremental saving")
         
-        # Upload to NAS
-        output_json = json.dumps(output_data, indent=2)
-        output_bytes = io.BytesIO(output_json.encode('utf-8'))
+        # Append records using Stage 5's pattern
+        if not append_records_to_json_array(nas_conn, results, output_path, is_first_batch):
+            raise RuntimeError("Failed to append records to output file")
         
-        if nas_upload_file(nas_conn, output_bytes, output_path):
-            log_execution(f"Incrementally saved {len(results)} records", {
-                "output_path": output_path,
-                "total_records": len(output_data["records"]),
-                "mode": mode
-            })
-        else:
-            raise RuntimeError("Failed to upload incremental results to NAS")
+        log_console(f"Appended {len(results)} records to output file")
+        log_execution(f"Incrementally saved {len(results)} records", {
+            "output_path": output_path,
+            "is_first_batch": is_first_batch
+        })
             
         nas_conn.close()
         
@@ -637,6 +610,56 @@ def save_results_incrementally(results: List[Dict], output_path: str, is_first_b
         error_msg = f"Failed to save results incrementally: {e}"
         log_error(error_msg, "incremental_save", {"error": str(e)})
         raise
+
+
+def append_records_to_json_array(nas_conn: SMBConnection, records: List[Dict], file_path: str, is_first: bool = False) -> bool:
+    """Append records to a JSON array file (Stage 5 pattern)."""
+    try:
+        # Prepare JSON content
+        if not is_first:
+            # Add comma before new records if not the first entry
+            records_json = ",\n" + json.dumps(records, indent=2)[1:-1]  # Remove [ and ]
+        else:
+            # First entry, no leading comma
+            records_json = json.dumps(records, indent=2)[1:-1]  # Remove [ and ]
+        
+        # Download existing file to append
+        existing_content = nas_download_file(nas_conn, file_path)
+        if existing_content is None:
+            log_error(f"Failed to download file for append: {file_path}", "output_save", {"path": file_path})
+            return False
+        
+        # Append new records
+        new_content = existing_content + records_json.encode('utf-8')
+        content_bytes = io.BytesIO(new_content)
+        content_bytes.seek(0)
+        
+        return nas_upload_file(nas_conn, content_bytes, file_path)
+        
+    except Exception as e:
+        log_error(f"Failed to append records: {e}", "output_save", {"path": file_path, "error": str(e)})
+        return False
+
+
+def close_json_array(nas_conn: SMBConnection, file_path: str) -> bool:
+    """Close a JSON array file by appending the closing bracket (Stage 5 pattern)."""
+    try:
+        # Download existing content
+        existing_content = nas_download_file(nas_conn, file_path)
+        if existing_content is None:
+            return False
+        
+        # Add closing bracket
+        new_content = existing_content + b"\n]"
+        
+        content_bytes = io.BytesIO(new_content)
+        content_bytes.seek(0)
+        
+        return nas_upload_file(nas_conn, content_bytes, file_path)
+        
+    except Exception as e:
+        log_error(f"Failed to close JSON array: {e}", "output_save", {"path": file_path, "error": str(e)})
+        return False
 
 
 # Security validation functions (from Stage 5)
@@ -1296,7 +1319,12 @@ def main():
             raise FileNotFoundError(f"Stage 5 output not found at {input_path}")
         
         stage5_data = json.loads(input_data.decode('utf-8'))
-        all_records = stage5_data.get("records", [])
+        # Stage 5 outputs a JSON array directly, not an object with "records" key
+        if isinstance(stage5_data, list):
+            all_records = stage5_data
+        else:
+            # Fallback for other possible formats
+            all_records = stage5_data.get("records", [])
         log_console(f"Loaded {len(all_records)} records from Stage 5")
         
         # Apply development mode limits
@@ -1359,6 +1387,12 @@ def main():
             # Brief pause between transcripts
             if i < len(transcripts):
                 time.sleep(1)
+        
+        # Close the JSON array if we processed any transcripts
+        successful_transcripts = len(transcripts) - len(failed_transcripts)
+        if successful_transcripts > 0:
+            if not close_json_array(nas_conn, output_path):
+                log_console("Warning: Failed to properly close main output file", "WARNING")
         
         # Save failed transcripts if any
         if failed_transcripts:
