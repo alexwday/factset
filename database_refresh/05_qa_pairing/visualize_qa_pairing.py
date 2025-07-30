@@ -130,7 +130,9 @@ def analyze_transcript_structure(transcript_records: List[Dict]) -> Dict:
         
         # Get block info from first record
         first_record = block_records[0]
-        section = first_record.get("section_name", "Unknown")
+        # Check both possible field names for compatibility
+        # Stage 5 copies section_name from Stage 4, not section_type
+        section = first_record.get("section_name") or first_record.get("section_type", "Unknown")
         qa_id = first_record.get("qa_group_id")
         speaker = first_record.get("speaker", "Unknown")
         
@@ -139,9 +141,10 @@ def analyze_transcript_structure(transcript_records: List[Dict]) -> Dict:
         block_words = count_words(block_text)
         total_words += block_words
         
-        if section == "Management Discussion":
+        # Check for both possible section names from Stage 4
+        if section == "Management Discussion" or section == "MD":
             management_words += block_words
-        elif section == "Q&A":
+        elif section == "Investor Q&A" or section == "Q&A":
             qa_words += block_words
         
         # Get sample text for gaps (first 100 chars)
@@ -161,7 +164,7 @@ def analyze_transcript_structure(transcript_records: List[Dict]) -> Dict:
     issues = []
     
     # 1. Check for gaps in Q&A sections (Q&A blocks without qa_id)
-    qa_blocks = [b for b in blocks_analysis if b["section"] == "Q&A"]
+    qa_blocks = [b for b in blocks_analysis if b["section"] == "Investor Q&A" or b["section"] == "Q&A"]
     for i, block in enumerate(qa_blocks):
         if block["qa_id"] is None:
             issues.append({
@@ -249,14 +252,14 @@ def generate_transcript_bar(transcript_id: str, analysis: Dict, max_words: int) 
     while i < len(blocks):
         block = blocks[i]
         
-        if block["section"] == "Management Discussion":
+        if block["section"] == "Management Discussion" or block["section"] == "MD":
             # Consolidate MD blocks by speaker
             speaker = block["speaker"]
             segment_blocks = [block]
             j = i + 1
             
-            # Collect consecutive blocks from same speaker
-            while j < len(blocks) and blocks[j]["section"] == "Management Discussion" and blocks[j]["speaker"] == speaker:
+            # Collect consecutive blocks from same speaker in same section type
+            while j < len(blocks) and (blocks[j]["section"] == "Management Discussion" or blocks[j]["section"] == "MD") and blocks[j]["speaker"] == speaker:
                 segment_blocks.append(blocks[j])
                 j += 1
             
@@ -272,7 +275,7 @@ def generate_transcript_bar(transcript_id: str, analysis: Dict, max_words: int) 
                 })
             i = j
             
-        elif block["section"] == "Q&A":
+        elif block["section"] == "Investor Q&A" or block["section"] == "Q&A":
             if block["qa_id"] is None:
                 # Gap block
                 if block["word_count"] > 0:
@@ -536,6 +539,7 @@ def generate_html_visualization(transcripts_data: Dict[str, List[Dict]], output_
             <li><strong>Continuity:</strong> Q&A group IDs should be consecutive (1, 2, 3... not 1, 3, 5...)</li>
             <li><strong>Accuracy:</strong> Each Q&A group should contain one complete analyst-executive conversation</li>
             <li><strong>Structure:</strong> Management Discussion should appear before Q&A sections</li>
+            <li><strong>Speaker Tracking:</strong> MD sections are consolidated by speaker to show conversation flow</li>
         </ul>
         
         <h3 style="color: #003087; font-size: 1.1em;">Why This Matters:</h3>
@@ -605,6 +609,15 @@ def generate_html_visualization(transcripts_data: Dict[str, List[Dict]], output_
     transcripts_with_order_issues = sum(1 for a in analyses.values() if any(i["type"] == "qa_order" for i in a["issues"]))
     avg_qa_groups = total_qa_groups / len(analyses) if analyses else 0
     
+    # Calculate MD speaker breakdown
+    md_speaker_stats = defaultdict(lambda: {"count": 0, "words": 0})
+    for analysis in analyses.values():
+        for block in analysis["blocks"]:
+            if block["section"] in ["Management Discussion", "MD"]:
+                speaker = block["speaker"]
+                md_speaker_stats[speaker]["count"] += 1
+                md_speaker_stats[speaker]["words"] += block["word_count"]
+    
     gap_issues = [i for a in analyses.values() for i in a["issues"] if i["type"] == "qa_gap"]
     order_issues = [i for a in analyses.values() for i in a["issues"] if i["type"] == "qa_order"]
     
@@ -615,7 +628,7 @@ def generate_html_visualization(transcripts_data: Dict[str, List[Dict]], output_
     # Calculate additional useful metrics
     total_gap_words = sum(b["word_count"] for a in analyses.values() 
                          for b in a["blocks"] 
-                         if b["section"] == "Q&A" and b["qa_id"] is None)
+                         if b["section"] == "Investor Q&A" and b["qa_id"] is None)
     
     # Get distribution of Q&A group sizes
     qa_group_sizes = []
@@ -706,6 +719,24 @@ def generate_html_visualization(transcripts_data: Dict[str, List[Dict]], output_
                     <p style="color: #666; margin: 5px 0;">Largest Group</p>
                     <p style="font-size: 20px; font-weight: bold; margin: 5px 0;">{max_qa_group_size:,} words</p>
                 </div>
+            </div>
+        </div>
+        
+        <div style="background: #e8f4fd; padding: 20px; border-radius: 5px; margin: 20px 0;">
+            <h3 style="color: #003087; margin-top: 0;">Management Discussion Speaker Breakdown</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">'''
+    
+    # Add MD speaker stats
+    for speaker, stats in sorted(md_speaker_stats.items(), key=lambda x: x[1]["words"], reverse=True):
+        if stats["words"] > 0:  # Only show speakers with actual content
+            html_content += f'''
+                <div style="background: white; padding: 10px; border-radius: 3px; border-left: 3px solid #003087;">
+                    <p style="font-weight: bold; margin: 5px 0; color: #003087;">{speaker}</p>
+                    <p style="margin: 5px 0;">{stats["words"]:,} words</p>
+                    <p style="font-size: 12px; color: #666; margin: 5px 0;">{stats["count"]} blocks</p>
+                </div>'''
+    
+    html_content += '''
             </div>
         </div>
         
@@ -831,8 +862,34 @@ def main():
             return
         
         # Parse JSON
-        records = json.loads(content_data.decode('utf-8'))
-        print(f"Loaded {len(records)} records")
+        data = json.loads(content_data.decode('utf-8'))
+        
+        # Handle both list and dict formats (Stage 5 might output either)
+        if isinstance(data, dict) and 'records' in data:
+            records = data['records']
+            print(f"Loaded {len(records)} records from dict format")
+        elif isinstance(data, list):
+            records = data
+            print(f"Loaded {len(records)} records from list format")
+        else:
+            print("Unexpected data format in Stage 5 output")
+            return
+        
+        # Detect which field name is being used for sections
+        if records:
+            first_record = records[0]
+            section_field = None
+            if 'section_type' in first_record:
+                section_field = 'section_type'
+                print("Detected field name: section_type")
+            elif 'section_name' in first_record:
+                section_field = 'section_name'
+                print("Detected field name: section_name")
+            else:
+                print("WARNING: No section field found in records")
+                print(f"Available fields: {list(first_record.keys())}")
+        
+        print(f"Total records loaded: {len(records)}")
         
         # Group by transcript
         transcripts = group_records_by_transcript(records)
