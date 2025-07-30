@@ -97,6 +97,112 @@ stage_05_qa_pairing:
     cost_per_1k_prompt_tokens: 0.00015
     cost_per_1k_completion_tokens: 0.0006
 
+# Stage 06 specific settings (LLM Financial Classification)
+stage_06_llm_classification:
+  description: "LLM-based financial content classification"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_05_qa_paired_content.json"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  dev_mode: true
+  dev_max_transcripts: 2
+  
+  # Processing configuration
+  processing_config:
+    md_paragraph_window_size: 5          # Paragraphs per MD classification call
+    max_speaker_blocks_context: 2        # Prior speaker blocks for context
+    prior_block_preview_chars: 750       # Characters to show from prior blocks
+  
+  # LLM configuration
+  llm_config:
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o-2024-08-06"
+    temperature: 0.0
+    max_tokens: 500
+    cost_per_1k_prompt_tokens: 0.0025
+    cost_per_1k_completion_tokens: 0.01
+    timeout: 30
+    max_retries: 3
+    token_endpoint: "https://auth.example.com/oauth/token"  # Replace with actual OAuth endpoint
+  
+  # Financial categories for classification
+  financial_categories:
+    - name: "Revenue & Growth"
+      description: "Discussions about revenue performance, growth rates, sales trends, and top-line metrics"
+      key_indicators: "revenue, sales, growth, top-line, organic growth, acquisition growth"
+      use_when: "Content discusses revenue figures, growth percentages, sales performance, or revenue drivers"
+      example_phrases: "revenue grew by, sales increased, top-line performance, organic growth of"
+    
+    - name: "Profitability & Margins"
+      description: "Content about profit margins, profitability metrics, margin expansion or compression"
+      key_indicators: "margin, profit, profitability, efficiency ratio, return on equity, return on assets"
+      use_when: "Discussion of profit margins, cost efficiency, or profitability metrics"
+      example_phrases: "net interest margin, efficiency ratio, return on equity, margin expansion"
+    
+    - name: "Credit & Risk Management"
+      description: "Credit quality, loan loss provisions, risk management practices, and credit metrics"
+      key_indicators: "credit loss, provision, impairment, allowance, risk management, credit quality"
+      use_when: "Discussion of credit provisions, loan quality, or risk management practices"
+      example_phrases: "provision for credit losses, impaired loans, credit quality, risk management"
+    
+    - name: "Capital Management"
+      description: "Capital ratios, capital adequacy, capital allocation, and regulatory capital"
+      key_indicators: "capital ratio, tier 1, common equity, capital adequacy, capital allocation"
+      use_when: "Discussion of capital strength, regulatory ratios, or capital deployment"
+      example_phrases: "CET1 ratio, tier 1 capital, capital adequacy, capital allocation"
+    
+    - name: "Business Strategy & Outlook"
+      description: "Strategic initiatives, business outlook, guidance, and long-term plans"
+      key_indicators: "strategy, outlook, guidance, initiative, transformation, digital"
+      use_when: "Discussion of future plans, strategic direction, or business transformation"
+      example_phrases: "our strategy, looking forward, digital transformation, strategic initiative"
+    
+    - name: "Market Conditions & Environment"
+      description: "Economic environment, market conditions, regulatory changes, and external factors"
+      key_indicators: "market, environment, economic, regulatory, interest rate, competition"
+      use_when: "Discussion of external factors affecting the business"
+      example_phrases: "market conditions, economic environment, regulatory changes, competitive landscape"
+    
+    - name: "Operations & Efficiency"
+      description: "Operational performance, cost management, efficiency initiatives, and productivity"
+      key_indicators: "operations, efficiency, cost, productivity, automation, digitization"
+      use_when: "Discussion of operational improvements, cost reduction, or efficiency gains"
+      example_phrases: "operational efficiency, cost reduction, productivity gains, automation"
+    
+    - name: "Geographic Performance"
+      description: "Performance by geographic region, international operations, and regional trends"
+      key_indicators: "geographic, region, international, domestic, Canada, US, Europe"
+      use_when: "Discussion of performance by region or geographic segment"
+      example_phrases: "in Canada, US operations, international business, regional performance"
+    
+    - name: "Product & Services"
+      description: "Specific products, services, business lines, and segment performance"
+      key_indicators: "product, service, business line, segment, wealth management, commercial banking"
+      use_when: "Discussion of specific business segments, products, or services"
+      example_phrases: "wealth management, commercial banking, personal banking, capital markets"
+    
+    - name: "Digital & Technology"
+      description: "Technology investments, digital capabilities, innovation, and tech-related initiatives"
+      key_indicators: "digital, technology, innovation, platform, mobile, online, fintech"
+      use_when: "Discussion of technology investments, digital transformation, or innovation"
+      example_phrases: "digital platform, technology investment, mobile banking, innovation"
+    
+    - name: "Regulatory & Compliance"
+      description: "Regulatory requirements, compliance matters, and regulatory capital"
+      key_indicators: "regulatory, compliance, regulation, Basel, IFRS, stress test"
+      use_when: "Discussion of regulatory matters, compliance, or regulatory capital"
+      example_phrases: "regulatory requirements, Basel III, stress testing, compliance"
+    
+    - name: "ESG & Sustainability"
+      description: "Environmental, social, and governance matters, sustainability initiatives"
+      key_indicators: "ESG, sustainability, climate, environment, governance, social"
+      use_when: "Discussion of ESG factors, sustainability, or corporate responsibility"
+      example_phrases: "climate risk, sustainability, ESG, environmental, governance"
+    
+    - name: "Other"
+      description: "Content that doesn't fit other categories, introductions, procedural matters"
+      use_when: "Non-financial content, introductions, procedural matters, or unclear topics"
+      example_phrases: "thank you, good morning, operator, next question"
+
 # Monitored Financial Institutions
 # Format: ticker: {name, type}
 monitored_institutions:
