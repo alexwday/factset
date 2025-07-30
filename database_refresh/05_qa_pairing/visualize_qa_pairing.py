@@ -116,8 +116,8 @@ def analyze_transcript_structure(transcript_records: List[Dict]) -> Dict:
         block_id = record.get("speaker_block_id")
         speaker_blocks[block_id].append(record)
     
-    # Sort blocks by ID
-    sorted_block_ids = sorted(speaker_blocks.keys())
+    # Sort blocks by ID (ensuring numeric sort)
+    sorted_block_ids = sorted(speaker_blocks.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
     
     # Analyze each block
     blocks_analysis = []
@@ -225,115 +225,131 @@ def generate_transcript_bar(transcript_id: str, analysis: Dict, max_words: int) 
     # Build consolidated segments
     segments_html = []
     
-    # Enhanced color palette for better visual distinction
-    mgmt_color = "#2980b9"  # Darker blue
+    # Professional bank-inspired color palette
+    mgmt_color = "#003087"  # RBC deep blue
     qa_colors = [
-        "#e74c3c",  # Red
-        "#e67e22",  # Orange
-        "#f39c12",  # Yellow
-        "#27ae60",  # Green
-        "#16a085",  # Teal
-        "#2980b9",  # Blue
-        "#8e44ad",  # Purple
-        "#34495e",  # Dark gray
-        "#c0392b",  # Dark red
-        "#d35400",  # Dark orange
+        "#0051A5",  # TD Bank blue
+        "#0079C1",  # BMO blue
+        "#00539B",  # Scotia blue
+        "#6B0F24",  # CIBC burgundy
+        "#004B87",  # National Bank blue
+        "#0066CC",  # Medium blue
+        "#4B7BA7",  # Light steel blue
+        "#1E3A5F",  # Navy blue
+        "#2E5090",  # Royal blue
+        "#3A5998",  # Corporate blue
     ]
-    gap_color = "#c0392b"  # Dark red for gaps
+    gap_color = "#8B0000"  # Dark red for gaps
     
-    # First, consolidate Management Discussion blocks by speaker
-    current_section = None
-    current_speaker = None
-    current_segment = None
+    # Build segments in order
+    consolidated_segments = []
     
+    # First pass: identify segment boundaries
     i = 0
     while i < len(blocks):
         block = blocks[i]
         
         if block["section"] == "Management Discussion":
-            # Check if we need to start a new segment
-            if current_section != "Management Discussion" or current_speaker != block["speaker"]:
-                # Save previous segment if exists
-                if current_segment:
-                    segments_html.append(current_segment)
-                
-                # Start new Management Discussion segment
-                segment_blocks = [block]
-                segment_words = block["word_count"]
-                
-                # Collect consecutive blocks from same speaker
+            # Consolidate MD blocks by speaker
+            speaker = block["speaker"]
+            segment_blocks = [block]
+            j = i + 1
+            
+            # Collect consecutive blocks from same speaker
+            while j < len(blocks) and blocks[j]["section"] == "Management Discussion" and blocks[j]["speaker"] == speaker:
+                segment_blocks.append(blocks[j])
+                j += 1
+            
+            # Create consolidated segment
+            total_segment_words = sum(b["word_count"] for b in segment_blocks)
+            if total_segment_words > 0:
+                consolidated_segments.append({
+                    "type": "md",
+                    "speaker": speaker,
+                    "word_count": total_segment_words,
+                    "block_ids": [b["block_id"] for b in segment_blocks],
+                    "position": i
+                })
+            i = j
+            
+        elif block["section"] == "Q&A":
+            if block["qa_id"] is None:
+                # Gap block
+                if block["word_count"] > 0:
+                    consolidated_segments.append({
+                        "type": "gap",
+                        "block": block,
+                        "position": i
+                    })
+                i += 1
+            else:
+                # Q&A block - collect all blocks with same qa_id
+                qa_id = block["qa_id"]
+                qa_blocks = [block]
                 j = i + 1
-                while j < len(blocks) and blocks[j]["section"] == "Management Discussion" and blocks[j]["speaker"] == block["speaker"]:
-                    segment_blocks.append(blocks[j])
-                    segment_words += blocks[j]["word_count"]
+                
+                # Look ahead for more blocks with same qa_id
+                while j < len(blocks) and blocks[j].get("qa_id") == qa_id:
+                    qa_blocks.append(blocks[j])
                     j += 1
                 
-                # Create segment
-                segment_width = segment_words * scale_factor
-                if segment_width > 0:
-                    speaker_name = block["speaker"].replace("Executives", "Exec").replace("Operator", "Op")
-                    block_ids = [b["block_id"] for b in segment_blocks]
-                    
-                    current_segment = f'''
-                        <div class="segment" style="width: {segment_width}px; background-color: {mgmt_color};"
-                             title="Management Discussion: {block['speaker']} ({segment_words:,} words, blocks {min(block_ids)}-{max(block_ids)})">
-                            <span class="label">{speaker_name}</span>
-                        </div>
-                    '''
-                else:
-                    current_segment = None
+                total_qa_words = sum(b["word_count"] for b in qa_blocks)
+                if total_qa_words > 0:
+                    consolidated_segments.append({
+                        "type": "qa",
+                        "qa_id": qa_id,
+                        "word_count": total_qa_words,
+                        "block_count": len(qa_blocks),
+                        "position": i
+                    })
+                i = j
+        else:
+            i += 1
+    
+    # Now render segments in order
+    for segment in consolidated_segments:
+        if segment["type"] == "md":
+            segment_width = segment["word_count"] * scale_factor
+            if segment_width > 0:
+                speaker_name = segment["speaker"].replace("Executives", "Exec").replace("Operator", "Op")
+                block_range = f"{min(segment['block_ids'])}-{max(segment['block_ids'])}" if len(segment['block_ids']) > 1 else str(segment['block_ids'][0])
                 
-                current_section = "Management Discussion"
-                current_speaker = block["speaker"]
-                i = j - 1
-        
-        elif block["section"] == "Q&A":
-            # Save any pending management discussion segment
-            if current_segment and current_section == "Management Discussion":
-                segments_html.append(current_segment)
-                current_segment = None
-            
-            if block["qa_id"] is None:
-                # Handle gap blocks - show speaker and sample text
-                gap_width = block["word_count"] * scale_factor
-                if gap_width > 0:
-                    # Get sample text from the block
-                    sample_text = block.get("sample_text", "").replace('"', '&quot;').replace("'", '&#39;')
-                    speaker_label = block['speaker'].replace("Executives", "Exec").replace("Operator", "Op")
-                    
-                    gap_segment = f'''
-                        <div class="segment gap" style="width: {gap_width}px; background-color: {gap_color}; border: 2px solid #7f1f1f;"
-                             title="GAP - Block {block['block_id']} - {speaker_label}: {sample_text} ({block['word_count']} words)">
-                            <span class="label">GAP</span>
-                        </div>
-                    '''
-                    segments_html.append(gap_segment)
-            else:
-                # Skip - we'll handle Q&A groups after all blocks
-                pass
-            
-            current_section = "Q&A"
-        
-        i += 1
-    
-    # Save last management segment if any
-    if current_segment and current_section == "Management Discussion":
-        segments_html.append(current_segment)
-    
-    # Now add Q&A groups as consolidated segments
-    for qa_id in sorted(qa_groups.keys()):
-        qa_group = qa_groups[qa_id]
-        qa_width = qa_group["word_count"] * scale_factor
-        
-        if qa_width > 0:
-            color = qa_colors[(qa_id - 1) % len(qa_colors)]
-            qa_segment = f'''
-                <div class="segment" style="width: {qa_width}px; background-color: {color};"
-                     title="Q&A Group {qa_id} ({qa_group['word_count']:,} words, {qa_group['block_count']} speaker blocks)">
-                    <span class="label">Q{qa_id}</span>
-                </div>
-            '''
-            segments_html.append(qa_segment)
+                md_segment = f'''
+                    <div class="segment md" style="width: {segment_width}px; background-color: {mgmt_color};"
+                         title="Management Discussion: {segment['speaker']} ({segment['word_count']:,} words, blocks {block_range})">
+                        <span class="label">{speaker_name}</span>
+                    </div>
+                '''
+                segments_html.append(md_segment)
+                
+        elif segment["type"] == "gap":
+            block = segment["block"]
+            gap_width = block["word_count"] * scale_factor
+            if gap_width > 0:
+                sample_text = block.get("sample_text", "").replace('"', '&quot;').replace("'", '&#39;')
+                speaker_label = block['speaker'].replace("Executives", "Exec").replace("Operator", "Op")
+                
+                gap_segment = f'''
+                    <div class="segment gap" style="width: {gap_width}px; background-color: {gap_color}; border: 2px solid #5a0000;"
+                         title="GAP - Block {block['block_id']} - {speaker_label}: {sample_text} ({block['word_count']} words)">
+                        <span class="label">GAP</span>
+                    </div>
+                '''
+                segments_html.append(gap_segment)
+                
+        elif segment["type"] == "qa":
+            qa_width = segment["word_count"] * scale_factor
+            if qa_width > 0:
+                qa_id = segment["qa_id"]
+                color = qa_colors[(qa_id - 1) % len(qa_colors)]
+                
+                qa_segment = f'''
+                    <div class="segment qa" style="width: {qa_width}px; background-color: {color};"
+                         title="Q&A Group {qa_id} ({segment['word_count']:,} words, {segment['block_count']} speaker blocks)">
+                        <span class="label">Q{qa_id}</span>
+                    </div>
+                '''
+                segments_html.append(qa_segment)
     
     # Build issues list with gap text
     issues_html = ""
@@ -510,22 +526,62 @@ def generate_html_visualization(transcripts_data: Dict[str, List[Dict]], output_
 <body>
     <h1>Stage 5 Q&A Pairing Visualization</h1>
     
+    <div class="explanation" style="margin: 20px auto; max-width: 900px; padding: 20px; background: #e8f4fd; border-left: 4px solid #003087; border-radius: 5px;">
+        <h2 style="color: #003087; margin-top: 0;">What This Visualization Shows</h2>
+        <p><strong>Purpose:</strong> This tool validates the Q&A pairing algorithm from Stage 5, which automatically detects conversation boundaries between analysts and company executives during earnings calls.</p>
+        
+        <h3 style="color: #003087; font-size: 1.1em;">What We're Checking:</h3>
+        <ul style="line-height: 1.6;">
+            <li><strong>Completeness:</strong> Every Q&A section paragraph should be assigned to a Q&A group (no gaps)</li>
+            <li><strong>Continuity:</strong> Q&A group IDs should be consecutive (1, 2, 3... not 1, 3, 5...)</li>
+            <li><strong>Accuracy:</strong> Each Q&A group should contain one complete analyst-executive conversation</li>
+            <li><strong>Structure:</strong> Management Discussion should appear before Q&A sections</li>
+        </ul>
+        
+        <h3 style="color: #003087; font-size: 1.1em;">Why This Matters:</h3>
+        <ul style="line-height: 1.6;">
+            <li>Proper Q&A pairing enables accurate attribution of questions to specific analysts</li>
+            <li>Clean conversation boundaries allow for focused analysis of individual topics</li>
+            <li>Detecting gaps helps identify edge cases where the algorithm needs improvement</li>
+            <li>Validated pairings ensure downstream analysis (sentiment, topics) is correctly scoped</li>
+        </ul>
+    </div>
+    
     <div class="legend">
         <div class="legend-item">
-            <span class="legend-color" style="background-color: #4a90e2;"></span>
+            <span class="legend-color" style="background-color: #003087;"></span>
             Management Discussion
         </div>
         <div class="legend-item">
-            <span class="legend-color" style="background-color: #f5a623;"></span>
+            <span class="legend-color" style="background-color: #0051A5;"></span>
             Q&A Sections (numbered by QA ID)
         </div>
         <div class="legend-item">
-            <span class="legend-color" style="background-color: #e74c3c;"></span>
+            <span class="legend-color" style="background-color: #8B0000;"></span>
             Gap/Issue
         </div>
         <div class="legend-item">
-            <span style="border: 2px solid red; padding: 2px;">Red Border</span>
+            <span style="border: 2px solid #8B0000; padding: 2px;">Red Border</span>
             Block with Issue
+        </div>
+    </div>
+    
+    <div style="margin: 20px 0; padding: 15px; background: white; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <div style="display: flex; gap: 20px; align-items: center;">
+            <div style="flex: 1;">
+                <input type="text" id="searchInput" placeholder="Search transcript IDs..." 
+                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div>
+                <select id="filterSelect" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="all">All Transcripts</option>
+                    <option value="perfect">Perfect (No Issues)</option>
+                    <option value="gaps">Has Gaps</option>
+                    <option value="order">Has Order Issues</option>
+                    <option value="any-issue">Any Issue</option>
+                </select>
+            </div>
+            <button onclick="resetFilters()" style="padding: 8px 16px; background: #003087; color: white; border: none; border-radius: 4px; cursor: pointer;">Reset</button>
         </div>
     </div>
     
@@ -543,15 +599,119 @@ def generate_html_visualization(transcripts_data: Dict[str, List[Dict]], output_
         html_content += generate_transcript_bar(transcript_id, analysis, max_words)
         total_issues += len(analysis["issues"])
     
-    # Add summary
+    # Calculate additional statistics
+    total_qa_groups = sum(a["qa_group_count"] for a in analyses.values())
+    transcripts_with_gaps = sum(1 for a in analyses.values() if any(i["type"] == "qa_gap" for i in a["issues"]))
+    transcripts_with_order_issues = sum(1 for a in analyses.values() if any(i["type"] == "qa_order" for i in a["issues"]))
+    avg_qa_groups = total_qa_groups / len(analyses) if analyses else 0
+    
+    gap_issues = [i for a in analyses.values() for i in a["issues"] if i["type"] == "qa_gap"]
+    order_issues = [i for a in analyses.values() for i in a["issues"] if i["type"] == "qa_order"]
+    
+    # Quality metrics
+    perfect_transcripts = len(analyses) - len([a for a in analyses.values() if a["issues"]])
+    quality_score = (perfect_transcripts / len(analyses) * 100) if analyses else 0
+    
+    # Calculate additional useful metrics
+    total_gap_words = sum(b["word_count"] for a in analyses.values() 
+                         for b in a["blocks"] 
+                         if b["section"] == "Q&A" and b["qa_id"] is None)
+    
+    # Get distribution of Q&A group sizes
+    qa_group_sizes = []
+    for analysis in analyses.values():
+        for qa_id, group_info in analysis["qa_groups"].items():
+            qa_group_sizes.append(group_info["word_count"])
+    
+    avg_qa_group_size = sum(qa_group_sizes) / len(qa_group_sizes) if qa_group_sizes else 0
+    min_qa_group_size = min(qa_group_sizes) if qa_group_sizes else 0
+    max_qa_group_size = max(qa_group_sizes) if qa_group_sizes else 0
+    
+    # Calculate MD/Q&A split
+    total_md_words = sum(a["management_words"] for a in analyses.values())
+    total_qa_words = sum(a["qa_words"] for a in analyses.values())
+    total_all_words = sum(a["total_words"] for a in analyses.values())
+    
+    # Add enhanced summary
     html_content += f'''
     </div>
     
     <div class="summary">
-        <h2>Summary</h2>
-        <p>Total Transcripts: {len(analyses)}</p>
-        <p>Total Issues Found: {total_issues}</p>
-        <p>Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+        <h2>Overall Statistics</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 20px 0;">
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid #003087;">
+                <h3 style="margin: 0; color: #003087;">Transcript Overview</h3>
+                <p style="font-size: 24px; margin: 10px 0;">{len(analyses)}</p>
+                <p style="color: #666; margin: 0;">Total Transcripts</p>
+            </div>
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid #0051A5;">
+                <h3 style="margin: 0; color: #0051A5;">Q&A Groups</h3>
+                <p style="font-size: 24px; margin: 10px 0;">{total_qa_groups}</p>
+                <p style="color: #666; margin: 0;">Total ({avg_qa_groups:.1f} avg per transcript)</p>
+            </div>
+            <div style="background: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ff9800;">
+                <h3 style="margin: 0; color: #ff9800;">Gap Issues</h3>
+                <p style="font-size: 24px; margin: 10px 0;">{len(gap_issues)}</p>
+                <p style="color: #666; margin: 0;">In {transcripts_with_gaps} transcripts</p>
+                <p style="color: #856404; margin: 5px 0; font-size: 12px;">{total_gap_words:,} words in gaps</p>
+            </div>
+            <div style="background: #f8d7da; padding: 15px; border-radius: 5px; border-left: 4px solid #8B0000;">
+                <h3 style="margin: 0; color: #8B0000;">Order Issues</h3>
+                <p style="font-size: 24px; margin: 10px 0;">{len(order_issues)}</p>
+                <p style="color: #666; margin: 0;">In {transcripts_with_order_issues} transcripts</p>
+            </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0;">
+            <div style="background: #e8f4fd; padding: 20px; border-radius: 5px;">
+                <h3 style="color: #003087; margin-top: 0;">Quality Score</h3>
+                <div style="background: #003087; height: 30px; border-radius: 15px; overflow: hidden;">
+                    <div style="background: #27ae60; height: 100%; width: {quality_score}%; transition: width 0.5s ease;"></div>
+                </div>
+                <p style="text-align: center; margin: 10px 0; font-size: 18px;">
+                    <strong>{quality_score:.1f}%</strong> ({perfect_transcripts}/{len(analyses)} transcripts without issues)
+                </p>
+            </div>
+            
+            <div style="background: #f0f8ff; padding: 20px; border-radius: 5px;">
+                <h3 style="color: #0051A5; margin-top: 0;">Content Distribution</h3>
+                <div style="margin: 10px 0;">
+                    <div style="display: flex; margin-bottom: 10px;">
+                        <span style="width: 150px;">Management Discussion:</span>
+                        <span style="font-weight: bold;">{(total_md_words/total_all_words*100 if total_all_words else 0):.1f}%</span>
+                    </div>
+                    <div style="display: flex; margin-bottom: 10px;">
+                        <span style="width: 150px;">Q&A Section:</span>
+                        <span style="font-weight: bold;">{(total_qa_words/total_all_words*100 if total_all_words else 0):.1f}%</span>
+                    </div>
+                    <div style="font-size: 12px; color: #666; margin-top: 10px;">
+                        Total: {total_all_words:,} words
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
+            <h3 style="color: #333; margin-top: 0;">Q&A Group Size Distribution</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; text-align: center;">
+                <div>
+                    <p style="color: #666; margin: 5px 0;">Average Size</p>
+                    <p style="font-size: 20px; font-weight: bold; margin: 5px 0;">{avg_qa_group_size:,.0f} words</p>
+                </div>
+                <div>
+                    <p style="color: #666; margin: 5px 0;">Smallest Group</p>
+                    <p style="font-size: 20px; font-weight: bold; margin: 5px 0;">{min_qa_group_size:,} words</p>
+                </div>
+                <div>
+                    <p style="color: #666; margin: 5px 0;">Largest Group</p>
+                    <p style="font-size: 20px; font-weight: bold; margin: 5px 0;">{max_qa_group_size:,} words</p>
+                </div>
+            </div>
+        </div>
+        
+        <p style="text-align: center; color: #666; margin-top: 20px;">
+            Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        </p>
     </div>
     
     <script>
@@ -565,6 +725,61 @@ def generate_html_visualization(transcripts_data: Dict[str, List[Dict]], output_
                 setTimeout(() => {{ this.style.color = '#333'; }}, 1000);
             }});
         }});
+        
+        // Search and filter functionality
+        function filterTranscripts() {{
+            const searchValue = document.getElementById('searchInput').value.toLowerCase();
+            const filterValue = document.getElementById('filterSelect').value;
+            const transcriptRows = document.querySelectorAll('.transcript-row');
+            
+            transcriptRows.forEach(row => {{
+                const transcriptId = row.querySelector('h3').textContent.toLowerCase();
+                const hasIssues = row.querySelector('.issues') !== null;
+                const issuesList = row.querySelector('.issues');
+                
+                let hasGaps = false;
+                let hasOrderIssues = false;
+                if (issuesList) {{
+                    const issueTexts = issuesList.textContent;
+                    hasGaps = issueTexts.includes('has no QA ID');
+                    hasOrderIssues = issueTexts.includes('Non-consecutive');
+                }}
+                
+                // Apply search filter
+                const matchesSearch = transcriptId.includes(searchValue);
+                
+                // Apply issue filter
+                let matchesFilter = true;
+                switch(filterValue) {{
+                    case 'perfect':
+                        matchesFilter = !hasIssues;
+                        break;
+                    case 'gaps':
+                        matchesFilter = hasGaps;
+                        break;
+                    case 'order':
+                        matchesFilter = hasOrderIssues;
+                        break;
+                    case 'any-issue':
+                        matchesFilter = hasIssues;
+                        break;
+                }}
+                
+                // Show/hide based on both filters
+                row.style.display = (matchesSearch && matchesFilter) ? 'block' : 'none';
+            }});
+        }}
+        
+        // Reset filters
+        function resetFilters() {{
+            document.getElementById('searchInput').value = '';
+            document.getElementById('filterSelect').value = 'all';
+            filterTranscripts();
+        }}
+        
+        // Attach event listeners
+        document.getElementById('searchInput').addEventListener('input', filterTranscripts);
+        document.getElementById('filterSelect').addEventListener('change', filterTranscripts);
     </script>
 </body>
 </html>
