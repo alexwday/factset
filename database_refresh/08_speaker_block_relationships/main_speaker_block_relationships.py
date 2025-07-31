@@ -732,31 +732,27 @@ def group_records_by_transcript(records: List[Dict]) -> Dict[str, List[Dict]]:
     return dict(transcripts)
 
 
-# Relationship scoring tools (Stage 8)
+# Relationship context tools (Stage 8)
 def create_speaker_block_relationship_tools() -> List[Dict]:
-    """Function calling schema for speaker block relationship scoring."""
+    """Function calling schema for speaker block context requirement assessment."""
     return [{
         "type": "function",
         "function": {
-            "name": "score_speaker_block_relationships",
-            "description": "Score the importance of previous and next speaker blocks relative to current block",
+            "name": "assess_speaker_block_context",
+            "description": "Determine if neighboring speaker blocks are required for proper understanding of current block",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "backward_importance": {
-                        "type": "number",
-                        "minimum": 0.0,
-                        "maximum": 1.0,
-                        "description": "Importance score (0.0-1.0) of the previous speaker block for understanding the current block"
+                    "backward_context_required": {
+                        "type": "boolean",
+                        "description": "True if the previous speaker block provides essential context for understanding the current block; False if current block is self-contained"
                     },
-                    "forward_importance": {
-                        "type": "number", 
-                        "minimum": 0.0,
-                        "maximum": 1.0,
-                        "description": "Importance score (0.0-1.0) of the next speaker block for understanding the current block"
+                    "forward_context_required": {
+                        "type": "boolean", 
+                        "description": "True if the next speaker block provides essential context for understanding the current block; False if current block is self-contained"
                     }
                 },
-                "required": ["backward_importance", "forward_importance"]
+                "required": ["backward_context_required", "forward_context_required"]
             }
         }
     }]
@@ -783,34 +779,53 @@ def create_speaker_block_relationship_prompt(company_name: str, fiscal_info: str
 </context>
 
 <objective>
-You are scoring the relationship importance between speaker blocks in a {fiscal_info} earnings call transcript.
-These scores will be used during retrieval to determine if neighboring speaker blocks should be included
-when the current block is retrieved, based on contextual importance and thematic continuity.
+You are assessing context dependencies between speaker blocks in a {fiscal_info} earnings call transcript.
+Your decision will determine whether neighboring blocks are retrieved together during search.
 
-Your task:
-1. BACKWARD IMPORTANCE: Score how important the PREVIOUS speaker block is for understanding the CURRENT block
-2. FORWARD IMPORTANCE: Score how important the NEXT speaker block is for understanding the CURRENT block
+YOUR TASK:
+Determine if neighboring speaker blocks are REQUIRED for proper understanding of the CURRENT block.
 
-SCORING CRITERIA (0.0 - 1.0):
-- 0.8-1.0: Critical relationship - neighboring block essential for full understanding
-- 0.6-0.8: Strong relationship - neighboring block significantly enhances understanding  
-- 0.4-0.6: Moderate relationship - neighboring block provides useful context
-- 0.2-0.4: Weak relationship - neighboring block tangentially related
-- 0.0-0.2: No relationship - neighboring block unrelated or redundant
+RETRIEVAL SCENARIO:
+When a user searches and the current block matches their query, your flags determine:
+- backward_context_required = True → Previous block WILL be included in results
+- backward_context_required = False → Previous block will NOT be included
+- forward_context_required = True → Next block WILL be included in results  
+- forward_context_required = False → Next block will NOT be included
 
-FACTORS TO CONSIDER:
-- Thematic continuity (same topic being developed across blocks)
-- Financial data dependencies (numbers referenced across blocks)
-- Logical flow (arguments building across speakers)
-- Q&A prep (management setting up for upcoming questions)
-- Conclusion dependencies (current block concludes points from previous)
-- Speaker transitions (new speaker continuing same theme)
+DECISION CRITERIA for "True" (context IS required):
+1. INCOMPLETE INFORMATION: Current block references something explained in neighboring block
+   - "As I mentioned earlier..." (backward = True)
+   - "Let me elaborate on that..." (forward = True)
+   - Numbers/metrics defined in neighboring block but used in current
 
-RETRIEVAL CONTEXT:
-When users search for content, if the current block matches their query:
-- HIGH backward/forward scores mean neighboring blocks should likely be included
-- LOW scores mean neighboring blocks can be safely excluded
-- This helps provide complete context while avoiding information overload
+2. LOGICAL DEPENDENCIES: Current block's meaning changes without neighboring context
+   - Current block answers a question posed in previous block
+   - Current block sets up information completed in next block
+   - Multi-part explanations split across blocks
+
+3. CONVERSATIONAL FLOW: Breaking the connection loses critical meaning
+   - Speaker handoffs where context carries over
+   - Progressive building of an argument
+   - Cause-and-effect relationships across blocks
+
+DECISION CRITERIA for "False" (context NOT required):
+1. SELF-CONTAINED: Current block has complete information on its topic
+   - Full explanation of a metric or initiative
+   - Complete answer to a question
+   - Standalone financial results
+
+2. TOPIC CHANGE: Clear transition to unrelated subject
+   - "Moving on to a different topic..."
+   - "Let me now discuss..."
+   - New speaker introducing new theme
+
+3. REDUNDANCY: Neighboring blocks would add no new information
+   - Repetition of same points
+   - Procedural transitions
+   - Thank you/acknowledgment blocks
+
+CRITICAL: Think from a user's perspective - if they searched and found the current block,
+would they be confused or missing key information without the neighboring block?
 </objective>
 
 <current_block>
@@ -841,11 +856,12 @@ A retrieval system that needs to decide whether to include neighboring speaker b
 </audience>
 
 <response_format>
-Use the score_speaker_block_relationships function.
-- backward_importance: How important is the previous block for understanding current block
-- forward_importance: How important is the next block for understanding current block
-- Consider thematic continuity, data dependencies, and logical flow
-- Think about practical retrieval scenarios and user information needs
+Use the assess_speaker_block_context function.
+- backward_context_required: True/False - Is previous block REQUIRED for understanding?
+- forward_context_required: True/False - Is next block REQUIRED for understanding?
+- Be decisive: either the context is required (True) or it's not (False)
+- Consider user confusion: Would they miss critical information without the neighboring block?
+- Default to False if uncertain - avoid over-including irrelevant content
 </response_format>
 """
 
@@ -962,13 +978,13 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                 tool_call = response.choices[0].message.tool_calls[0]
                 response_data = json.loads(tool_call.function.arguments)
                 
-                backward_importance = response_data.get("backward_importance", 0.0)
-                forward_importance = response_data.get("forward_importance", 0.0)
+                backward_context_required = response_data.get("backward_context_required", False)
+                forward_context_required = response_data.get("forward_context_required", False)
                 
-                # Apply relationship scores to all paragraphs in this speaker block
+                # Apply context requirement flags to all paragraphs in this speaker block
                 for record in block_records:
-                    record["backward_importance"] = backward_importance
-                    record["forward_importance"] = forward_importance
+                    record["backward_context_required"] = backward_context_required
+                    record["forward_context_required"] = forward_context_required
                 
                 enhanced_records.extend(block_records)
                 
@@ -983,7 +999,7 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                         "cost": cost_data
                     })
                 
-                log_execution(f"Scored relationships for Management speaker block {block_id}: backward={backward_importance:.2f}, forward={forward_importance:.2f}")
+                log_execution(f"Assessed context for Management speaker block {block_id}: backward={backward_context_required}, forward={forward_context_required}")
             
             else:
                 enhanced_error_logger.log_summarization_error(
@@ -994,8 +1010,8 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                 
                 # Set null values for failed block
                 for record in block_records:
-                    record["backward_importance"] = None
-                    record["forward_importance"] = None
+                    record["backward_context_required"] = None
+                    record["forward_context_required"] = None
                 
                 enhanced_records.extend(block_records)
         
@@ -1008,8 +1024,8 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
             
             # Set null values for failed block
             for record in block_records:
-                record["backward_importance"] = None
-                record["forward_importance"] = None
+                record["backward_context_required"] = None
+                record["forward_context_required"] = None
             
             enhanced_records.extend(block_records)
     
@@ -1036,11 +1052,11 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     except Exception as e:
         enhanced_error_logger.log_processing_error(transcript_id, f"Transcript processing failed: {e}")
         
-        # Return original records with null relationship score fields
+        # Return original records with null context requirement fields
         for record in transcript_records:
             if record.get("section_name") == "MANAGEMENT DISCUSSION SECTION":
-                record["backward_importance"] = None
-                record["forward_importance"] = None
+                record["backward_context_required"] = None
+                record["forward_context_required"] = None
         
         return transcript_records
 
@@ -1176,22 +1192,32 @@ def main():
         end_time = datetime.now()
         execution_time = end_time - start_time
         
-        # Calculate relationship scoring statistics
-        mgmt_records_with_scores = len([r for r in all_enhanced_records 
-                                      if r.get("section_name") == "MANAGEMENT DISCUSSION SECTION" 
-                                      and r.get("backward_importance") is not None 
-                                      and r.get("forward_importance") is not None])
+        # Calculate context assessment statistics
+        mgmt_records_with_flags = len([r for r in all_enhanced_records 
+                                     if r.get("section_name") == "MANAGEMENT DISCUSSION SECTION" 
+                                     and r.get("backward_context_required") is not None 
+                                     and r.get("forward_context_required") is not None])
         mgmt_records_total = len([r for r in all_enhanced_records if r.get("section_name") == "MANAGEMENT DISCUSSION SECTION"])
         non_mgmt_records = len(all_enhanced_records) - mgmt_records_total
+        
+        # Calculate flag statistics
+        backward_true_count = len([r for r in all_enhanced_records 
+                                 if r.get("section_name") == "MANAGEMENT DISCUSSION SECTION" 
+                                 and r.get("backward_context_required") is True])
+        forward_true_count = len([r for r in all_enhanced_records 
+                                if r.get("section_name") == "MANAGEMENT DISCUSSION SECTION" 
+                                and r.get("forward_context_required") is True])
         
         stage_summary = {
             "total_transcripts": len(transcripts),
             "successful_transcripts": len(transcripts) - len(failed_transcripts),
             "failed_transcripts": len(failed_transcripts),
             "total_records": len(all_enhanced_records),
-            "mgmt_records_with_scores": mgmt_records_with_scores,
+            "mgmt_records_with_flags": mgmt_records_with_flags,
             "mgmt_records_total": mgmt_records_total,
             "non_mgmt_records_passthrough": non_mgmt_records,
+            "backward_context_required_count": backward_true_count,
+            "forward_context_required_count": forward_true_count,
             "execution_time": str(execution_time),
             "total_cost": enhanced_error_logger.total_cost,
             "total_tokens": enhanced_error_logger.total_tokens
@@ -1199,10 +1225,12 @@ def main():
         
         # Final summary
         log_console("="*60)
-        log_console("STAGE 8 RELATIONSHIP SCORING COMPLETE")
+        log_console("STAGE 8 CONTEXT ASSESSMENT COMPLETE")
         log_console("="*60)
         log_console(f"Transcripts processed: {stage_summary['successful_transcripts']}/{stage_summary['total_transcripts']}")
-        log_console(f"Management records with scores: {mgmt_records_with_scores}/{mgmt_records_total}")
+        log_console(f"Management records with flags: {mgmt_records_with_flags}/{mgmt_records_total}")
+        log_console(f"Backward context required: {backward_true_count}")
+        log_console(f"Forward context required: {forward_true_count}")
         log_console(f"Non-management records (passthrough): {non_mgmt_records}")
         log_console(f"Total cost: ${stage_summary['total_cost']:.4f}")
         log_console(f"Total tokens: {stage_summary['total_tokens']:,}")
