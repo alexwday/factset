@@ -732,39 +732,62 @@ def group_records_by_transcript(records: List[Dict]) -> Dict[str, List[Dict]]:
     return dict(transcripts)
 
 
-# Relationship context tools (Stage 8)
+# Enhanced relationship context tools (Stage 8)
 def create_speaker_block_relationship_tools() -> List[Dict]:
-    """Function calling schema for speaker block context requirement assessment."""
+    """Enhanced function calling schema for speaker block context requirement assessment with context pattern detection."""
     return [{
         "type": "function",
         "function": {
             "name": "assess_speaker_block_context",
-            "description": "Determine if neighboring speaker blocks are required for proper understanding of current block",
+            "description": "Analyze speaker block relationships to determine optimal context inclusion for RAG retrieval",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "backward_context_required": {
                         "type": "boolean",
-                        "description": "True if the previous speaker block adds meaningful context that would enhance user understanding of the current block; False if it provides no additional value"
+                        "description": "TRUE: Previous block provides essential context, setup, background, or thematic connection that enhances user understanding. FALSE: Previous block is unrelated, redundant, or adds no meaningful value to current block comprehension. Default to TRUE unless clearly unrelated."
                     },
                     "forward_context_required": {
                         "type": "boolean", 
-                        "description": "True if the next speaker block adds meaningful context that would enhance user understanding of the current block; False if it provides no additional value"
+                        "description": "TRUE: Next block provides essential follow-up, examples, clarification, or thematic continuation that enhances user understanding. FALSE: Next block is unrelated, redundant, or adds no meaningful value to current block comprehension. Default to TRUE unless clearly unrelated."
+                    },
+                    "relationship_confidence": {
+                        "type": "string",
+                        "enum": ["high", "medium", "low"],
+                        "description": "Confidence level in the relationship assessment. HIGH: Clear thematic/logical connections. MEDIUM: Some connection but less obvious. LOW: Uncertain or weak connections."
+                    },
+                    "context_type": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "causal_relationship",
+                                "thematic_continuation", 
+                                "question_answer_flow",
+                                "incomplete_thought",
+                                "numerical_sequence",
+                                "comparative_analysis",
+                                "topic_transition",
+                                "standalone_statement",
+                                "procedural_content"
+                            ]
+                        },
+                        "description": "Categories of relationships detected between blocks. Multiple types can apply."
                     }
                 },
-                "required": ["backward_context_required", "forward_context_required"]
+                "required": ["backward_context_required", "forward_context_required", "relationship_confidence", "context_type"]
             }
         }
     }]
 
 
-def create_speaker_block_relationship_prompt(company_name: str, fiscal_info: str,
-                                           current_speaker: str, current_summary: str,
-                                           previous_speaker: str, previous_summary: str,
-                                           next_speaker: str, next_summary: str,
-                                           financial_categories: List[str],
-                                           block_position: str) -> str:
-    """Create prompt for speaker block relationship scoring."""
+def create_enhanced_speaker_block_relationship_prompt(company_name: str, fiscal_info: str,
+                                                    current_speaker: str, current_summary: str,
+                                                    previous_speaker: str, previous_summary: str,
+                                                    next_speaker: str, next_summary: str,
+                                                    financial_categories: List[str],
+                                                    block_position: str, current_block_type: str = "statement") -> str:
+    """Create enhanced prompt for speaker block relationship scoring with pattern recognition."""
     
     categories_str = ', '.join(financial_categories) if financial_categories else 'General Business'
     
@@ -775,96 +798,191 @@ def create_speaker_block_relationship_prompt(company_name: str, fiscal_info: str
   <call_type>Earnings Call Management Discussion</call_type>
   <current_speaker>{current_speaker}</current_speaker>
   <block_position>{block_position}</block_position>
+  <block_type>{current_block_type}</block_type>
   <financial_focus>{categories_str}</financial_focus>
 </context>
 
 <objective>
-You are assessing context value for retrieval expansion in a {fiscal_info} earnings call transcript.
-Your decision determines whether neighboring blocks should be included to provide richer context.
+You are a specialized RAG retrieval context analyzer for earnings call transcripts. Your role is to determine when speaker blocks require neighboring context to provide complete, meaningful information to users during retrieval.
 
-YOUR TASK:
-Determine if neighboring speaker blocks would ADD MEANINGFUL VALUE when retrieved with the current block.
+RETRIEVAL SCENARIO IMPACT:
+When users query this earnings call transcript, your assessment directly controls:
+- backward_context_required = True → Previous speaker block WILL be retrieved alongside current block
+- forward_context_required = True → Next speaker block WILL be retrieved alongside current block
+- These flags enable RAG systems to provide richer, more complete responses
 
-RETRIEVAL SCENARIO:
-When a user searches and the current block matches their query, your flags determine:
-- backward_context_required = True → Previous block WILL be included to provide additional context
-- backward_context_required = False → Previous block adds no meaningful value
-- forward_context_required = True → Next block WILL be included to provide additional context
-- forward_context_required = False → Next block adds no meaningful value
-
-DECISION CRITERIA for "True" (context ADDS VALUE):
-1. ENHANCES UNDERSTANDING: Neighboring block provides useful background or follow-up
-   - Previous block sets up the topic discussed in current block
-   - Next block provides examples, details, or consequences of current block
-   - Related financial metrics or explanations across blocks
-
-2. THEMATIC CONTINUITY: Same topic or theme flows across blocks
-   - Same speaker continuing a multi-part explanation
-   - Different speakers discussing related aspects of same topic
-   - Progressive development of an argument or analysis
-
-3. CONVERSATIONAL FLOW: Natural progression that users would find helpful
-   - Question-answer pairs that span blocks
-   - Cause-and-effect relationships
-   - Building context that enriches understanding
-
-4. COMPLEMENTARY INFORMATION: Different but related perspectives
-   - Previous block provides context for current decision/statement  
-   - Next block shows impact or implementation of current discussion
-   - Cross-references to same financial data or initiatives
-
-DECISION CRITERIA for "False" (context ADDS NO VALUE):
-1. UNRELATED TOPICS: Neighboring blocks discuss completely different subjects
-   - Clear topic transitions with no thematic connection
-   - Different business segments or metrics with no overlap
-
-2. PURE REDUNDANCY: Neighboring blocks repeat the same information
-   - Identical points restated by same or different speakers
-   - No new insights or perspectives added
-
-3. PROCEDURAL CONTENT: Neighboring blocks are just transitions/housekeeping
-   - "Thank you", "Next question", "Moving on..."
-   - Pure introductions with no substantive content
-
-GUIDANCE: Err on the side of inclusion - if there's reasonable doubt about value, choose True.
-Users benefit from richer context during retrieval, so be generous with context expansion.
+Your decisions optimize the balance between:
+✓ COMPREHENSIVE CONTEXT: Users get complete picture when blocks are interdependent
+✓ PRECISE RETRIEVAL: Avoid noise when blocks are truly independent
+✓ CONVERSATION FLOW: Preserve natural discussion threads and logical progressions
 </objective>
 
+<context_dependency_framework>
+STRONG INDICATORS for Context Requirements (Choose TRUE):
+
+1. INCOMPLETE THOUGHTS & CONTINUATIONS
+   - Current block references "as I mentioned," "continuing on that," "building on that"
+   - Speaker explicitly connects to previous statements: "following up on," "to add to that"
+   - Numerical sequences: "first," "second," "finally" spanning blocks
+   - Incomplete explanations continued in neighboring blocks
+
+2. CAUSE-EFFECT RELATIONSHIPS
+   - Previous block explains WHY → Current block explains WHAT/HOW
+   - Current block presents PROBLEM → Next block presents SOLUTION
+   - Previous block gives CONTEXT → Current block gives SPECIFIC METRICS/EXAMPLES
+   - Decision rationale spans multiple blocks
+
+3. THEMATIC CONVERSATION THREADS
+   - Same financial topic (revenue, costs, capital) discussed across multiple speakers
+   - Different aspects of same business initiative explained in sequence
+   - Related metrics or performance indicators referenced across blocks
+   - Follow-up clarifications or additional details in neighboring blocks
+
+4. QUESTION-ANSWER FLOW PATTERNS
+   - Previous block asks question → Current block provides answer
+   - Current block raises issue → Next block provides resolution/clarification
+   - Multi-part explanations where answer spans multiple speaker turns
+   - Cross-references between speakers on same topic
+
+5. CONTEXTUAL SETUP & PAYOFF
+   - Previous block provides background/setup → Current block delivers key insight
+   - Current block mentions initiative/strategy → Next block provides details/metrics
+   - Historical context in one block → Current performance in next
+   - Comparative discussions spanning multiple blocks
+
+CLEAR INDICATORS for Independence (Choose FALSE):
+
+1. TOPIC TRANSITIONS
+   - Clear subject changes: revenue discussion → regulatory discussion
+   - Different business segments with no overlap
+   - Procedural transitions: "moving to next question," "shifting topics"
+   - Calendar/temporal breaks: "next quarter," "different timeframe"
+
+2. SELF-CONTAINED STATEMENTS
+   - Complete thoughts with no external references
+   - Standalone metrics, statistics, or announcements
+   - Independent procedural comments: "thank you," "good morning"
+   - Purely introductory or closing remarks
+
+3. SPEAKER-SPECIFIC CONTEXTS
+   - Different speakers discussing unrelated areas of expertise
+   - No thematic or numerical connections between blocks
+   - Independent commentary with no cross-references
+</context_dependency_framework>
+
+<decision_guidelines>
+CONTEXTUAL EXPANSION PHILOSOPHY:
+- GENEROUS INCLUSION: When in doubt, include context (users benefit from richer information)
+- PRESERVE CONVERSATIONS: Maintain natural flow of earnings call discussions
+- PROTECT INSIGHTS: Ensure key insights aren't separated from their explanatory context
+- AVOID NOISE: Only exclude when blocks are clearly unrelated or purely redundant
+
+EVALUATION QUESTIONS:
+1. "Would a user searching for this content benefit from seeing the neighboring block?"
+2. "Does the neighboring block help explain, setup, or follow-up on the current content?"
+3. "Are there shared concepts, metrics, or themes that connect these blocks?"
+4. "Would removing the neighboring context make this block harder to understand?"
+
+DEFAULT LOGIC:
+- If ANY meaningful connection exists → TRUE
+- Only choose FALSE for obvious topic breaks or pure redundancy
+- Err on side of inclusion for better user experience
+</decision_guidelines>
+
+<pattern_examples>
+EXAMPLE 1 - STRONG BACKWARD CONTEXT (TRUE):
+Previous: "We've been investing heavily in our digital transformation initiatives"
+Current: "This resulted in a 15% increase in digital engagement and $50M in cost savings"
+→ backward_context_required = TRUE (cause-effect relationship, "This resulted" references previous)
+
+EXAMPLE 2 - STRONG FORWARD CONTEXT (TRUE):  
+Current: "Our capital ratio improved significantly this quarter"
+Next: "Specifically, our CET1 ratio increased to 12.5%, well above regulatory minimums"
+→ forward_context_required = TRUE (next block provides specific details/metrics)
+
+EXAMPLE 3 - WEAK CONTEXT (FALSE):
+Previous: "Thank you for the question about our revenue growth"
+Current: "Moving to regulatory capital, our Basel III requirements..."
+Next: "In terms of geographic performance, Canada showed strong results"
+→ Both FALSE (clear topic transitions, no thematic connection)
+
+EXAMPLE 4 - CONVERSATION THREAD (BOTH TRUE):
+Previous: "The credit loss environment has been favorable this quarter"
+Current: "Building on that, we've seen a 20 basis point improvement in our provision expense"  
+Next: "This trend should continue if economic conditions remain stable"
+→ backward_context_required = TRUE ("Building on that" references previous)
+→ forward_context_required = TRUE (logical continuation of trend discussion)
+</pattern_examples>
+
+<earnings_call_context_patterns>
+FINANCIAL METRICS RELATIONSHIPS:
+- Previous block mentions performance → Current gives specific numbers
+- Current states metric → Next provides comparison/benchmark
+- Quarter-over-quarter or year-over-year comparisons spanning blocks
+
+GUIDANCE & OUTLOOK PATTERNS:
+- Previous provides context → Current gives forward guidance
+- Current states outlook → Next provides supporting rationale
+- Multi-part guidance explanations across speakers
+
+BUSINESS SEGMENT DISCUSSIONS:
+- Segment introduction → Specific performance metrics
+- Performance results → Strategic rationale or outlook
+- Cross-segment comparisons and references
+
+REGULATORY & CAPITAL DISCUSSIONS:
+- Regulatory context → Specific compliance metrics
+- Capital position → Risk management implications
+- Stress testing results → Capital planning consequences
+
+STRATEGIC INITIATIVE EXPLANATIONS:
+- Initiative announcement → Implementation details
+- Investment rationale → Expected returns/benefits
+- Progress updates → Future milestones
+</earnings_call_context_patterns>
+
 <current_block>
-SPEAKER: {current_speaker}
+SPEAKER: {current_speaker}  
 SUMMARY: {current_summary}
+ANALYSIS_FOCUS: Identify references to previous content, incomplete thoughts, or lead-ins to future discussion
 </current_block>
 
 <previous_block>
 SPEAKER: {previous_speaker if previous_speaker else "N/A (First block)"}
 SUMMARY: {previous_summary if previous_summary else "N/A"}
+RELATIONSHIP_CHECK: Does this block provide setup, context, or connect thematically to current block?
 </previous_block>
 
 <next_block>
-SPEAKER: {next_speaker if next_speaker else "N/A (Last block)"}
+SPEAKER: {next_speaker if next_speaker else "N/A (Last block)"}  
 SUMMARY: {next_summary if next_summary else "N/A"}
+RELATIONSHIP_CHECK: Does this block provide follow-up, clarification, or connect thematically to current block?
 </next_block>
 
-<style>
-Analytical and precise. Focus on information relationships and retrieval utility.
-</style>
-
-<tone>
-Objective and systematic. Consider the practical retrieval scenario.
-</tone>
-
-<audience>
-A retrieval system that needs to decide whether to include neighboring speaker blocks.
-</audience>
-
 <response_format>
-Use the assess_speaker_block_context function.
-- backward_context_required: True/False - Does previous block ADD VALUE to user understanding?
-- forward_context_required: True/False - Does next block ADD VALUE to user understanding?
-- Be generous: if neighboring block provides any meaningful context, choose True
-- Consider user benefit: Would richer context help them better understand the topic?
-- Default to True if uncertain - users benefit from more context during retrieval
-- Only choose False for clearly unrelated or purely redundant content
+Use the assess_speaker_block_context function with this enhanced evaluation:
+
+backward_context_required: 
+- TRUE if previous block provides meaningful setup, background, or thematic connection
+- Consider: Does previous block explain WHY current block makes sense?
+- Look for: Cause-effect, question-answer, thematic continuation, contextual setup
+
+forward_context_required:
+- TRUE if next block provides meaningful follow-up, details, or thematic connection  
+- Consider: Does next block expand on, clarify, or continue current block's theme?
+- Look for: Examples, consequences, additional details, logical continuation
+
+relationship_confidence:
+- HIGH: Clear linguistic/thematic connections between blocks
+- MEDIUM: Some connection but less obvious
+- LOW: Uncertain or weak connections
+
+context_type:
+- Select all applicable relationship categories detected
+- Focus on primary patterns: causal, thematic, conversational, sequential
+
+SPECIFIC BIAS: Favor inclusion (TRUE) unless blocks are obviously unrelated.
+RAG users benefit from comprehensive context during retrieval.
 </response_format>
 """
 
@@ -945,8 +1063,31 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                 enhanced_records.extend(block_records)
                 continue
             
-            # Create relationship scoring prompt
-            system_prompt = create_speaker_block_relationship_prompt(
+            # Detect incomplete thoughts and references for enhanced prompting
+            current_content = " ".join([r.get("paragraph_text", "") for r in block_records])
+            
+            has_incomplete_indicators = any(indicator in current_content.lower() for indicator in [
+                "as i mentioned", "continuing on", "building on", "to add to that",
+                "first,", "second,", "finally,", "in addition", "furthermore",
+                "let me address this in", "parts", "two parts", "several aspects"
+            ])
+            
+            # Detect causal language
+            has_causal_language = any(indicator in current_content.lower() for indicator in [
+                "this resulted", "because of", "due to", "as a result", 
+                "consequently", "therefore", "this led to", "resulting in"
+            ])
+            
+            # Determine block content type for enhanced analysis
+            if has_incomplete_indicators:
+                current_block_type = "incomplete"
+            elif has_causal_language:
+                current_block_type = "causal"
+            else:
+                current_block_type = "statement"
+            
+            # Create enhanced relationship scoring prompt
+            system_prompt = create_enhanced_speaker_block_relationship_prompt(
                 company_name=block_records[0].get("company_name", "Unknown"),
                 fiscal_info=f"{block_records[0].get('fiscal_year')} {block_records[0].get('fiscal_quarter')}",
                 current_speaker=current_speaker,
@@ -956,7 +1097,8 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                 next_speaker=next_speaker,
                 next_summary=next_summary,
                 financial_categories=block_records[0].get("category_type", []),
-                block_position=block_position
+                block_position=block_position,
+                current_block_type=current_block_type
             )
             
             # Build simple context for LLM (summaries are in the prompt)
@@ -976,18 +1118,30 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                 timeout=config["stage_08_speaker_block_relationships"]["llm_config"]["timeout"]
             )
             
-            # Process LLM response
+            # Process enhanced LLM response
             if response.choices and response.choices[0].message.tool_calls:
                 tool_call = response.choices[0].message.tool_calls[0]
                 response_data = json.loads(tool_call.function.arguments)
                 
                 backward_context_required = response_data.get("backward_context_required", False)
                 forward_context_required = response_data.get("forward_context_required", False)
+                relationship_confidence = response_data.get("relationship_confidence", "medium")
+                context_type = response_data.get("context_type", [])
                 
-                # Apply context requirement flags to all paragraphs in this speaker block
+                # Apply enhanced context requirement flags to all paragraphs in this speaker block
                 for record in block_records:
                     record["backward_context_required"] = backward_context_required
                     record["forward_context_required"] = forward_context_required
+                    record["relationship_confidence"] = relationship_confidence
+                    record["context_type"] = context_type
+                    record["analysis_metadata"] = {
+                        "linguistic_indicators": [],
+                        "block_position": block_position,
+                        "speaker_continuity": previous_speaker == current_speaker if previous_speaker else False,
+                        "theme_continuity": "thematic_continuation" in context_type,
+                        "has_incomplete_indicators": has_incomplete_indicators,
+                        "has_causal_language": has_causal_language
+                    }
                 
                 enhanced_records.extend(block_records)
                 
@@ -1002,7 +1156,7 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                         "cost": cost_data
                     })
                 
-                log_execution(f"Assessed context for Management speaker block {block_id}: backward={backward_context_required}, forward={forward_context_required}")
+                log_execution(f"Enhanced context assessment for Management speaker block {block_id}: backward={backward_context_required}, forward={forward_context_required}, confidence={relationship_confidence}, types={context_type}")
             
             else:
                 enhanced_error_logger.log_summarization_error(
@@ -1015,6 +1169,9 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                 for record in block_records:
                     record["backward_context_required"] = None
                     record["forward_context_required"] = None
+                    record["relationship_confidence"] = None
+                    record["context_type"] = None
+                    record["analysis_metadata"] = None
                 
                 enhanced_records.extend(block_records)
         
@@ -1029,6 +1186,9 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
             for record in block_records:
                 record["backward_context_required"] = None
                 record["forward_context_required"] = None
+                record["relationship_confidence"] = None
+                record["context_type"] = None
+                record["analysis_metadata"] = None
             
             enhanced_records.extend(block_records)
     
@@ -1055,11 +1215,14 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     except Exception as e:
         enhanced_error_logger.log_processing_error(transcript_id, f"Transcript processing failed: {e}")
         
-        # Return original records with null context requirement fields
+        # Return original records with null enhanced context requirement fields
         for record in transcript_records:
             if record.get("section_name") == "MANAGEMENT DISCUSSION SECTION":
                 record["backward_context_required"] = None
                 record["forward_context_required"] = None
+                record["relationship_confidence"] = None
+                record["context_type"] = None
+                record["analysis_metadata"] = None
         
         return transcript_records
 
