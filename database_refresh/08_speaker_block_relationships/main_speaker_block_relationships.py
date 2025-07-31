@@ -745,11 +745,11 @@ def create_speaker_block_relationship_tools() -> List[Dict]:
                 "properties": {
                     "backward_context_required": {
                         "type": "boolean",
-                        "description": "True if the previous speaker block provides essential context for understanding the current block; False if current block is self-contained"
+                        "description": "True if the previous speaker block adds meaningful context that would enhance user understanding of the current block; False if it provides no additional value"
                     },
                     "forward_context_required": {
                         "type": "boolean", 
-                        "description": "True if the next speaker block provides essential context for understanding the current block; False if current block is self-contained"
+                        "description": "True if the next speaker block adds meaningful context that would enhance user understanding of the current block; False if it provides no additional value"
                     }
                 },
                 "required": ["backward_context_required", "forward_context_required"]
@@ -779,53 +779,55 @@ def create_speaker_block_relationship_prompt(company_name: str, fiscal_info: str
 </context>
 
 <objective>
-You are assessing context dependencies between speaker blocks in a {fiscal_info} earnings call transcript.
-Your decision will determine whether neighboring blocks are retrieved together during search.
+You are assessing context value for retrieval expansion in a {fiscal_info} earnings call transcript.
+Your decision determines whether neighboring blocks should be included to provide richer context.
 
 YOUR TASK:
-Determine if neighboring speaker blocks are REQUIRED for proper understanding of the CURRENT block.
+Determine if neighboring speaker blocks would ADD MEANINGFUL VALUE when retrieved with the current block.
 
 RETRIEVAL SCENARIO:
 When a user searches and the current block matches their query, your flags determine:
-- backward_context_required = True → Previous block WILL be included in results
-- backward_context_required = False → Previous block will NOT be included
-- forward_context_required = True → Next block WILL be included in results  
-- forward_context_required = False → Next block will NOT be included
+- backward_context_required = True → Previous block WILL be included to provide additional context
+- backward_context_required = False → Previous block adds no meaningful value
+- forward_context_required = True → Next block WILL be included to provide additional context
+- forward_context_required = False → Next block adds no meaningful value
 
-DECISION CRITERIA for "True" (context IS required):
-1. INCOMPLETE INFORMATION: Current block references something explained in neighboring block
-   - "As I mentioned earlier..." (backward = True)
-   - "Let me elaborate on that..." (forward = True)
-   - Numbers/metrics defined in neighboring block but used in current
+DECISION CRITERIA for "True" (context ADDS VALUE):
+1. ENHANCES UNDERSTANDING: Neighboring block provides useful background or follow-up
+   - Previous block sets up the topic discussed in current block
+   - Next block provides examples, details, or consequences of current block
+   - Related financial metrics or explanations across blocks
 
-2. LOGICAL DEPENDENCIES: Current block's meaning changes without neighboring context
-   - Current block answers a question posed in previous block
-   - Current block sets up information completed in next block
-   - Multi-part explanations split across blocks
+2. THEMATIC CONTINUITY: Same topic or theme flows across blocks
+   - Same speaker continuing a multi-part explanation
+   - Different speakers discussing related aspects of same topic
+   - Progressive development of an argument or analysis
 
-3. CONVERSATIONAL FLOW: Breaking the connection loses critical meaning
-   - Speaker handoffs where context carries over
-   - Progressive building of an argument
-   - Cause-and-effect relationships across blocks
+3. CONVERSATIONAL FLOW: Natural progression that users would find helpful
+   - Question-answer pairs that span blocks
+   - Cause-and-effect relationships
+   - Building context that enriches understanding
 
-DECISION CRITERIA for "False" (context NOT required):
-1. SELF-CONTAINED: Current block has complete information on its topic
-   - Full explanation of a metric or initiative
-   - Complete answer to a question
-   - Standalone financial results
+4. COMPLEMENTARY INFORMATION: Different but related perspectives
+   - Previous block provides context for current decision/statement  
+   - Next block shows impact or implementation of current discussion
+   - Cross-references to same financial data or initiatives
 
-2. TOPIC CHANGE: Clear transition to unrelated subject
-   - "Moving on to a different topic..."
-   - "Let me now discuss..."
-   - New speaker introducing new theme
+DECISION CRITERIA for "False" (context ADDS NO VALUE):
+1. UNRELATED TOPICS: Neighboring blocks discuss completely different subjects
+   - Clear topic transitions with no thematic connection
+   - Different business segments or metrics with no overlap
 
-3. REDUNDANCY: Neighboring blocks would add no new information
-   - Repetition of same points
-   - Procedural transitions
-   - Thank you/acknowledgment blocks
+2. PURE REDUNDANCY: Neighboring blocks repeat the same information
+   - Identical points restated by same or different speakers
+   - No new insights or perspectives added
 
-CRITICAL: Think from a user's perspective - if they searched and found the current block,
-would they be confused or missing key information without the neighboring block?
+3. PROCEDURAL CONTENT: Neighboring blocks are just transitions/housekeeping
+   - "Thank you", "Next question", "Moving on..."
+   - Pure introductions with no substantive content
+
+GUIDANCE: Err on the side of inclusion - if there's reasonable doubt about value, choose True.
+Users benefit from richer context during retrieval, so be generous with context expansion.
 </objective>
 
 <current_block>
@@ -857,11 +859,12 @@ A retrieval system that needs to decide whether to include neighboring speaker b
 
 <response_format>
 Use the assess_speaker_block_context function.
-- backward_context_required: True/False - Is previous block REQUIRED for understanding?
-- forward_context_required: True/False - Is next block REQUIRED for understanding?
-- Be decisive: either the context is required (True) or it's not (False)
-- Consider user confusion: Would they miss critical information without the neighboring block?
-- Default to False if uncertain - avoid over-including irrelevant content
+- backward_context_required: True/False - Does previous block ADD VALUE to user understanding?
+- forward_context_required: True/False - Does next block ADD VALUE to user understanding?
+- Be generous: if neighboring block provides any meaningful context, choose True
+- Consider user benefit: Would richer context help them better understand the topic?
+- Default to True if uncertain - users benefit from more context during retrieval
+- Only choose False for clearly unrelated or purely redundant content
 </response_format>
 """
 
