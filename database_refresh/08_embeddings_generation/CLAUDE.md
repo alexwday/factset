@@ -85,11 +85,17 @@ python main_embeddings_generation.py --config ../config.yaml
 ```
 
 ## Configuration
-Uses the same `config.yaml` as other stages with OpenAI API configuration:
+Uses the same `config.yaml` as other stages with OAuth authentication:
 
 ```yaml
-openai:
-  api_key: your-api-key-here
+# OAuth configuration (same as Stage 07)
+stage_08_embeddings_generation:
+  llm_config:
+    base_url: "https://api.openai.com/v1"
+    model: "text-embedding-3-large"
+    timeout: 30
+    max_retries: 3
+    token_endpoint: "https://auth.example.com/oauth/token"
   
 database:
   host: localhost
@@ -98,6 +104,14 @@ database:
   user: your-user
   password: your-password
 ```
+
+### Authentication
+- **OAuth 2.0**: Client credentials flow (same as Stage 07)
+- **Environment Variables Required**:
+  - `LLM_CLIENT_ID`: OAuth client ID
+  - `LLM_CLIENT_SECRET`: OAuth client secret
+- **SSL Certificate**: Uses `ssl_cert_path` from config if available
+- **Token Refresh**: Automatic refresh every 500 embeddings
 
 ### Embedding Configuration
 - **Model**: text-embedding-3-large

@@ -203,6 +203,26 @@ stage_06_llm_classification:
       use_when: "Non-financial content, introductions, procedural matters, or unclear topics"
       example_phrases: "thank you, good morning, operator, next question"
 
+# Database Configuration (for stages that use PostgreSQL)
+database:
+  host: localhost
+  port: 5432
+  name: factset_transcripts
+  user: postgres
+  password: postgres  # Update with your actual password
+
+# Stage 08 specific settings (Embeddings Generation)
+stage_08_embeddings_generation:
+  description: "Generate embeddings from summarized content"
+  
+  # LLM configuration (uses same OAuth as Stage 07)
+  llm_config:
+    base_url: "https://api.openai.com/v1"
+    model: "text-embedding-3-large"
+    timeout: 30
+    max_retries: 3
+    token_endpoint: "https://auth.example.com/oauth/token"  # Same as Stage 07
+
 # Stage 07 specific settings (LLM Content Summarization)
 stage_07_llm_summarization:
   description: "LLM-based content summarization"
@@ -223,25 +243,6 @@ stage_07_llm_summarization:
     timeout: 30
     token_endpoint: "https://auth.example.com/oauth/token"  # Replace with actual OAuth endpoint
 
-# Stage 08 specific settings (Speaker Block Relationship Scoring)
-stage_08_speaker_block_relationships:
-  description: "Speaker block relationship scoring for Management Discussion sections"
-  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
-  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
-  dev_mode: true
-  dev_max_transcripts: 2
-  
-  # LLM configuration for relationship scoring
-  llm_config:
-    base_url: "https://api.openai.com/v1"
-    model: "gpt-4o-2024-08-06"
-    temperature: 0.0  # Lower temperature for consistent scoring
-    max_tokens: 200   # Smaller response (just two scores)
-    cost_per_1k_prompt_tokens: 0.0025
-    cost_per_1k_completion_tokens: 0.01
-    timeout: 30
-    token_endpoint: "https://auth.example.com/oauth/token"  # Replace with actual OAuth endpoint
 
 # Monitored Financial Institutions
 # Format: ticker: {name, type}

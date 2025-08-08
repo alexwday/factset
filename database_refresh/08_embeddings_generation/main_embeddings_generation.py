@@ -23,6 +23,7 @@ from openai import OpenAI
 import tiktoken
 import numpy as np
 from tqdm import tqdm
+import requests
 
 # Configure logging
 logging.basicConfig(
@@ -44,6 +45,8 @@ class EmbeddingsGenerator:
         self.db_conn = None
         self.db_cursor = None
         self.openai_client = None
+        self.oauth_token = None
+        self.ssl_cert_path = None
         self.tokenizer = None
         self.stats = defaultdict(int)
         
@@ -64,9 +67,11 @@ class EmbeddingsGenerator:
         with open(config_file, 'r') as f:
             config = yaml.safe_load(f)
         
-        # Override with environment variables if present
-        if 'OPENAI_API_KEY' in os.environ:
-            config['openai']['api_key'] = os.environ['OPENAI_API_KEY']
+        # Check for SSL certificate path
+        if 'ssl_cert_path' in config:
+            cert_path = Path(__file__).parent.parent / config['ssl_cert_path']
+            if cert_path.exists():
+                self.ssl_cert_path = str(cert_path)
         
         return config
     
@@ -86,12 +91,61 @@ class EmbeddingsGenerator:
             logger.error(f"Failed to connect to database: {e}")
             raise
     
-    def setup_openai(self):
-        """Initialize OpenAI client and tokenizer."""
+    def get_oauth_token(self) -> Optional[str]:
+        """Obtain OAuth token for LLM API access."""
         try:
-            self.openai_client = OpenAI(api_key=self.config['openai']['api_key'])
+            token_endpoint = self.config['stage_08_embeddings_generation']['llm_config']['token_endpoint']
+            
+            auth_data = {
+                'grant_type': 'client_credentials',
+                'client_id': os.getenv("LLM_CLIENT_ID"),
+                'client_secret': os.getenv("LLM_CLIENT_SECRET")
+            }
+            
+            headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+            
+            # Set up SSL context if certificate available
+            verify_ssl = True
+            if self.ssl_cert_path and os.path.exists(self.ssl_cert_path):
+                verify_ssl = self.ssl_cert_path
+            
+            response = requests.post(
+                token_endpoint,
+                data=auth_data,
+                headers=headers,
+                verify=verify_ssl,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                token_data = response.json()
+                return token_data.get('access_token')
+            else:
+                logger.error(f"OAuth token request failed: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"OAuth token acquisition failed: {e}")
+            return None
+    
+    def setup_openai(self):
+        """Initialize OpenAI client with OAuth and tokenizer."""
+        try:
+            # Get OAuth token
+            self.oauth_token = self.get_oauth_token()
+            if not self.oauth_token:
+                raise RuntimeError("Failed to obtain OAuth token")
+            
+            # Setup OpenAI client with OAuth token
+            self.openai_client = OpenAI(
+                api_key=self.oauth_token,
+                base_url=self.config['stage_08_embeddings_generation']['llm_config']['base_url'],
+                timeout=self.config['stage_08_embeddings_generation']['llm_config']['timeout']
+            )
+            
+            # Setup tokenizer
             self.tokenizer = tiktoken.get_encoding("cl100k_base")  # GPT-4 tokenizer
-            logger.info("OpenAI client and tokenizer initialized")
+            logger.info("OpenAI client with OAuth and tokenizer initialized")
         except Exception as e:
             logger.error(f"Failed to setup OpenAI: {e}")
             raise
@@ -290,9 +344,14 @@ class EmbeddingsGenerator:
                 
                 self.stats['paragraphs_processed'] += 1
                 
-                # Rate limiting
+                # Rate limiting and OAuth refresh
                 if self.stats['embeddings_generated'] % 100 == 0:
                     time.sleep(1)  # Brief pause every 100 embeddings
+                    
+                # Refresh OAuth token every 500 embeddings to prevent expiration
+                if self.stats['embeddings_generated'] % 500 == 0 and self.stats['embeddings_generated'] > 0:
+                    logger.info("Refreshing OAuth token...")
+                    self.setup_openai()
             
             return processed_records
             
