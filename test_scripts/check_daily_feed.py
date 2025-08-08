@@ -39,7 +39,8 @@ NAS_SERVER_NAME = os.getenv('NAS_SERVER_NAME')
 NAS_SHARE_NAME = os.getenv('NAS_SHARE_NAME')
 NAS_BASE_PATH = os.getenv('NAS_BASE_PATH')
 NAS_PORT = int(os.getenv('NAS_PORT', 445))
-CONFIG_PATH = os.getenv('CONFIG_PATH')
+# Default to config.yaml if not specified
+CONFIG_PATH = os.getenv('CONFIG_PATH', 'database_refresh/config.yaml')
 CLIENT_MACHINE_NAME = os.getenv('CLIENT_MACHINE_NAME')
 PROXY_DOMAIN = os.getenv('PROXY_DOMAIN', 'MAPLE')
 
@@ -47,7 +48,7 @@ PROXY_DOMAIN = os.getenv('PROXY_DOMAIN', 'MAPLE')
 required_env_vars = [
     'API_USERNAME', 'API_PASSWORD', 'PROXY_USER', 'PROXY_PASSWORD', 'PROXY_URL',
     'NAS_USERNAME', 'NAS_PASSWORD', 'NAS_SERVER_IP', 'NAS_SERVER_NAME',
-    'NAS_SHARE_NAME', 'NAS_BASE_PATH', 'CONFIG_PATH', 'CLIENT_MACHINE_NAME'
+    'NAS_SHARE_NAME', 'NAS_BASE_PATH', 'CLIENT_MACHINE_NAME'
 ]
 
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
@@ -204,7 +205,7 @@ def main():
         return
     
     # Setup SSL certificate
-    temp_cert_path = setup_ssl_certificate(nas_conn, config['ssl_cert_nas_path'])
+    temp_cert_path = setup_ssl_certificate(nas_conn, config['ssl_cert_path'])
     if not temp_cert_path:
         nas_conn.close()
         return
