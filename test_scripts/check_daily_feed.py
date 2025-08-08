@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Set, Tuple, Any
 import warnings
 from dotenv import load_dotenv
 import json
+import yaml
 
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -94,7 +95,11 @@ def load_config(nas_conn: SMBConnection) -> Dict[str, Any]:
         config_data = nas_download_file(nas_conn, CONFIG_PATH)
         
         if config_data:
-            config = json.loads(config_data.decode('utf-8'))
+            # Check if it's YAML or JSON based on file extension
+            if CONFIG_PATH.endswith('.yaml') or CONFIG_PATH.endswith('.yml'):
+                config = yaml.safe_load(config_data.decode('utf-8'))
+            else:
+                config = json.loads(config_data.decode('utf-8'))
             print("✅ Successfully loaded configuration from NAS")
             return config
         else:
