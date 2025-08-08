@@ -35,9 +35,12 @@ api_settings:
 
 # Stage 00 specific settings
 stage_00_download_historical:
-  description: "Historical download using 3-year rolling window"
+  description: "Historical download using 3-year rolling window or fixed start year"
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  # Optional: Set a fixed start year instead of using 3-year rolling window
+  # Uncomment and set to desired year (e.g., 2020) to download from that year to present
+  # start_year: 2020
 
 # Stage 01 specific settings
 stage_01_download_daily:

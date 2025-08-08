@@ -313,6 +313,17 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             error_msg = f"Missing required stage_00_download_historical setting: {setting}"
             log_error(error_msg, "config_validation", {"missing_setting": setting})
             raise ValueError(error_msg)
+    
+    # Check for optional start_year setting
+    if "start_year" in config["stage_00_download_historical"]:
+        start_year = config["stage_00_download_historical"]["start_year"]
+        if start_year is not None:
+            # Validate start_year is a reasonable value
+            current_year = datetime.now().year
+            if not isinstance(start_year, int) or start_year < 2000 or start_year > current_year:
+                error_msg = f"Invalid start_year: {start_year}. Must be between 2000 and {current_year}"
+                log_error(error_msg, "config_validation", {"start_year": start_year})
+                raise ValueError(error_msg)
 
     # Validate ssl_cert_path is not empty
     if not config["ssl_cert_path"] or not config["ssl_cert_path"].strip():
@@ -862,20 +873,38 @@ def scan_existing_transcripts(nas_conn: SMBConnection) -> List[Dict[str, str]]:
     return transcript_inventory
 
 
-def calculate_rolling_window() -> Tuple[datetime.date, datetime.date]:
-    """Calculate 3-year rolling window from current date."""
+def calculate_rolling_window(start_year: Optional[int] = None) -> Tuple[datetime.date, datetime.date]:
+    """Calculate date window from start year to present or use 3-year rolling window.
+    
+    Args:
+        start_year: Optional fixed start year. If None, uses 3-year rolling window.
+    
+    Returns:
+        Tuple of (start_date, end_date) for transcript filtering
+    """
     current_time = datetime.now()
     end_date = current_time.date()
-    start_date = datetime(end_date.year - 3, end_date.month, end_date.day).date()
+    
+    if start_year:
+        # Fixed start year mode - from January 1st of start year to present
+        start_date = datetime(start_year, 1, 1).date()
+        window_type = "Fixed Start Year"
+        calculation_method = f"From January 1, {start_year} to present"
+    else:
+        # 3-year rolling window mode (default)
+        start_date = datetime(end_date.year - 3, end_date.month, end_date.day).date()
+        window_type = "3-Year Rolling Window"
+        calculation_method = "Current date minus exactly 3 years"
 
     # Calculate additional context for logging
     total_days = (end_date - start_date).days
     quarters_covered = total_days / 91.25  # Approximate days per quarter
+    years_covered = total_days / 365.25  # Approximate years
 
     # Enhanced logging with simple explanation
     log_console(
-        f"3-Year Rolling Window: {start_date.isoformat()} to {end_date.isoformat()} "
-        f"({total_days} days, ~{round(quarters_covered, 1)} quarters)"
+        f"{window_type}: {start_date.isoformat()} to {end_date.isoformat()} "
+        f"({total_days} days, ~{round(years_covered, 1)} years, ~{round(quarters_covered, 1)} quarters)"
     )
     log_console(
         "API will return only transcripts within this date range. "
@@ -883,16 +912,18 @@ def calculate_rolling_window() -> Tuple[datetime.date, datetime.date]:
     )
 
     log_execution(
-        "Calculated 3-year rolling window for transcript sync",
+        f"Calculated {window_type.lower()} for transcript sync",
         {
             "calculation_time": current_time.isoformat(),
             "current_date": end_date.isoformat(),
             "window_start": start_date.isoformat(),
             "window_end": end_date.isoformat(),
-            "window_years": 3,
+            "window_type": window_type,
+            "start_year": start_year if start_year else "N/A (rolling window)",
             "total_days_covered": total_days,
+            "approximate_years_covered": round(years_covered, 1),
             "approximate_quarters_covered": round(quarters_covered, 1),
-            "calculation_method": "Current date minus exactly 3 years",
+            "calculation_method": calculation_method,
             "purpose": "API query date range for transcript filtering",
             "explanation": "API queries limited to this range, NAS files outside range will be removed",
         },
@@ -1408,12 +1439,16 @@ def main() -> None:
         api_configuration = setup_factset_api_client(proxy_url, ssl_cert_path)
 
         log_console("Setup complete - ready for API calls")
+        # Determine approach based on configuration
+        start_year_config = config["stage_00_download_historical"].get("start_year", None)
+        approach = f"Fixed start year ({start_year_config})" if start_year_config else "3-year rolling window"
+        
         log_execution(
             "Authentication and API setup completed",
             {
                 "monitored_institutions": len(config["monitored_institutions"]),
                 "transcript_types": config["api_settings"]["transcript_types"],
-                "approach": "3-year rolling window",
+                "approach": approach,
             },
         )
 
@@ -1440,9 +1475,13 @@ def main() -> None:
                 "WARNING",
             )
 
-        # Step 9: Calculate rolling window
-        log_console("Calculating 3-year rolling window...")
-        start_date, end_date = calculate_rolling_window()
+        # Step 9: Calculate date window (either fixed start year or 3-year rolling)
+        start_year = config["stage_00_download_historical"].get("start_year", None)
+        if start_year:
+            log_console(f"Calculating date window from {start_year} to present...")
+        else:
+            log_console("Calculating 3-year rolling window...")
+        start_date, end_date = calculate_rolling_window(start_year)
 
         # Step 10: Process each institution
         log_console("Processing institutions for transcript comparison...")
@@ -1563,13 +1602,15 @@ def main() -> None:
 
         # Log comprehensive processing summary
         net_change = total_to_download - total_to_remove
+        window_type = "fixed_start_year" if start_year else "rolling_window"
         log_execution(
             "Stage 0 processing calculations summary",
             {
-                "rolling_window": {
+                f"{window_type}": {
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
                     "total_days": (end_date - start_date).days,
+                    "start_year": start_year if start_year else "N/A",
                 },
                 "institution_processing": {
                     "total_institutions": len(config["monitored_institutions"]),
