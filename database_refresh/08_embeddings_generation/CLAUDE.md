@@ -3,12 +3,17 @@
 ## Overview
 This stage generates vector embeddings from Stage 7's summarized content for semantic search and retrieval-augmented generation (RAG).
 
+**Input**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json`
+**Output**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.json`
+
+Architecture exactly matches Stage 7 with NAS operations, incremental saving, and OAuth refresh.
+
 ## Key Features
 - **Token Calculation**: Uses tiktoken to calculate tokens for paragraphs and speaker/QA blocks
 - **Intelligent Chunking**: Breaks large paragraphs (>1000 tokens) into ~500 token chunks
 - **Embeddings Generation**: Creates full 3072-dimensional vectors using OpenAI's text-embedding-3-large
-- **PostgreSQL Integration**: Uses halfvec (16-bit float) type for efficient storage of 3072 dimensions
-- **Storage Optimization**: 50% reduction in storage compared to standard vectors while maintaining quality
+- **JSON Input/Output**: Reads from Stage 7 JSON and outputs enhanced JSON with embeddings
+- **Full Semantic Representation**: Leverages all 3072 dimensions for maximum embedding quality
 
 ## Process Flow
 
@@ -27,41 +32,28 @@ This stage generates vector embeddings from Stage 7's summarized content for sem
 ### 3. Embedding Generation
 - **Model**: text-embedding-3-large
 - **Dimensions**: 3072 (full model dimensions)
-- **Storage Type**: halfvec (16-bit floats)
-- **Benefits**: Better semantic representation with full dimensions
+- **Storage Type**: vector (32-bit floats)
+- **Benefits**: Maximum semantic representation with full dimensions
 - **Rate Limiting**: Pauses every 100 embeddings
 - **Retry Logic**: 3 attempts with exponential backoff
 
-## Database Schema
+## Output JSON Structure
 
-```sql
-CREATE TABLE stage_08_embeddings (
-    id SERIAL PRIMARY KEY,
-    event_id VARCHAR(50),
-    file_name TEXT,
-    section_type VARCHAR(10),
-    speaker_id INTEGER,
-    speaker_name TEXT,
-    speaker_title TEXT,
-    qa_id INTEGER,
-    question_speaker_name TEXT,
-    answer_speaker_name TEXT,
-    paragraph_id VARCHAR(100),
-    paragraph_sequence INTEGER,
-    paragraph_text TEXT,
-    paragraph_summary TEXT,
-    paragraph_tokens INTEGER,      -- New: tokens in original paragraph
-    block_tokens INTEGER,          -- New: total tokens in speaker/QA block
-    chunk_id INTEGER,              -- New: chunk number (1, 2, 3...)
-    chunk_text TEXT,               -- New: actual text of chunk
-    chunk_tokens INTEGER,          -- New: tokens in this chunk
-    embedding halfvec(3072),       -- New: embedding vector (halfvec for 3072 dims)
-    embedding_model VARCHAR(100),  -- New: model used (text-embedding-3-large)
-    embedding_dimensions INTEGER,  -- New: vector dimensions (3072)
-    processed_at_stage_7 TIMESTAMP,
-    processed_at_stage_8 TIMESTAMP,
-    UNIQUE(paragraph_id, chunk_id)
-);
+Each record in the output contains all fields from Stage 7 plus:
+
+```json
+{
+  // All original Stage 7 fields preserved...
+  
+  // New Stage 8 fields:
+  "paragraph_tokens": 850,        // Tokens in original paragraph
+  "block_tokens": 2500,           // Total tokens in speaker/QA block
+  "chunk_id": 1,                  // Chunk number (1, 2, 3...)
+  "total_chunks": 2,              // Total chunks for this paragraph
+  "chunk_text": "...",            // Actual text of chunk
+  "chunk_tokens": 425,            // Tokens in this chunk
+  "embedding": [0.123, -0.456, ...] // 3072-dimensional vector
+}
 ```
 
 ## Usage
@@ -72,52 +64,64 @@ cd database_refresh/08_embeddings_generation
 python main_embeddings_generation.py
 ```
 
-### With Options
-```bash
-# Process limited events
-python main_embeddings_generation.py --limit 10
-
-# Enable debug logging
-python main_embeddings_generation.py --debug
-
-# Custom config
-python main_embeddings_generation.py --config ../config.yaml
-```
+The script will:
+1. Connect to NAS using environment variables
+2. Load configuration from NAS
+3. Download Stage 7 output from NAS
+4. Process each transcript with OAuth token refresh
+5. Save results incrementally to NAS
+6. Save logs and error reports to NAS
 
 ## Configuration
-Uses the same `config.yaml` as other stages with OAuth authentication:
+Configuration is loaded from NAS at runtime from `config.yaml`:
 
 ```yaml
-# OAuth configuration (same as Stage 07)
 stage_08_embeddings_generation:
+  description: "Generate vector embeddings from Stage 7 summarized content"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  dev_mode: true
+  dev_max_transcripts: 10
+  
+  # Embedding configuration
+  embedding_config:
+    model: "text-embedding-3-large"
+    dimensions: 3072
+    chunk_threshold: 1000
+    target_chunk_size: 500
+    min_final_chunk: 300
+    rate_limit_pause: 100
+    token_refresh_interval: 500
+  
+  # LLM configuration (same OAuth as Stage 07)
   llm_config:
     base_url: "https://api.openai.com/v1"
-    model: "text-embedding-3-large"
     timeout: 30
     max_retries: 3
     token_endpoint: "https://auth.example.com/oauth/token"
-  
-database:
-  host: localhost
-  port: 5432
-  name: factset_transcripts
-  user: your-user
-  password: your-password
 ```
 
-### Authentication
-- **OAuth 2.0**: Client credentials flow (same as Stage 07)
-- **Environment Variables Required**:
-  - `LLM_CLIENT_ID`: OAuth client ID
-  - `LLM_CLIENT_SECRET`: OAuth client secret
-- **SSL Certificate**: Uses `ssl_cert_path` from config if available
-- **Token Refresh**: Automatic refresh every 500 embeddings
+### Authentication & NAS Access
+
+**Environment Variables Required**:
+- `NAS_SHARE_NAME`: NAS share name
+- `NAS_USER`: NAS username
+- `NAS_PASSWORD`: NAS password
+- `NAS_DOMAIN`: NAS domain (optional)
+- `LLM_CLIENT_ID`: OAuth client ID
+- `LLM_CLIENT_SECRET`: OAuth client secret
+
+**Features**:
+- OAuth 2.0 client credentials flow (same as Stage 07)
+- SSL certificate downloaded from NAS
+- Automatic OAuth token refresh per transcript
 
 ### Embedding Configuration
 - **Model**: text-embedding-3-large
 - **Dimensions**: 3072 (full dimensions)
-- **Storage**: halfvec (16-bit precision)
-- **Max supported**: 4000 dimensions with halfvec
+- **Storage**: vector (standard 32-bit precision)
+- **Requirements**: PostgreSQL with pgvector 0.5.0+
 
 ## Output Statistics
 The script provides detailed statistics:
@@ -127,29 +131,30 @@ The script provides detailed statistics:
 - Embedding failures
 - Average chunks per paragraph
 
-## Vector Search Queries
+## Working with Embeddings
 
-### Find Similar Content
-```sql
--- Find top 5 most similar chunks to a query
--- Note: Cast query embedding to halfvec(3072) for comparison
-SELECT 
-    chunk_text,
-    1 - (embedding <=> '[query_embedding]'::halfvec(3072)) AS similarity
-FROM stage_08_embeddings
-ORDER BY embedding <=> '[query_embedding]'::halfvec(3072)
-LIMIT 5;
-```
+### Loading and Searching Embeddings
+```python
+import json
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 
-### Aggregate by Speaker Block
-```sql
--- Get all chunks for a speaker block
-SELECT *
-FROM stage_08_embeddings
-WHERE event_id = 'EVENT123' 
-  AND section_type = 'MD'
-  AND speaker_id = 1
-ORDER BY paragraph_sequence, chunk_id;
+# Load embeddings
+with open('stage_08_embeddings.json', 'r') as f:
+    embeddings_data = json.load(f)
+
+# Extract embeddings and texts
+embeddings = np.array([record['embedding'] for record in embeddings_data])
+texts = [record['chunk_text'] for record in embeddings_data]
+
+# Search for similar content
+query_embedding = generate_embedding("your search query")  # Use same model
+similarities = cosine_similarity([query_embedding], embeddings)[0]
+top_5_indices = np.argsort(similarities)[-5:][::-1]
+
+for idx in top_5_indices:
+    print(f"Similarity: {similarities[idx]:.3f}")
+    print(f"Text: {texts[idx][:200]}...\n")
 ```
 
 ## Performance Considerations
@@ -163,11 +168,11 @@ ORDER BY paragraph_sequence, chunk_id;
 - Minimizes API calls by batching appropriately
 - Preserves semantic coherence in chunks
 
-### Database Optimization
-- Uses HNSW index with halfvec_cosine_ops for better performance
-- Composite unique constraint on (paragraph_id, chunk_id)
-- Indexes on event_id for fast lookups
-- 50% storage reduction with halfvec vs standard vectors
+### Processing Optimization
+- Batched processing with progress tracking
+- Automatic OAuth token refresh every 500 embeddings
+- Rate limiting with configurable pauses
+- Dev mode for testing with limited transcripts
 
 ## Error Handling
 - Retries embedding generation 3 times with exponential backoff
@@ -177,30 +182,24 @@ ORDER BY paragraph_sequence, chunk_id;
 
 ## Dependencies
 ```bash
-pip install psycopg2-binary
+pip install pyyaml
+pip install pysmb
+pip install python-dotenv
 pip install openai
 pip install tiktoken
-pip install numpy
-pip install pyyaml
-pip install tqdm
+pip install requests
 ```
 
-## PostgreSQL Requirements
-Ensure pgvector extension is installed (version 0.7.0+ required for halfvec):
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+## Storage Requirements
 
--- Verify halfvec support
-SELECT * FROM pg_available_extensions WHERE name = 'vector';
--- Should show version 0.7.0 or higher
-```
-
-### Why halfvec?
-- **Full Dimensions**: Supports all 3072 dimensions from text-embedding-3-large
-- **Storage Efficiency**: 50% less storage than standard vectors
-- **Performance**: 30% faster HNSW index builds
-- **Quality**: Minimal loss in precision for similarity search
-- **Capacity**: Supports up to 4000 dimensions (vs 2000 for standard vectors)
+### Embedding Storage
+- **Full Dimensions**: All 3072 dimensions from text-embedding-3-large
+- **Precision**: 32-bit floats for maximum accuracy
+- **Size per embedding**: ~12KB (3072 × 4 bytes)
+- **JSON file size estimates**:
+  - 1,000 embeddings: ~15 MB
+  - 10,000 embeddings: ~150 MB
+  - 100,000 embeddings: ~1.5 GB
 
 ## Next Steps
 The embeddings generated in this stage enable:

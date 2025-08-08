@@ -203,22 +203,28 @@ stage_06_llm_classification:
       use_when: "Non-financial content, introductions, procedural matters, or unclear topics"
       example_phrases: "thank you, good morning, operator, next question"
 
-# Database Configuration (for stages that use PostgreSQL)
-database:
-  host: localhost
-  port: 5432
-  name: factset_transcripts
-  user: postgres
-  password: postgres  # Update with your actual password
-
 # Stage 08 specific settings (Embeddings Generation)
 stage_08_embeddings_generation:
-  description: "Generate embeddings from summarized content"
+  description: "Generate vector embeddings from Stage 7 summarized content"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  dev_mode: true
+  dev_max_transcripts: 10
+  
+  # Embedding configuration
+  embedding_config:
+    model: "text-embedding-3-large"
+    dimensions: 3072  # Full dimensions
+    chunk_threshold: 1000  # Tokens threshold for chunking
+    target_chunk_size: 500  # Target size for chunks
+    min_final_chunk: 300  # Minimum size for final chunk
+    rate_limit_pause: 100  # Pause after this many embeddings
+    token_refresh_interval: 500  # Refresh OAuth token after this many embeddings
   
   # LLM configuration (uses same OAuth as Stage 07)
   llm_config:
     base_url: "https://api.openai.com/v1"
-    model: "text-embedding-3-large"
     timeout: 30
     max_retries: 3
     token_endpoint: "https://auth.example.com/oauth/token"  # Same as Stage 07
