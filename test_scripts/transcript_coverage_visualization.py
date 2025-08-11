@@ -76,6 +76,29 @@ class NASTranscriptScanner:
         # Build institution categories from config
         self.institution_categories = self._build_categories_from_config()
         
+        # Build a ticker to category mapping for quick lookups
+        self.ticker_to_category = {}
+        for ticker, info in self.monitored_institutions.items():
+            inst_type = info.get('type', 'Other')
+            # Map the type to display name
+            type_display_mapping = {
+                'Canadian_Banks': 'Canadian Banks',
+                'US_Banks': 'US Banks',
+                'European_Banks': 'European Banks',
+                'US_Boutiques': 'US Boutiques',
+                'Canadian_Asset_Managers': 'Canadian Asset Managers',
+                'US_Regionals': 'US Regionals',
+                'US_Wealth_Asset_Managers': 'US Wealth & Asset Managers',
+                'UK_Wealth_Asset_Managers': 'UK Wealth & Asset Managers',
+                'Nordic_Banks': 'Nordic Banks',
+                'Canadian_Insurers': 'Canadian Insurers',
+                'Canadian_Monoline_Lenders': 'Canadian Monoline Lenders',
+                'Australian_Banks': 'Australian Banks',
+                'Trusts': 'Trusts'
+            }
+            display_type = type_display_mapping.get(inst_type, inst_type.replace('_', ' '))
+            self.ticker_to_category[ticker] = display_type
+        
         # Data structure to hold coverage information
         self.coverage_data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: {
             "Raw": 0,
@@ -145,9 +168,12 @@ class NASTranscriptScanner:
         base_path = self.config.get('stage_00_download_historical', {}).get('output_data_path', 
                                     'Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data')
         
+        logger.info(f"Scanning for transcripts in base path: {base_path}")
+        
         try:
             # List year folders
             year_folders = conn.listPath(self.nas_share_name, base_path)
+            logger.info(f"Found {len([y for y in year_folders if y.isDirectory and y.filename not in ['.', '..']])} year folders")
             
             for year_entry in year_folders:
                 if year_entry.isDirectory and year_entry.filename.isdigit() and len(year_entry.filename) == 4:
@@ -170,9 +196,10 @@ class NASTranscriptScanner:
                                     type_folders = conn.listPath(self.nas_share_name, quarter_path)
                                     
                                     for type_entry in type_folders:
-                                        if type_entry.isDirectory:
+                                        if type_entry.isDirectory and type_entry.filename not in ['.', '..']:
                                             inst_type = type_entry.filename
                                             type_path = f"{quarter_path}/{inst_type}"
+                                            logger.debug(f"Found institution type folder: {inst_type} in {year}/{quarter}")
                                             
                                             # List institution folders
                                             try:
@@ -185,31 +212,51 @@ class NASTranscriptScanner:
                                                         if ticker_match:
                                                             ticker = ticker_match.group(1)
                                                             
-                                                            # Find which category this ticker belongs to
-                                                            category_found = None
-                                                            for cat_name, cat_info in self.institution_categories.items():
-                                                                if ticker in cat_info["institutions"]:
-                                                                    category_found = cat_name
-                                                                    break
+                                                            # Use our ticker to category mapping
+                                                            category_found = self.ticker_to_category.get(ticker)
                                                             
                                                             if category_found:
                                                                 inst_path = f"{type_path}/{inst_entry.filename}"
                                                                 
-                                                                # Check transcript type folders
-                                                                for transcript_type in ["Raw", "Corrected", "NearRealTime"]:
-                                                                    type_folder_path = f"{inst_path}/{transcript_type}"
+                                                                # Stage 00 stores XML files directly in the company folder
+                                                                # Files are named: ticker_quarter_year_transcripttype_eventid_versionid.xml
+                                                                try:
+                                                                    files = conn.listPath(self.nas_share_name, inst_path)
                                                                     
-                                                                    try:
-                                                                        files = conn.listPath(self.nas_share_name, type_folder_path)
-                                                                        # Count XML files
-                                                                        xml_count = sum(1 for f in files if f.filename.endswith('.xml') and not f.isDirectory)
+                                                                    # Count XML files by transcript type from filename
+                                                                    raw_count = 0
+                                                                    corrected_count = 0
+                                                                    nearreal_count = 0
+                                                                    
+                                                                    for f in files:
+                                                                        if f.filename.endswith('.xml') and not f.isDirectory:
+                                                                            # Parse transcript type from filename
+                                                                            parts = f.filename[:-4].split('_')  # Remove .xml and split
+                                                                            if len(parts) >= 4:
+                                                                                transcript_type = parts[3]  # 4th part is transcript type
+                                                                                if transcript_type == 'Raw':
+                                                                                    raw_count += 1
+                                                                                elif transcript_type == 'Corrected':
+                                                                                    corrected_count += 1
+                                                                                elif transcript_type == 'NearRealTime':
+                                                                                    nearreal_count += 1
+                                                                    
+                                                                    # Store counts if any files found
+                                                                    if raw_count > 0:
+                                                                        self.coverage_data[category_found][ticker][year_quarter]["Raw"] = raw_count
+                                                                    if corrected_count > 0:
+                                                                        self.coverage_data[category_found][ticker][year_quarter]["Corrected"] = corrected_count
+                                                                    if nearreal_count > 0:
+                                                                        self.coverage_data[category_found][ticker][year_quarter]["NearRealTime"] = nearreal_count
+                                                                    
+                                                                    total_files = raw_count + corrected_count + nearreal_count
+                                                                    if total_files > 0:
+                                                                        logger.debug(f"Found {total_files} files for {ticker} in {year_quarter}: R={raw_count}, C={corrected_count}, N={nearreal_count}")
                                                                         
-                                                                        if xml_count > 0:
-                                                                            self.coverage_data[category_found][ticker][year_quarter][transcript_type] = xml_count
-                                                                            
-                                                                    except Exception:
-                                                                        # Folder doesn't exist or error accessing it
-                                                                        pass
+                                                                except Exception as e:
+                                                                    logger.debug(f"Error accessing {inst_path}: {str(e)[:50]}")
+                                                            else:
+                                                                logger.debug(f"Ticker {ticker} not in monitored institutions")
                                                                     
                                             except Exception as e:
                                                 logger.warning(f"Error listing institution folders in {type_path}: {e}")
