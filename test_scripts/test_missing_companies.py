@@ -174,41 +174,62 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> str:
         print(f"✗ Error setting up SSL certificate: {e}")
         return None
 
-def setup_factset_api_client():
-    """Set up FactSet API client with proxy and authentication."""
-    global config
-    
-    configuration = fds.sdk.EventsandTranscripts.Configuration(
-        username=os.getenv("API_USERNAME"),
-        password=os.getenv("API_PASSWORD")
-    )
-    
-    # Configure proxy if available
-    proxy_url = os.getenv("PROXY_URL")
-    if proxy_url:
+def setup_proxy_configuration():
+    """Configure proxy URL for API authentication (matching Stage 00 exactly)."""
+    try:
         proxy_user = os.getenv("PROXY_USER")
-        proxy_pass = os.getenv("PROXY_PASSWORD")
+        proxy_password = os.getenv("PROXY_PASSWORD")
+        proxy_url = os.getenv("PROXY_URL")
+        proxy_domain = os.getenv("PROXY_DOMAIN", "MAPLE")
         
-        if proxy_user and proxy_pass:
-            # URL encode credentials for special characters
-            proxy_user_encoded = quote(proxy_user, safe='')
-            proxy_pass_encoded = quote(proxy_pass, safe='')
-            proxy_auth = f"http://{proxy_user_encoded}:{proxy_pass_encoded}@{proxy_url}"
-        else:
-            proxy_auth = f"http://{proxy_url}"
+        if not proxy_url:
+            print("⚠ No proxy URL configured")
+            return None
         
-        configuration.proxy = proxy_auth
-        print(f"✓ Proxy configured: {proxy_url}")
+        # Escape domain and user for NTLM authentication
+        escaped_domain = quote(proxy_domain + "\\" + proxy_user)
+        quoted_password = quote(proxy_password)
+        
+        # Construct proxy URL (matching Stage 00 format exactly)
+        proxy_url_formatted = f"http://{escaped_domain}:{quoted_password}@{proxy_url}"
+        
+        print(f"✓ Proxy configured with domain authentication: {proxy_domain}\\{proxy_user}")
+        return proxy_url_formatted
+        
+    except Exception as e:
+        print(f"✗ Error configuring proxy: {e}")
+        return None
+
+def setup_factset_api_client():
+    """Set up FactSet API client with proxy and authentication (matching Stage 00)."""
+    global config, ssl_cert_path
     
-    # Set SSL certificate if available
-    if ssl_cert_path and os.path.exists(ssl_cert_path):
-        configuration.ssl_ca_cert = ssl_cert_path
-        configuration.verify_ssl = True
-        print(f"✓ SSL verification enabled with certificate")
-    
-    return transcripts_api.TranscriptsApi(
-        fds.sdk.EventsandTranscripts.ApiClient(configuration)
-    )
+    try:
+        # Get proxy configuration
+        proxy_url = setup_proxy_configuration()
+        
+        # Configure FactSet API client
+        configuration = fds.sdk.EventsandTranscripts.Configuration(
+            username=os.getenv("API_USERNAME"),
+            password=os.getenv("API_PASSWORD"),
+            proxy=proxy_url,
+            ssl_ca_cert=ssl_cert_path
+        )
+        
+        # Generate authentication token (important!)
+        configuration.get_basic_auth_token()
+        
+        print("✓ FactSet API client configured successfully")
+        print(f"✓ SSL certificate: {ssl_cert_path}")
+        
+        # Return the configuration wrapped in API client
+        return transcripts_api.TranscriptsApi(
+            fds.sdk.EventsandTranscripts.ApiClient(configuration)
+        )
+        
+    except Exception as e:
+        print(f"✗ Error setting up FactSet API client: {e}")
+        raise
 
 def test_ticker_formats(api_instance, ticker: str, company_name: str) -> Dict[str, Any]:
     """Test various ticker format variations."""
@@ -386,6 +407,62 @@ def cleanup_ssl_certificate():
         except Exception as e:
             print(f"⚠ Could not clean up SSL certificate: {e}")
 
+def test_known_working_ticker(api_instance):
+    """Test with a known working ticker (RBC) to verify API connection."""
+    print("\n" + "=" * 60)
+    print("Testing API connection with known working ticker (RY-CA)")
+    print("=" * 60)
+    
+    try:
+        # Test with Royal Bank of Canada (known to work)
+        end_date = datetime.now().date()
+        start_date = (datetime.now() - timedelta(days=90)).date()  # Just last 90 days for quick test
+        
+        print(f"Testing RY-CA (Royal Bank of Canada)")
+        print(f"Date range: {start_date} to {end_date}")
+        
+        api_params = {
+            "ids": ["RY-CA"],
+            "start_date": start_date,
+            "end_date": end_date,
+            "categories": ["IN:BANKS", "IN:FNLSVC", "IN:INS", "IN:SECS"],
+            "sort": ["-storyDateTime"],
+            "pagination_limit": 10,
+            "pagination_offset": 0
+        }
+        
+        response = api_instance.get_transcripts_ids(**api_params)
+        
+        if response and hasattr(response, 'data') and response.data:
+            count = len(response.data)
+            print(f"✓ API CONNECTION SUCCESSFUL - Found {count} transcripts for RY-CA")
+            
+            # Show sample transcript
+            if response.data:
+                sample = response.data[0].to_dict()
+                print(f"  Sample transcript:")
+                print(f"    Event ID: {sample.get('event_id')}")
+                print(f"    Primary IDs: {sample.get('primary_ids')}")
+                print(f"    Event Type: {sample.get('event_type')}")
+                print(f"    Date: {str(sample.get('event_date_time', ''))[:10]}")
+            return True
+        else:
+            print("✗ WARNING: No transcripts found for RY-CA (but API connection worked)")
+            return True  # Connection worked even if no data
+            
+    except ApiException as e:
+        print(f"✗ API ERROR: Status {e.status} - {e.reason}")
+        print(f"  Details: {e.body if hasattr(e, 'body') else 'No details'}")
+        return False
+    except Exception as e:
+        print(f"✗ CONNECTION ERROR: {e}")
+        print("\nPossible issues:")
+        print("  1. Check API credentials (API_USERNAME, API_PASSWORD)")
+        print("  2. Verify proxy settings (PROXY_URL, PROXY_USER, PROXY_PASSWORD, PROXY_DOMAIN)")
+        print("  3. Ensure SSL certificate is valid")
+        print("  4. Check network connectivity to api.factset.com")
+        return False
+
 def main():
     """Main test function."""
     print("=" * 80)
@@ -428,8 +505,18 @@ def main():
         nas_conn.close()
         sys.exit(1)
     
-    # Step 6: Test each missing company
-    print("\nStep 6: Testing missing companies...")
+    # Step 6: Test API connection with known working ticker
+    print("\nStep 6: Testing API connection with known working ticker...")
+    if not test_known_working_ticker(api_instance):
+        print("\n✗ API connection test failed. Please fix connection issues before proceeding.")
+        cleanup_ssl_certificate()
+        nas_conn.close()
+        sys.exit(1)
+    
+    print("\n✓ API connection verified successfully!")
+    
+    # Step 7: Test each missing company
+    print("\nStep 7: Testing missing companies...")
     print("=" * 80)
     
     all_results = {}
