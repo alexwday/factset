@@ -8,11 +8,11 @@ Generates an interactive HTML visualization showing transcript coverage across:
 - Transcript types (Raw, Corrected, NearRealTime) with counts in cells
 - Color coding: Green = has transcripts, Red = no transcripts
 
-Output: Interactive HTML file with expandable categories
+Updated to use current monitored institutions from config.yaml (91 institutions)
 """
 
 import os
-import json
+import yaml
 import logging
 from datetime import datetime
 from collections import defaultdict
@@ -34,7 +34,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Authentication and connection settings from environment
-CONFIG_PATH = os.getenv('CONFIG_PATH')
 NAS_SHARE_NAME = os.getenv('NAS_SHARE_NAME')
 
 def nas_download_file(nas_conn: SMBConnection, file_path: str) -> bytes:
@@ -43,16 +42,17 @@ def nas_download_file(nas_conn: SMBConnection, file_path: str) -> bytes:
     nas_conn.retrieveFile(NAS_SHARE_NAME, file_path, file_obj)
     return file_obj.getvalue()
 
-def load_config_from_nas(nas_conn: SMBConnection) -> Dict:
-    """Load configuration from NAS."""
+def load_config() -> Dict:
+    """Load configuration from local config.yaml file."""
     try:
-        logger.info("Loading configuration from NAS...")
-        config_data = nas_download_file(nas_conn, CONFIG_PATH)
-        config = json.loads(config_data.decode('utf-8'))
+        logger.info("Loading configuration from config.yaml...")
+        config_path = Path(__file__).parent.parent / "database_refresh" / "config.yaml"
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
         logger.info("Configuration loaded successfully")
         return config
     except Exception as e:
-        logger.error(f"Failed to load configuration from NAS: {e}")
+        logger.error(f"Failed to load configuration: {e}")
         raise
 
 class NASTranscriptScanner:
@@ -90,25 +90,26 @@ class NASTranscriptScanner:
         """Build institution categories from configuration."""
         categories = defaultdict(lambda: {"institutions": [], "names": {}})
         
+        # Create a mapping of institution type to display name
+        type_display_mapping = {
+            'Canadian_Banks': 'Canadian Banks',
+            'US_Banks': 'US Banks',
+            'European_Banks': 'European Banks',
+            'US_Boutiques': 'US Boutiques',
+            'Canadian_Asset_Managers': 'Canadian Asset Managers',
+            'US_Regionals': 'US Regionals',
+            'US_Wealth_Asset_Managers': 'US Wealth & Asset Managers',
+            'UK_Wealth_Asset_Managers': 'UK Wealth & Asset Managers',
+            'Nordic_Banks': 'Nordic Banks',
+            'Canadian_Insurers': 'Canadian Insurers',
+            'Canadian_Monoline_Lenders': 'Canadian Monoline Lenders',
+            'Australian_Banks': 'Australian Banks',
+            'Trusts': 'Trusts'
+        }
+        
         for ticker, info in self.monitored_institutions.items():
             inst_type = info.get('type', 'Other')
-            # Map the type to display name
-            type_mapping = {
-                'Canadian': 'Canadian',
-                'US': 'US',
-                'European': 'European',
-                'Insurance': 'Insurance',
-                'US_Regional': 'US Regional',
-                'Nordic': 'Nordic',
-                'Australian': 'Australian',
-                'US_Asset_Manager': 'US Asset Manager',
-                'US_Boutique': 'US Boutique',
-                'Canadian_Asset_Manager': 'Canadian Asset Manager',
-                'UK_Asset_Manager': 'UK Asset Manager',
-                'Canadian_Monoline': 'Canadian Monoline',
-                'US_Trust': 'US Trust'
-            }
-            display_type = type_mapping.get(inst_type, inst_type)
+            display_type = type_display_mapping.get(inst_type, inst_type.replace('_', ' '))
             
             categories[display_type]["institutions"].append(ticker)
             categories[display_type]["names"][ticker] = info.get('name', ticker)
@@ -117,7 +118,10 @@ class NASTranscriptScanner:
         for category in categories.values():
             category["institutions"].sort()
         
-        return dict(categories)
+        # Sort categories by name for consistent display order
+        sorted_categories = dict(sorted(categories.items()))
+        
+        return sorted_categories
         
     def connect_to_nas(self) -> SMBConnection:
         """Establish connection to NAS"""
@@ -138,7 +142,7 @@ class NASTranscriptScanner:
     
     def scan_transcript_folders(self, conn: SMBConnection):
         """Scan the NAS folder structure for transcripts"""
-        base_path = f"{self.nas_base_path}/Outputs/Data"
+        base_path = f"{self.nas_base_path}/Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
         
         try:
             # List year folders
@@ -179,40 +183,32 @@ class NASTranscriptScanner:
                                                         ticker_match = re.match(r'^([A-Z0-9\.-]+)_', inst_entry.filename)
                                                         if ticker_match:
                                                             ticker = ticker_match.group(1)
-                                                            inst_path = f"{type_path}/{inst_entry.filename}"
                                                             
-                                                            # Check transcript type folders
-                                                            for transcript_type in ["Raw", "Corrected", "NearRealTime"]:
-                                                                type_folder_path = f"{inst_path}/{transcript_type}"
+                                                            # Find which category this ticker belongs to
+                                                            category_found = None
+                                                            for cat_name, cat_info in self.institution_categories.items():
+                                                                if ticker in cat_info["institutions"]:
+                                                                    category_found = cat_name
+                                                                    break
+                                                            
+                                                            if category_found:
+                                                                inst_path = f"{type_path}/{inst_entry.filename}"
                                                                 
-                                                                try:
-                                                                    files = conn.listPath(self.nas_share_name, type_folder_path)
-                                                                    # Count XML files
-                                                                    xml_count = sum(1 for f in files if f.filename.endswith('.xml') and not f.isDirectory)
+                                                                # Check transcript type folders
+                                                                for transcript_type in ["Raw", "Corrected", "NearRealTime"]:
+                                                                    type_folder_path = f"{inst_path}/{transcript_type}"
                                                                     
-                                                                    if xml_count > 0:
-                                                                        # Map folder type to display type
-                                                                        type_mapping = {
-                                                                            'Canadian': 'Canadian',
-                                                                            'US': 'US',
-                                                                            'European': 'European',
-                                                                            'Insurance': 'Insurance',
-                                                                            'US_Regional': 'US Regional',
-                                                                            'Nordic': 'Nordic',
-                                                                            'Australian': 'Australian',
-                                                                            'US_Asset_Manager': 'US Asset Manager',
-                                                                            'US_Boutique': 'US Boutique',
-                                                                            'Canadian_Asset_Manager': 'Canadian Asset Manager',
-                                                                            'UK_Asset_Manager': 'UK Asset Manager',
-                                                                            'Canadian_Monoline': 'Canadian Monoline',
-                                                                            'US_Trust': 'US Trust'
-                                                                        }
-                                                                        display_type = type_mapping.get(inst_type, inst_type)
-                                                                        self.coverage_data[display_type][ticker][year_quarter][transcript_type] = xml_count
+                                                                    try:
+                                                                        files = conn.listPath(self.nas_share_name, type_folder_path)
+                                                                        # Count XML files
+                                                                        xml_count = sum(1 for f in files if f.filename.endswith('.xml') and not f.isDirectory)
                                                                         
-                                                                except Exception:
-                                                                    # Folder doesn't exist or error accessing it
-                                                                    pass
+                                                                        if xml_count > 0:
+                                                                            self.coverage_data[category_found][ticker][year_quarter][transcript_type] = xml_count
+                                                                            
+                                                                    except Exception:
+                                                                        # Folder doesn't exist or error accessing it
+                                                                        pass
                                                                     
                                             except Exception as e:
                                                 logger.warning(f"Error listing institution folders in {type_path}: {e}")
@@ -237,7 +233,7 @@ class NASTranscriptScanner:
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Transcript Coverage Report</title>
+    <title>Transcript Coverage Report - 91 Monitored Institutions</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -477,15 +473,15 @@ class NASTranscriptScanner:
             }
         }
         
-        // Initialize with Canadian and US expanded
+        // Initialize with Canadian Banks and US Banks expanded
         window.onload = function() {
-            expandCategory('Canadian');
-            expandCategory('US');
+            expandCategory('Canadian_Banks');
+            expandCategory('US_Banks');
         }
     </script>
 </head>
 <body>
-    <h1>Transcript Coverage Report</h1>
+    <h1>Transcript Coverage Report - 91 Monitored Institutions</h1>
     <div class="timestamp">Generated on: """ + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + """</div>
     
     <div class="legend">
@@ -508,10 +504,10 @@ class NASTranscriptScanner:
     </div>
     
     <div class="controls">
-        <button class="btn" onclick="expandCategory('Canadian')">Canadian</button>
-        <button class="btn" onclick="expandCategory('US')">US</button>
-        <button class="btn" onclick="expandCategory('European')">European</button>
-        <button class="btn" onclick="expandCategory('Insurance')">Insurance</button>
+        <button class="btn" onclick="expandCategory('Canadian_Banks')">Canadian Banks</button>
+        <button class="btn" onclick="expandCategory('US_Banks')">US Banks</button>
+        <button class="btn" onclick="expandCategory('European_Banks')">European Banks</button>
+        <button class="btn" onclick="expandCategory('US_Regionals')">US Regionals</button>
         <button class="btn btn-secondary" onclick="expandAll()">Expand All</button>
         <button class="btn btn-secondary" onclick="collapseAll()">Collapse All</button>
     </div>
@@ -519,7 +515,7 @@ class NASTranscriptScanner:
     <table>
         <thead>
             <tr>
-                <th style="text-align: left; min-width: 250px;">Institution</th>
+                <th style="text-align: left; min-width: 300px;">Institution</th>
 """
         
         # Add year-quarter headers
@@ -533,8 +529,11 @@ class NASTranscriptScanner:
         
         # Generate rows for each category and institution
         for category, cat_info in self.institution_categories.items():
+            # Create safe category ID by replacing spaces and special chars
+            safe_category_id = category.replace(' ', '_').replace('&', 'and')
+            
             # Category header row
-            html_content += f"""            <tr id="{category}" class="category-header" onclick="toggleCategory('{category}')">
+            html_content += f"""            <tr id="{safe_category_id}" class="category-header" onclick="toggleCategory('{safe_category_id}')">
                 <td style="text-align: left;">
                     <span class="expand-icon">▶</span> {category} ({len(cat_info['institutions'])} institutions)
                 </td>
@@ -557,7 +556,7 @@ class NASTranscriptScanner:
             # Institution rows
             for ticker in cat_info['institutions']:
                 inst_name = cat_info['names'].get(ticker, ticker)
-                html_content += f"""            <tr class="{category}-inst institution-row">
+                html_content += f"""            <tr class="{safe_category_id}-inst institution-row">
                 <td class="institution-name">{ticker} - {inst_name}</td>
 """
                 
@@ -598,16 +597,20 @@ class NASTranscriptScanner:
         total_institutions = sum(len(cat['institutions']) for cat in self.institution_categories.values())
         institutions_with_data = set()
         total_transcripts = 0
+        transcripts_by_type = {"Raw": 0, "Corrected": 0, "NearRealTime": 0}
         
         for category, cat_data in self.coverage_data.items():
             for ticker, ticker_data in cat_data.items():
                 institutions_with_data.add(ticker)
                 for yq, counts in ticker_data.items():
-                    total_transcripts += sum(counts.values())
+                    for transcript_type, count in counts.items():
+                        total_transcripts += count
+                        transcripts_by_type[transcript_type] += count
         
         html_content += f"""        <p><strong>Total Institutions Monitored:</strong> {total_institutions}</p>
         <p><strong>Institutions with Transcripts:</strong> {len(institutions_with_data)} ({len(institutions_with_data)/total_institutions*100:.1f}%)</p>
         <p><strong>Total Transcripts Found:</strong> {total_transcripts:,}</p>
+        <p><strong>Transcript Types:</strong> Raw: {transcripts_by_type['Raw']:,}, Corrected: {transcripts_by_type['Corrected']:,}, NearRealTime: {transcripts_by_type['NearRealTime']:,}</p>
         <p><strong>Date Range:</strong> {sorted_year_quarters[0] if sorted_year_quarters else 'N/A'} to {sorted_year_quarters[-1] if sorted_year_quarters else 'N/A'}</p>
     </div>
     
@@ -624,36 +627,17 @@ class NASTranscriptScanner:
         print(f"Total institutions monitored: {total_institutions}")
         print(f"Institutions with transcripts: {len(institutions_with_data)}")
         print(f"Total transcripts found: {total_transcripts:,}")
+        print(f"  - Raw: {transcripts_by_type['Raw']:,}")
+        print(f"  - Corrected: {transcripts_by_type['Corrected']:,}")
+        print(f"  - NearRealTime: {transcripts_by_type['NearRealTime']:,}")
 
 def main():
     """Main execution function"""
     try:
         logger.info("Starting transcript coverage analysis...")
         
-        # First, create a temporary connection to load config
-        nas_username = os.getenv('NAS_USERNAME')
-        nas_password = os.getenv('NAS_PASSWORD')
-        nas_server_ip = os.getenv('NAS_SERVER_IP')
-        nas_server_name = os.getenv('NAS_SERVER_NAME')
-        client_machine_name = os.getenv('CLIENT_MACHINE_NAME', 'DESKTOP')
-        
-        # Connect to NAS to load config
-        config_conn = SMBConnection(
-            nas_username,
-            nas_password,
-            client_machine_name,
-            nas_server_name,
-            use_ntlm_v2=True
-        )
-        
-        if not config_conn.connect(nas_server_ip, 139):
-            raise ConnectionError("Failed to connect to NAS for configuration")
-        
-        try:
-            # Load configuration from NAS
-            config = load_config_from_nas(config_conn)
-        finally:
-            config_conn.close()
+        # Load configuration from local config.yaml
+        config = load_config()
         
         # Create scanner instance with config
         scanner = NASTranscriptScanner(config)
