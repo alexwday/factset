@@ -65,7 +65,6 @@ class NASTranscriptScanner:
         self.nas_server_ip = os.getenv('NAS_SERVER_IP')
         self.nas_server_name = os.getenv('NAS_SERVER_NAME')
         self.nas_share_name = os.getenv('NAS_SHARE_NAME')
-        self.nas_base_path = os.getenv('NAS_BASE_PATH', '')
         
         # Client machine name
         self.client_machine_name = os.getenv('CLIENT_MACHINE_NAME', 'DESKTOP')
@@ -142,7 +141,9 @@ class NASTranscriptScanner:
     
     def scan_transcript_folders(self, conn: SMBConnection):
         """Scan the NAS folder structure for transcripts"""
-        base_path = f"{self.nas_base_path}/Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
+        # Get the output data path from config (matches Stage 00 configuration)
+        base_path = self.config.get('stage_00_download_historical', {}).get('output_data_path', 
+                                    'Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data')
         
         try:
             # List year folders
