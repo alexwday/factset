@@ -672,8 +672,8 @@ def parse_quarter_and_year_from_xml(
 ) -> Tuple[str, str]:
     """Parse quarter and fiscal year from transcript XML title.
     
-    Note: We now parse ALL transcripts, not just earnings calls.
-    Returns the quarter and year if found in title, or 'Unknown' for both if not.
+    STRICT PARSING: Only accepts exact format "Qx 20xx Earnings Call".
+    All other formats go to Unknown/Unknown folders.
     """
     try:
         # Parse only until we find the title
@@ -692,41 +692,23 @@ def parse_quarter_and_year_from_xml(
 
         title = title_elem.text.strip()
 
-        # Try to extract quarter and year from various title formats
-        # First try the standard earnings call format
-        pattern = r"Q([1-4])\s+(20\d{2})"
+        # ONLY accept exact format: "Qx 20xx Earnings Call"
+        # This is the same pattern used in Stage 02 for filtering
+        pattern = r"^Q([1-4])\s+(20\d{2})\s+Earnings\s+Call$"
         match = re.search(pattern, title, re.IGNORECASE)
         if match:
             quarter = f"Q{match.group(1)}"
             year = match.group(2)
             return quarter, year
 
-        # Try other common formats (e.g., "First Quarter 2024", "1Q24", etc.)
-        # This allows us to organize non-earnings transcripts too
-        quarter_patterns = [
-            (r"First\s+Quarter\s+(20\d{2})", "Q1"),
-            (r"Second\s+Quarter\s+(20\d{2})", "Q2"),
-            (r"Third\s+Quarter\s+(20\d{2})", "Q3"),
-            (r"Fourth\s+Quarter\s+(20\d{2})", "Q4"),
-            (r"1Q(\d{2})", "Q1"),
-            (r"2Q(\d{2})", "Q2"),
-            (r"3Q(\d{2})", "Q3"),
-            (r"4Q(\d{2})", "Q4"),
-        ]
-        
-        for pattern, quarter_val in quarter_patterns:
-            match = re.search(pattern, title, re.IGNORECASE)
-            if match:
-                year_val = match.group(1)
-                # Handle 2-digit years
-                if len(year_val) == 2:
-                    year_val = "20" + year_val
-                return quarter_val, year_val
-
-        # If no pattern matches, log and return Unknown
+        # Anything that doesn't match exact format goes to Unknown
         log_execution(
-            f"Could not extract quarter/year from title",
-            {"title": title, "file_organization": "Will use Unknown/Unknown"}
+            f"Title does not match exact earnings call format",
+            {
+                "title": title, 
+                "required_format": "Qx 20xx Earnings Call",
+                "file_organization": "Will use Unknown/Unknown"
+            }
         )
         return "Unknown", "Unknown"
 
@@ -1148,11 +1130,8 @@ def compare_transcripts(
             to_download.extend(api_versions)
             new_events += 1
 
-    # Process each event_id in NAS that's not in API (outside 3-year window)
-    for event_id, nas_versions in nas_by_event_id.items():
-        if event_id not in api_by_event_id:
-            to_remove.extend(nas_versions)
-            outdated_events += 1
+    # No removal of files outside window - NAS is complete archive
+    # Files outside the API window remain in NAS for historical reference
 
     # Log detailed comparison results
     log_execution(
@@ -1164,15 +1143,15 @@ def compare_transcripts(
                 "version_updates": version_updates,
                 "new_transcript_types": new_transcript_types,
                 "new_events": new_events,
-                "outdated_events_to_remove": outdated_events,
+                "outdated_events_kept": outdated_events,  # Kept, not removed
                 "unchanged_transcripts": unchanged_transcripts,
             },
             "actions_summary": {
                 "total_to_download": len(to_download),
-                "total_to_remove": len(to_remove),
-                "net_change": len(to_download) - len(to_remove),
+                "total_to_remove": 0,  # No removals - complete archive
+                "net_change": len(to_download),  # Only additions
             },
-            "comparison_logic": "API version always considered latest, 3-year window enforced",
+            "comparison_logic": "API version always considered latest, NAS keeps all historical data",
         },
     )
 
@@ -1457,7 +1436,7 @@ def main() -> None:
         # Step 10: Process each institution
         log_console("Processing institutions for transcript comparison...")
         total_to_download = 0
-        total_to_remove = 0
+        # No removal tracking - NAS is complete historical archive
 
         with fds.sdk.EventsandTranscripts.ApiClient(api_configuration) as api_client:
             api_instance = transcripts_api.TranscriptsApi(api_client)
@@ -1488,17 +1467,16 @@ def main() -> None:
                     and t["company_type"] == institution_info["type"]
                 ]
 
-                # Compare and determine actions
-                to_download, to_remove = compare_transcripts(
+                # Compare and determine actions (only downloads, no removals)
+                to_download, _ = compare_transcripts(
                     api_transcript_list, company_nas_transcripts
                 )
 
                 total_to_download += len(to_download)
-                total_to_remove += len(to_remove)
+                # No removals - NAS is a complete historical archive
 
                 # Process downloads for this institution
                 downloaded_count = 0
-                removed_count = 0
                 skipped_count = 0
 
                 # Download new/updated transcripts
@@ -1520,13 +1498,7 @@ def main() -> None:
                     # Rate limit between downloads
                     time.sleep(config["api_settings"]["request_delay"])
 
-                # Remove out-of-scope transcripts
-                for transcript in to_remove:
-                    if remove_nas_file(nas_conn, transcript["full_path"]):
-                        removed_count += 1
-                        log_console(
-                            f"Removed NAS XML (outside window): {transcript['full_path']}"
-                        )
+                # No removal logic - NAS keeps everything as historical archive
 
                 # Update totals to reflect actual downloads vs skipped
                 total_to_download = (
@@ -1538,7 +1510,6 @@ def main() -> None:
                     f"{ticker} ({i}/{len(config['monitored_institutions'])}): "
                     f"{len(api_transcript_list)} API transcripts, "
                     f"{downloaded_count} downloaded, "
-                    f"{removed_count} removed (outside window), "
                     f"{skipped_count} skipped (errors)"
                 )
 
@@ -1553,9 +1524,7 @@ def main() -> None:
                         "downloads_attempted": len(to_download),
                         "downloads_successful": downloaded_count,
                         "downloads_skipped_errors": skipped_count,
-                        "removals_attempted": len(to_remove),
-                        "removals_successful": removed_count,
-                        "explanation": "API transcripts within 3-year rolling window, NAS files outside window removed",
+                        "explanation": "NAS is complete historical archive - no files removed",
                     },
                 )
 
@@ -1564,11 +1533,10 @@ def main() -> None:
                     time.sleep(config["api_settings"]["request_delay"])
 
         log_console(
-            f"Transcript comparison complete: {total_to_download} to download, {total_to_remove} to remove"
+            f"Transcript comparison complete: {total_to_download} to download"
         )
 
         # Log comprehensive processing summary
-        net_change = total_to_download - total_to_remove
         window_type = "fixed_start_year" if start_year else "rolling_window"
         log_execution(
             "Stage 0 processing calculations summary",
@@ -1585,9 +1553,9 @@ def main() -> None:
                 },
                 "transcript_actions": {
                     "downloads_planned": total_to_download,
-                    "removals_planned": total_to_remove,
-                    "net_change": net_change,
-                    "net_change_interpretation": "positive=growth, negative=reduction, zero=stable",
+                    "removals_planned": 0,  # No removals
+                    "net_change": total_to_download,
+                    "net_change_interpretation": "always positive or zero - archive only grows",
                 },
                 "inventory_status": {
                     "existing_files_found": stage_summary["transcript_files_found"],
@@ -1598,7 +1566,7 @@ def main() -> None:
 
         # Update stage summary
         stage_summary["total_to_download"] = total_to_download
-        stage_summary["total_to_remove"] = total_to_remove
+        stage_summary["total_to_remove"] = 0  # No removals
         stage_summary["rolling_window_start"] = start_date.isoformat()
         stage_summary["rolling_window_end"] = end_date.isoformat()
 

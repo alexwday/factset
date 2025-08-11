@@ -1081,7 +1081,7 @@ def compare_transcripts(
                     # Compare versions - API version is always considered latest
                     if api_transcript["version_id"] != matching_nas["version_id"]:
                         to_download.append(api_transcript)
-                        to_remove.append(matching_nas)
+                        # No removal - keep old versions for historical reference
                         version_updates += 1
                     else:
                         unchanged_transcripts += 1
@@ -1504,9 +1504,7 @@ def main() -> None:
                             "downloads_attempted": len(to_download),
                             "downloads_successful": downloaded_count,
                             "downloads_skipped_errors": skipped_count,
-                            "removals_attempted": len(to_remove),
-                            "removals_successful": removed_count,
-                            "explanation": "Daily sync - adds new transcripts and manages versions only",
+                            "explanation": "Daily sync - NAS keeps all versions as historical archive",
                         },
                     )
 
