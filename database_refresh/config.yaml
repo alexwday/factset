@@ -272,11 +272,11 @@ monitored_institutions:
   C-US: {name: "Citigroup Inc.", type: "US_Banks", path_safe_name: "C-US_Citigroup_Inc"}
   MS-US: {name: "Morgan Stanley", type: "US_Banks", path_safe_name: "MS-US_Morgan_Stanley"}
   GS-US: {name: "Goldman Sachs Group Inc.", type: "US_Banks", path_safe_name: "GS-US_Goldman_Sachs_Group_Inc"}
-  JEF-US: {name: "Jefferies Financial Group Inc.", type: "US_Banks", path_safe_name: "JEF-US_Jefferies_Financial_Group_Inc"}
+  JEF: {name: "Jefferies Financial Group Inc.", type: "US_Banks", path_safe_name: "JEF_Jefferies_Financial_Group_Inc"}
   
   # European Banks (14)
-  UBS-CH: {name: "UBS Group AG", type: "European_Banks", path_safe_name: "UBS-CH_UBS_Group_AG"}
-  BCS-GB: {name: "Barclays PLC", type: "European_Banks", path_safe_name: "BCS-GB_Barclays_PLC"}
+  UBS: {name: "UBS Group AG", type: "European_Banks", path_safe_name: "UBS_UBS_Group_AG"}
+  BCS: {name: "Barclays PLC", type: "European_Banks", path_safe_name: "BCS_Barclays_PLC"}
   DBK-DE: {name: "Deutsche Bank AG", type: "European_Banks", path_safe_name: "DBK-DE_Deutsche_Bank_AG"}
   GLE-FR: {name: "Societe Generale", type: "European_Banks", path_safe_name: "GLE-FR_Societe_Generale"}
   BNP-FR: {name: "BNP Paribas", type: "European_Banks", path_safe_name: "BNP-FR_BNP_Paribas"}
@@ -284,7 +284,7 @@ monitored_institutions:
   SAN-ES: {name: "Banco Santander S.A.", type: "European_Banks", path_safe_name: "SAN-ES_Banco_Santander_SA"}
   HSBA-GB: {name: "HSBC Holdings plc", type: "European_Banks", path_safe_name: "HSBA-GB_HSBC_Holdings_plc"}
   LLOY-GB: {name: "Lloyds Banking Group plc", type: "European_Banks", path_safe_name: "LLOY-GB_Lloyds_Banking_Group_plc"}
-  ING-NL: {name: "ING Groep N.V.", type: "European_Banks", path_safe_name: "ING-NL_ING_Groep_NV"}
+  ING: {name: "ING Groep N.V.", type: "European_Banks", path_safe_name: "ING_ING_Groep_NV"}
   STAN-GB: {name: "Standard Chartered PLC", type: "European_Banks", path_safe_name: "STAN-GB_Standard_Chartered_PLC"}
   RBS-GB: {name: "NatWest Group plc", type: "European_Banks", path_safe_name: "RBS-GB_NatWest_Group_plc"}
   UCG-IT: {name: "UniCredit S.p.A.", type: "European_Banks", path_safe_name: "UCG-IT_UniCredit_SpA"}
@@ -325,7 +325,7 @@ monitored_institutions:
   SNV-US: {name: "Synovus Financial Corp.", type: "US_Regionals", path_safe_name: "SNV-US_Synovus_Financial_Corp"}
   
   # U.S. Wealth & Asset Managers (10)
-  SCHW-US: {name: "Charles Schwab Corporation", type: "US_Wealth_Asset_Managers", path_safe_name: "SCHW-US_Charles_Schwab_Corporation"}
+  SCHW: {name: "Charles Schwab Corporation", type: "US_Wealth_Asset_Managers", path_safe_name: "SCHW_Charles_Schwab_Corporation"}
   BLK-US: {name: "BlackRock Inc.", type: "US_Wealth_Asset_Managers", path_safe_name: "BLK-US_BlackRock_Inc"}
   BEN-US: {name: "Franklin Resources Inc.", type: "US_Wealth_Asset_Managers", path_safe_name: "BEN-US_Franklin_Resources_Inc"}
   IVZ-US: {name: "Invesco Ltd.", type: "US_Wealth_Asset_Managers", path_safe_name: "IVZ-US_Invesco_Ltd"}
