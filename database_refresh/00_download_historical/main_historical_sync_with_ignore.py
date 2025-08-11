@@ -1620,6 +1620,8 @@ def main() -> None:
                 # Process downloads for this institution
                 downloaded_count = 0
                 rejected_count = 0
+                existing_valid_count = len(company_nas_transcripts)
+                skipped_already_invalid = len([t for t in api_transcript_list if is_transcript_in_invalid_list(invalid_df, t['event_id'], t['version_id'])])
 
                 # Download new/updated transcripts with validation
                 for transcript in to_download:
@@ -1640,30 +1642,40 @@ def main() -> None:
                     # Rate limit between downloads
                     time.sleep(config["api_settings"]["request_delay"])
 
+                # Save invalid list after each bank (incremental saving)
+                if rejected_count > 0:
+                    log_console(f"Saving {rejected_count} new invalid entries to ignore list...")
+                    save_invalid_transcript_list(nas_conn, invalid_df)
+
                 # Update totals
                 total_to_download = (
                     total_to_download - len(to_download) + downloaded_count
                 )
 
-                # One-line summary per bank
+                # Enhanced summary per bank with all statistics
                 log_console(
                     f"{ticker} ({i}/{len(config['monitored_institutions'])}): "
-                    f"{len(api_transcript_list)} API transcripts, "
-                    f"{downloaded_count} downloaded (valid), "
-                    f"{rejected_count} rejected (invalid title)"
+                    f"{len(api_transcript_list)} API transcripts | "
+                    f"Downloaded: {downloaded_count} valid | "
+                    f"Existing valid: {existing_valid_count} | "
+                    f"Rejected: {rejected_count} invalid | "
+                    f"Previously rejected: {skipped_already_invalid}"
                 )
 
-                # Detailed execution log
+                # Detailed execution log with enhanced statistics
                 log_execution(
                     f"Completed transcript processing for {ticker}",
                     {
                         "ticker": ticker,
                         "institution_position": f"{i}/{len(config['monitored_institutions'])}",
                         "api_transcripts_found": len(api_transcript_list),
-                        "nas_transcripts_existing": len(company_nas_transcripts),
+                        "existing_valid_earnings_calls": existing_valid_count,
                         "downloads_attempted": len(to_download),
-                        "downloads_successful": downloaded_count,
-                        "downloads_rejected": rejected_count,
+                        "downloads_successful_valid": downloaded_count,
+                        "downloads_rejected_invalid_title": rejected_count,
+                        "skipped_already_in_ignore_list": skipped_already_invalid,
+                        "total_valid_after_processing": existing_valid_count + downloaded_count,
+                        "total_invalid_tracked": len(invalid_df),
                     },
                 )
 
@@ -1675,9 +1687,9 @@ def main() -> None:
         total_added_to_invalid = len(invalid_df) - initial_invalid_count
         stage_summary["invalid_transcripts_added"] = total_added_to_invalid
         
-        # Save updated invalid list
+        # Final save of invalid list (in case there were no rejections in last bank)
         if total_added_to_invalid > 0:
-            log_console(f"Saving invalid transcript list with {total_added_to_invalid} new entries...")
+            log_console(f"Final save: Total {total_added_to_invalid} new entries added to invalid list")
             save_invalid_transcript_list(nas_conn, invalid_df)
 
         log_console(
