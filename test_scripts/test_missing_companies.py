@@ -90,11 +90,12 @@ def get_nas_connection() -> Optional[SMBConnection]:
     """Establish connection to NAS server."""
     try:
         nas_conn = SMBConnection(
-            os.getenv("NAS_USERNAME"),
-            os.getenv("NAS_PASSWORD"),
-            os.getenv("CLIENT_MACHINE_NAME"),
-            os.getenv("NAS_SERVER_NAME"),
-            use_ntlm_v2=True
+            username=os.getenv("NAS_USERNAME"),
+            password=os.getenv("NAS_PASSWORD"),
+            my_name=os.getenv("CLIENT_MACHINE_NAME"),
+            remote_name=os.getenv("NAS_SERVER_NAME"),
+            use_ntlm_v2=True,
+            is_direct_tcp=True
         )
         
         if nas_conn.connect(os.getenv("NAS_SERVER_IP"), int(os.getenv("NAS_PORT", 445))):
