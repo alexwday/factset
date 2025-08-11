@@ -7,6 +7,7 @@ fds.sdk.StreetAccountNews
 pandas
 requests
 python-dotenv
+openpyxl  # For Excel file handling
 
 # SMB connection
 pysmb
