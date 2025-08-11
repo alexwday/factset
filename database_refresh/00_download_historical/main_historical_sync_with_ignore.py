@@ -776,9 +776,15 @@ def save_invalid_transcript_list(nas_conn: SMBConnection, df: pd.DataFrame) -> b
     invalid_list_dir = nas_path_join(base_path, "Outputs", "Data", "InvalidTranscripts")
     invalid_list_path = nas_path_join(invalid_list_dir, "invalid_transcripts.xlsx")
     
+    log_console(f"DEBUG: Attempting to save invalid list to: {invalid_list_path}")
+    log_console(f"DEBUG: Invalid list contains {len(df)} total entries")
+    
     try:
         # Create directory if it doesn't exist
-        nas_create_directory_recursive(nas_conn, invalid_list_dir)
+        log_console(f"DEBUG: Creating directory: {invalid_list_dir}")
+        if not nas_create_directory_recursive(nas_conn, invalid_list_dir):
+            log_error(f"Failed to create InvalidTranscripts directory: {invalid_list_dir}", "directory_creation")
+            return False
         
         # Save DataFrame to Excel in memory
         excel_buffer = io.BytesIO()
@@ -786,13 +792,15 @@ def save_invalid_transcript_list(nas_conn: SMBConnection, df: pd.DataFrame) -> b
             df.to_excel(writer, index=False, sheet_name='Invalid_Transcripts')
         
         excel_buffer.seek(0)
+        buffer_size = len(excel_buffer.getvalue())
+        log_console(f"DEBUG: Excel buffer created, size: {buffer_size} bytes")
         
         # Upload to NAS
         if nas_upload_file(nas_conn, excel_buffer, invalid_list_path):
-            log_console(f"Saved invalid transcript list with {len(df)} entries")
+            log_console(f"✓ Successfully saved invalid transcript list with {len(df)} entries to {invalid_list_path}")
             return True
         else:
-            log_error("Failed to save invalid transcript list to NAS", "save_invalid_list")
+            log_error(f"Failed to upload invalid list to NAS path: {invalid_list_path}", "save_invalid_list")
             return False
             
     except Exception as e:
