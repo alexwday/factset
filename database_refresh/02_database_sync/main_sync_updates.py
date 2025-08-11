@@ -544,12 +544,69 @@ def sanitize_url_for_logging(url: str) -> str:
         return "[URL_SANITIZED]"
 
 
-def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any]]:
-    """Scan NAS for ALL transcript files. Structure: Data/YYYY/QX/Type/Company/files.xml"""
+def parse_quarter_and_year_from_xml(
+    xml_content: bytes,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Parse quarter and fiscal year from transcript XML title.
     
-    log_execution("Starting comprehensive NAS file scan")
+    Returns (quarter, year) if title matches 'Qx 20xx Earnings Call' format,
+    or (None, None) if it doesn't match.
+    """
+    try:
+        # Parse only until we find the title
+        root = ET.parse(io.BytesIO(xml_content)).getroot()
+        namespace = ""
+        if root.tag.startswith("{"):
+            namespace = root.tag.split("}")[0] + "}"
+
+        meta = root.find(f"{namespace}meta" if namespace else "meta")
+        if meta is None:
+            return None, None
+
+        title_elem = meta.find(f"{namespace}title" if namespace else "title")
+        if title_elem is None or not title_elem.text:
+            return None, None
+
+        title = title_elem.text.strip()
+
+        # Only accept exact format: "Qx 20xx Earnings Call"
+        pattern = r"^Q([1-4])\s+(20\d{2})\s+Earnings\s+Call$"
+        match = re.search(pattern, title, re.IGNORECASE)
+        if match:
+            quarter = f"Q{match.group(1)}"
+            year = match.group(2)
+            return quarter, year
+
+        # Title doesn't match required format - log for debugging
+        log_execution(
+            f"Title validation failed - not an earnings call",
+            {
+                "actual_title": title,
+                "required_format": "Qx 20xx Earnings Call",
+                "validation_rule": "Must match exact pattern with no additional text",
+            },
+        )
+        return None, None
+
+    except Exception as e:
+        log_error(
+            f"Error parsing XML title: {e}", "xml_parsing", {"error_details": str(e)}
+        )
+        return None, None
+
+
+def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str, Any]]:
+    """Scan NAS for ALL transcript files. Structure: Data/YYYY/QX/Type/Company/files.xml
+    
+    Returns a dictionary with file_path as key and file_record as value.
+    Each file_record now includes an 'is_earnings_call' flag based on title validation.
+    """
+    
+    log_execution("Starting comprehensive NAS file scan with title validation")
     data_base_path = config["stage_02_database_sync"]["input_data_path"]
     nas_inventory = {}
+    earnings_call_count = 0
+    non_earnings_count = 0
     
     # Scan all years
     years = nas_list_directories(nas_conn, data_base_path)
@@ -582,16 +639,38 @@ def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str,
                         file_path = nas_path_join(company_path, filename)
                         modified_time = get_file_modified_time(nas_conn, file_path)
                         
-                        # Create file record with minimal required fields
+                        # Check if this is an earnings call by parsing the XML title
+                        is_earnings_call = False
+                        try:
+                            # Download the file to check its title
+                            file_content = nas_download_file(nas_conn, file_path)
+                            if file_content:
+                                quarter_parsed, year_parsed = parse_quarter_and_year_from_xml(file_content)
+                                if quarter_parsed and year_parsed:
+                                    is_earnings_call = True
+                                    earnings_call_count += 1
+                                else:
+                                    non_earnings_count += 1
+                        except Exception as e:
+                            log_execution(f"Could not validate title for {file_path}: {e}")
+                            non_earnings_count += 1
+                        
+                        # Create file record with earnings call flag
                         file_record = {
                             "file_path": file_path,
-                            "date_last_modified": modified_time.isoformat() if modified_time else datetime.now().isoformat()
+                            "date_last_modified": modified_time.isoformat() if modified_time else datetime.now().isoformat(),
+                            "is_earnings_call": is_earnings_call
                         }
                         
                         # Use file_path as key for direct comparison
                         nas_inventory[file_path] = file_record
 
-    log_execution(f"NAS file scan complete", {"total_files_found": len(nas_inventory)})
+    log_execution(f"NAS file scan complete with title validation", {
+        "total_files_found": len(nas_inventory),
+        "earnings_calls": earnings_call_count,
+        "non_earnings_transcripts": non_earnings_count,
+        "earnings_call_percentage": f"{(earnings_call_count / len(nas_inventory) * 100):.1f}%" if nas_inventory else "0%"
+    })
     return nas_inventory
 
 
@@ -681,23 +760,42 @@ def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory:
 
 
 def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str], files_to_remove: List[str], nas_inventory: Dict[str, Dict[str, Any]], database_inventory: Dict[str, Dict[str, Any]]) -> bool:
-    """Save processing queues to NAS refresh folder as simple JSON records."""
+    """Save processing queues to NAS refresh folder as simple JSON records.
+    
+    IMPORTANT: Only earnings call transcripts are included in the processing queue.
+    Non-earnings transcripts are stored in NAS but not processed by downstream stages.
+    """
     
     refresh_path = config["stage_02_database_sync"]["refresh_output_path"]
     nas_create_directory_recursive(nas_conn, refresh_path)
 
     success = True
 
-    # Convert files_to_process to JSON records
+    # Convert files_to_process to JSON records, filtering for earnings calls only
     process_records = []
+    earnings_calls_count = 0
+    non_earnings_filtered = 0
+    
     for file_path in files_to_process:
-        # Get the NAS record for this file to include date_last_modified
+        # Get the NAS record for this file to check if it's an earnings call
         nas_record = nas_inventory.get(file_path, {})
-        record = {
-            "file_path": file_path,
-            "date_last_modified": nas_record.get("date_last_modified", datetime.now().isoformat())
-        }
-        process_records.append(record)
+        
+        # Only include earnings calls in the processing queue
+        if nas_record.get("is_earnings_call", False):
+            record = {
+                "file_path": file_path,
+                "date_last_modified": nas_record.get("date_last_modified", datetime.now().isoformat())
+            }
+            process_records.append(record)
+            earnings_calls_count += 1
+        else:
+            non_earnings_filtered += 1
+    
+    log_execution(f"Filtered processing queue for earnings calls only", {
+        "total_files_to_process": len(files_to_process),
+        "earnings_calls_included": earnings_calls_count,
+        "non_earnings_filtered_out": non_earnings_filtered
+    })
 
     # Save files to process as simple JSON records
     process_path = nas_path_join(refresh_path, "stage_02_process_queue.json")

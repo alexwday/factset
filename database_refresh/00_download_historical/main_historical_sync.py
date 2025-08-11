@@ -669,8 +669,12 @@ def parse_filename(filename: str) -> Optional[Dict[str, str]]:
 
 def parse_quarter_and_year_from_xml(
     xml_content: bytes,
-) -> Tuple[Optional[str], Optional[str]]:
-    """Parse quarter and fiscal year from transcript XML title."""
+) -> Tuple[str, str]:
+    """Parse quarter and fiscal year from transcript XML title.
+    
+    Note: We now parse ALL transcripts, not just earnings calls.
+    Returns the quarter and year if found in title, or 'Unknown' for both if not.
+    """
     try:
         # Parse only until we find the title
         root = ET.parse(io.BytesIO(xml_content)).getroot()
@@ -680,45 +684,57 @@ def parse_quarter_and_year_from_xml(
 
         meta = root.find(f"{namespace}meta" if namespace else "meta")
         if meta is None:
-            return None, None
+            return "Unknown", "Unknown"
 
         title_elem = meta.find(f"{namespace}title" if namespace else "title")
         if title_elem is None or not title_elem.text:
-            return None, None
+            return "Unknown", "Unknown"
 
         title = title_elem.text.strip()
 
-        # Only accept exact format: "Qx 20xx Earnings Call"
-        pattern = r"^Q([1-4])\s+(20\d{2})\s+Earnings\s+Call$"
+        # Try to extract quarter and year from various title formats
+        # First try the standard earnings call format
+        pattern = r"Q([1-4])\s+(20\d{2})"
         match = re.search(pattern, title, re.IGNORECASE)
         if match:
             quarter = f"Q{match.group(1)}"
             year = match.group(2)
             return quarter, year
 
-        # Title doesn't match required format - log for debugging
+        # Try other common formats (e.g., "First Quarter 2024", "1Q24", etc.)
+        # This allows us to organize non-earnings transcripts too
+        quarter_patterns = [
+            (r"First\s+Quarter\s+(20\d{2})", "Q1"),
+            (r"Second\s+Quarter\s+(20\d{2})", "Q2"),
+            (r"Third\s+Quarter\s+(20\d{2})", "Q3"),
+            (r"Fourth\s+Quarter\s+(20\d{2})", "Q4"),
+            (r"1Q(\d{2})", "Q1"),
+            (r"2Q(\d{2})", "Q2"),
+            (r"3Q(\d{2})", "Q3"),
+            (r"4Q(\d{2})", "Q4"),
+        ]
+        
+        for pattern, quarter_val in quarter_patterns:
+            match = re.search(pattern, title, re.IGNORECASE)
+            if match:
+                year_val = match.group(1)
+                # Handle 2-digit years
+                if len(year_val) == 2:
+                    year_val = "20" + year_val
+                return quarter_val, year_val
+
+        # If no pattern matches, log and return Unknown
         log_execution(
-            f"Title validation failed - exact format required",
-            {
-                "actual_title": title,
-                "required_format": "Qx 20xx Earnings Call",
-                "required_pattern": r"^Q([1-4])\s+(20\d{2})\s+Earnings\s+Call$",
-                "validation_rule": "Must match exact pattern with no additional text",
-                "rejection_reason": "Does not match exact quarterly earnings call format",
-                "examples_accepted": ["Q1 2024 Earnings Call", "Q3 2023 Earnings Call"],
-                "examples_rejected": [
-                    "Q1 2024 Earnings Call - Preliminary",
-                    "First Quarter 2024",
-                ],
-            },
+            f"Could not extract quarter/year from title",
+            {"title": title, "file_organization": "Will use Unknown/Unknown"}
         )
-        return None, None
+        return "Unknown", "Unknown"
 
     except Exception as e:
         log_error(
             f"Error parsing XML title: {e}", "xml_parsing", {"error_details": str(e)}
         )
-        return None, None
+        return "Unknown", "Unknown"
 
 
 def sanitize_url_for_logging(url: str) -> str:
@@ -984,16 +1000,7 @@ def get_api_transcripts_for_company(
                 else:
                     contamination_rejected += 1
 
-            # Filter for earnings transcripts only
-            earnings_transcripts = []
-            non_earnings_rejected = 0
-            for transcript in filtered_transcripts:
-                event_type = transcript.get("event_type", "")
-                if event_type and "Earnings" in str(event_type):
-                    earnings_transcripts.append(transcript)
-                else:
-                    non_earnings_rejected += 1
-
+            # Return ALL transcripts (not just earnings) - filtering moved to Stage 02
             log_execution(
                 f"API query and filtering completed for {ticker}",
                 {
@@ -1004,17 +1011,12 @@ def get_api_transcripts_for_company(
                         "rejected": contamination_rejected,
                         "rejection_reason": "Multiple primary IDs (cross-contamination risk)",
                     },
-                    "earnings_filter": {
-                        "passed": len(earnings_transcripts),
-                        "rejected": non_earnings_rejected,
-                        "rejection_reason": "Non-earnings event type",
-                    },
-                    "final_count": len(earnings_transcripts),
-                    "filtering_logic": "SOLE primary ID + earnings events only",
+                    "final_count": len(filtered_transcripts),
+                    "filtering_logic": "SOLE primary ID only (all transcript types)",
                 },
             )
 
-            return earnings_transcripts
+            return filtered_transcripts
 
         except Exception as e:
             if attempt < config["api_settings"]["max_retries"] - 1:
@@ -1177,14 +1179,14 @@ def compare_transcripts(
     return to_download, to_remove
 
 
-def download_transcript_with_title_filtering(
+def download_transcript(
     nas_conn: SMBConnection,
     transcript: Dict[str, Any],
     ticker: str,
     institution_info: Dict[str, str],
     api_configuration,
 ) -> Optional[Dict[str, str]]:
-    """Download transcript and validate title format."""
+    """Download transcript without title validation - all transcripts are downloaded."""
     transcript_link = transcript.get("transcripts_link")
     if not transcript_link:
         log_error(
@@ -1229,40 +1231,9 @@ def download_transcript_with_title_filtering(
 
             response.raise_for_status()
 
-            # Parse XML to extract and validate title
+            # Parse XML to extract quarter and year from title for file organization
+            # Note: We no longer reject transcripts, just organize them
             quarter, year = parse_quarter_and_year_from_xml(response.content)
-
-            if not quarter or not year:
-                # Extract title for logging
-                try:
-                    root = ET.parse(io.BytesIO(response.content)).getroot()
-                    namespace = ""
-                    if root.tag.startswith("{"):
-                        namespace = root.tag.split("}")[0] + "}"
-                    meta = root.find(f"{namespace}meta" if namespace else "meta")
-                    title_elem = (
-                        meta.find(f"{namespace}title" if namespace else "title")
-                        if meta is not None
-                        else None
-                    )
-                    title = (
-                        title_elem.text
-                        if title_elem is not None and title_elem.text
-                        else "No title found"
-                    )
-                except:
-                    title = "Failed to extract title"
-
-                log_execution(
-                    f"Skipping transcript with invalid title for {ticker}",
-                    {
-                        "ticker": ticker,
-                        "event_id": transcript.get("event_id"),
-                        "title": title,
-                        "reason": 'Title does not match "Qx 20xx Earnings Call" format',
-                    },
-                )
-                return None
 
             # Create filename
             filename = f"{ticker}_{quarter}_{year}_{transcript.get('transcript_type')}_{transcript.get('event_id')}_{transcript.get('version_id')}.xml"
@@ -1529,11 +1500,10 @@ def main() -> None:
                 downloaded_count = 0
                 removed_count = 0
                 skipped_count = 0
-                title_filtered_count = 0
 
                 # Download new/updated transcripts
                 for transcript in to_download:
-                    result = download_transcript_with_title_filtering(
+                    result = download_transcript(
                         nas_conn,
                         transcript,
                         ticker,
@@ -1544,9 +1514,8 @@ def main() -> None:
                         downloaded_count += 1
                         log_console(f"Downloaded XML: {result['filename']}")
                     else:
-                        # All failures from download_transcript_with_title_filtering are title filtering
-                        # (other errors would raise exceptions and not return None)
-                        title_filtered_count += 1
+                        # Failures are now only from download errors
+                        skipped_count += 1
 
                     # Rate limit between downloads
                     time.sleep(config["api_settings"]["request_delay"])
@@ -1570,8 +1539,7 @@ def main() -> None:
                     f"{len(api_transcript_list)} API transcripts, "
                     f"{downloaded_count} downloaded, "
                     f"{removed_count} removed (outside window), "
-                    f"{skipped_count} skipped (errors), "
-                    f"{title_filtered_count} filtered (invalid title)"
+                    f"{skipped_count} skipped (errors)"
                 )
 
                 # Detailed execution log for audit trail
@@ -1585,7 +1553,6 @@ def main() -> None:
                         "downloads_attempted": len(to_download),
                         "downloads_successful": downloaded_count,
                         "downloads_skipped_errors": skipped_count,
-                        "downloads_filtered_title": title_filtered_count,
                         "removals_attempted": len(to_remove),
                         "removals_successful": removed_count,
                         "explanation": "API transcripts within 3-year rolling window, NAS files outside window removed",
