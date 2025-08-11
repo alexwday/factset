@@ -247,27 +247,41 @@ def nas_upload_file(
     conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_path: str
 ) -> bool:
     """Upload a file object to NAS."""
+    # Get share name from config or environment
+    share_name = config.get("nas_share_name", os.getenv("NAS_SHARE_NAME"))
+    if not share_name:
+        log_error("NAS_SHARE_NAME not found in config or environment", "nas_upload", {})
+        return False
+        
     try:
-        # Create parent directory if needed
+        # Create parent directory if needed (using recursive function)
         parent_dir = "/".join(nas_file_path.split("/")[:-1])
         if parent_dir:
-            nas_create_directory(conn, parent_dir)
+            log_console(f"DEBUG: Ensuring parent directory exists: {parent_dir}")
+            if not nas_create_directory_recursive(conn, parent_dir):
+                log_error(f"Failed to create parent directory: {parent_dir}", "nas_upload", {})
+                return False
 
         # Upload file
         local_file_obj.seek(0)  # Reset file pointer
-        conn.storeFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, local_file_obj)
+        file_size = len(local_file_obj.getvalue())
+        log_console(f"DEBUG: Uploading file to {nas_file_path} on share {share_name} (size: {file_size} bytes)")
+        
+        conn.storeFile(share_name, nas_file_path, local_file_obj)
 
+        log_console(f"DEBUG: Successfully uploaded file to NAS: {nas_file_path}")
         log_execution(
             f"Successfully uploaded file to NAS: {nas_file_path}",
-            {"file_path": nas_file_path, "file_size": len(local_file_obj.getvalue())},
+            {"file_path": nas_file_path, "file_size": file_size, "share_name": share_name},
         )
         return True
     except Exception as e:
         log_error(
             f"Failed to upload file to NAS {nas_file_path}: {e}",
             "nas_upload",
-            {"file_path": nas_file_path, "error_details": str(e)},
+            {"file_path": nas_file_path, "error_details": str(e), "share_name": share_name},
         )
+        log_console(f"ERROR: Failed to upload file {nas_file_path} to share {share_name}: {e}")
         return False
 
 
@@ -535,6 +549,12 @@ def nas_create_directory(conn: SMBConnection, dir_path: str) -> bool:
 
 def nas_create_directory_recursive(nas_conn: SMBConnection, dir_path: str) -> bool:
     """Create directory on NAS with recursive parent creation."""
+    # Get share name from environment or config
+    share_name = config.get("nas_share_name", os.getenv("NAS_SHARE_NAME"))
+    if not share_name:
+        log_error("NAS_SHARE_NAME not found in config or environment", "directory_creation", {})
+        return False
+        
     # Normalize and validate path
     normalized_path = dir_path.strip("/").rstrip("/")
     if not normalized_path:
@@ -547,6 +567,8 @@ def nas_create_directory_recursive(nas_conn: SMBConnection, dir_path: str) -> bo
         log_error("Cannot create directory with invalid path", "directory_creation", {})
         return False
 
+    log_console(f"DEBUG: Creating directory structure with share: {share_name}, path: {dir_path}")
+
     # Build path incrementally from root
     current_path = ""
     for part in path_parts:
@@ -555,12 +577,14 @@ def nas_create_directory_recursive(nas_conn: SMBConnection, dir_path: str) -> bo
         # Check if directory already exists
         try:
             # Try to list directory contents to check if it exists
-            nas_conn.listPath(config["nas_share_name"], current_path)
+            nas_conn.listPath(share_name, current_path)
+            log_console(f"DEBUG: Directory already exists: {current_path}")
             continue  # Directory exists, move to next part
-        except:
+        except Exception as check_error:
             # Directory doesn't exist, try to create it
             try:
-                nas_conn.createDirectory(config["nas_share_name"], current_path)
+                nas_conn.createDirectory(share_name, current_path)
+                log_console(f"DEBUG: Successfully created directory: {current_path}")
                 log_execution(
                     f"Created directory: {current_path}",
                     {"directory_path": current_path},
@@ -568,16 +592,19 @@ def nas_create_directory_recursive(nas_conn: SMBConnection, dir_path: str) -> bo
             except Exception as e:
                 # If creation fails, check if it exists now (race condition)
                 try:
-                    nas_conn.listPath(config["nas_share_name"], current_path)
+                    nas_conn.listPath(share_name, current_path)
+                    log_console(f"DEBUG: Directory exists after race condition: {current_path}")
                     continue  # Directory exists now
-                except:
+                except Exception as final_error:
                     log_error(
                         f"Failed to create directory {current_path}: {e}",
                         "directory_creation",
-                        {"directory_path": current_path, "error_details": str(e)},
+                        {"directory_path": current_path, "error_details": str(e), "share_name": share_name},
                     )
+                    log_console(f"ERROR: Could not create directory {current_path} on share {share_name}: {e}")
                     return False
 
+    log_console(f"DEBUG: Successfully created full directory path: {dir_path}")
     return True
 
 
