@@ -110,6 +110,12 @@ class NASTranscriptScanner:
         # Store companies with transcripts in ignore list
         self.companies_in_ignore_list = set()
         
+        # Store count of ignored transcripts per company
+        self.ignored_transcript_counts = {}
+        
+        # Store earnings transcript counts separately
+        self.earnings_transcript_counts = defaultdict(lambda: defaultdict(int))
+        
         self.years_quarters = set()
     
     def _build_categories_from_config(self) -> Dict:
@@ -183,10 +189,15 @@ class NASTranscriptScanner:
             # Read Excel file
             df = pd.read_excel(file_obj)
             
-            # Extract unique tickers from the ignore list
+            # Extract unique tickers from the ignore list and count entries per ticker
             if 'ticker' in df.columns:
                 unique_tickers = df['ticker'].unique()
                 self.companies_in_ignore_list = set(unique_tickers)
+                
+                # Count transcripts per ticker in the ignore list
+                ticker_counts = df.groupby('ticker').size()
+                self.ignored_transcript_counts = ticker_counts.to_dict()
+                
                 logger.info(f"Loaded ignore list with {len(df)} entries covering {len(self.companies_in_ignore_list)} unique companies")
             else:
                 logger.warning("No 'ticker' column found in ignore list")
@@ -281,6 +292,11 @@ class NASTranscriptScanner:
                                                                         self.coverage_data[category_found][ticker][year_quarter]["Corrected"] = corrected_count
                                                                     if nearreal_count > 0:
                                                                         self.coverage_data[category_found][ticker][year_quarter]["NearRealTime"] = nearreal_count
+                                                                    
+                                                                    # Track earnings transcripts (all downloaded transcripts are earnings)
+                                                                    total_earnings = raw_count + corrected_count + nearreal_count
+                                                                    if total_earnings > 0:
+                                                                        self.earnings_transcript_counts[ticker][year_quarter] = total_earnings
                                                                     
                                                                     total_files = raw_count + corrected_count + nearreal_count
                                                                     if total_files > 0:
@@ -574,7 +590,10 @@ class NASTranscriptScanner:
             <span class="legend-box no-transcripts"></span> No Valid Transcripts
         </span>
         <span class="legend-item">
-            <span class="legend-box" style="background-color: #ffe6e6; border-color: #6B0F24;"></span> In Ignore List (non-earnings transcripts)
+            <span class="legend-box" style="background-color: #e3f2fd; border-color: #1976d2;"></span> Total Transcripts (includes ignored)
+        </span>
+        <span class="legend-item">
+            <span class="legend-box" style="background-color: #e8f5e8; border-color: #2e7d32;"></span> Earnings Transcripts Only
         </span>
         <span class="legend-item">
             <span class="transcript-display corrected" style="font-size: 12px;">C</span> Corrected
@@ -600,7 +619,8 @@ class NASTranscriptScanner:
         <thead>
             <tr>
                 <th style="text-align: left; min-width: 300px;">Institution</th>
-                <th style="min-width: 80px; background-color: #6B0F24; color: white;">In Ignore List</th>
+                <th style="min-width: 100px; background-color: #1976d2; color: white;">Total Transcripts</th>
+                <th style="min-width: 100px; background-color: #2e7d32; color: white;">Earnings Transcripts</th>
 """
         
         # Add year-quarter headers
@@ -624,10 +644,31 @@ class NASTranscriptScanner:
                 </td>
 """
             
-            # Count institutions in ignore list for this category
-            ignore_count = sum(1 for ticker in cat_info['institutions'] if ticker in self.companies_in_ignore_list)
-            if ignore_count > 0:
-                html_content += f'                <td style="background-color: #ffe6e6; color: #6B0F24; font-weight: bold;">{ignore_count}</td>\n'
+            # Calculate total and earnings transcript counts for this category
+            cat_total_transcripts = 0
+            cat_earnings_transcripts = 0
+            
+            for ticker in cat_info['institutions']:
+                # Count earnings transcripts (downloaded)
+                for yq_data in self.earnings_transcript_counts.get(ticker, {}).values():
+                    cat_earnings_transcripts += yq_data
+                
+                # Count ignored transcripts
+                ignored_count = self.ignored_transcript_counts.get(ticker, 0)
+                cat_total_transcripts += ignored_count
+            
+            # Add earnings to total
+            cat_total_transcripts += cat_earnings_transcripts
+            
+            # Display total transcripts
+            if cat_total_transcripts > 0:
+                html_content += f'                <td style="background-color: #e3f2fd; color: #1976d2; font-weight: bold;">{cat_total_transcripts}</td>\n'
+            else:
+                html_content += '                <td style="background-color: #f8f8f8;">-</td>\n'
+            
+            # Display earnings transcripts
+            if cat_earnings_transcripts > 0:
+                html_content += f'                <td style="background-color: #e8f5e8; color: #2e7d32; font-weight: bold;">{cat_earnings_transcripts}</td>\n'
             else:
                 html_content += '                <td style="background-color: #f8f8f8;">-</td>\n'
             
@@ -652,11 +693,22 @@ class NASTranscriptScanner:
                 <td class="institution-name">{ticker} - {inst_name}</td>
 """
                 
-                # Add ignore list status cell
-                if ticker in self.companies_in_ignore_list:
-                    html_content += '                <td style="background-color: #ffe6e6; color: #6B0F24; text-align: center; font-weight: bold;">Yes</td>\n'
+                # Calculate total transcripts for this institution
+                inst_earnings_total = sum(self.earnings_transcript_counts.get(ticker, {}).values())
+                inst_ignored_total = self.ignored_transcript_counts.get(ticker, 0)
+                inst_total = inst_earnings_total + inst_ignored_total
+                
+                # Total transcripts column
+                if inst_total > 0:
+                    html_content += f'                <td style="background-color: #e3f2fd; color: #1976d2; text-align: center;">{inst_total}</td>\n'
                 else:
-                    html_content += '                <td style="background-color: #f0f8f0; color: #2e7d32; text-align: center;">No</td>\n'
+                    html_content += '                <td style="background-color: #f8f8f8; text-align: center;">-</td>\n'
+                
+                # Earnings transcripts column  
+                if inst_earnings_total > 0:
+                    html_content += f'                <td style="background-color: #e8f5e8; color: #2e7d32; text-align: center;">{inst_earnings_total}</td>\n'
+                else:
+                    html_content += '                <td style="background-color: #f8f8f8; text-align: center;">-</td>\n'
                 
                 for yq in sorted_year_quarters:
                     counts = self.coverage_data.get(category, {}).get(ticker, {}).get(yq, {})
@@ -691,32 +743,58 @@ class NASTranscriptScanner:
         <h3>Summary Statistics</h3>
 """
         
-        # Calculate summary statistics
+        # Calculate comprehensive summary statistics
         total_institutions = sum(len(cat['institutions']) for cat in self.institution_categories.values())
-        institutions_with_data = set()
-        total_transcripts = 0
-        transcripts_by_type = {"Raw": 0, "Corrected": 0, "NearRealTime": 0}
+        
+        # Count institutions with earnings transcripts
+        institutions_with_earnings = set()
+        total_earnings_transcripts = 0
+        earnings_by_type = {"Raw": 0, "Corrected": 0, "NearRealTime": 0}
         
         for category, cat_data in self.coverage_data.items():
             for ticker, ticker_data in cat_data.items():
-                institutions_with_data.add(ticker)
+                institutions_with_earnings.add(ticker)
                 for yq, counts in ticker_data.items():
                     for transcript_type, count in counts.items():
-                        total_transcripts += count
-                        transcripts_by_type[transcript_type] += count
+                        total_earnings_transcripts += count
+                        earnings_by_type[transcript_type] += count
         
-        # Calculate ignore list statistics
-        institutions_in_ignore_list = len(self.companies_in_ignore_list)
-        institutions_with_data_and_ignore = len(institutions_with_data.intersection(self.companies_in_ignore_list))
-        institutions_only_ignore = len(self.companies_in_ignore_list - institutions_with_data)
+        # Count institutions with any transcripts (earnings or ignored)
+        institutions_with_any_transcripts = institutions_with_earnings.union(self.companies_in_ignore_list)
         
-        html_content += f"""        <p><strong>Total Institutions Monitored:</strong> {total_institutions}</p>
-        <p><strong>Institutions with Valid Transcripts:</strong> {len(institutions_with_data)} ({len(institutions_with_data)/total_institutions*100:.1f}%)</p>
-        <p><strong>Institutions with Ignored Transcripts:</strong> {institutions_in_ignore_list} 
-            ({institutions_with_data_and_ignore} also have valid transcripts, {institutions_only_ignore} have only ignored transcripts)</p>
-        <p><strong>Total Valid Transcripts Found:</strong> {total_transcripts:,}</p>
-        <p><strong>Transcript Types:</strong> Raw: {transcripts_by_type['Raw']:,}, Corrected: {transcripts_by_type['Corrected']:,}, NearRealTime: {transcripts_by_type['NearRealTime']:,}</p>
-        <p><strong>Date Range:</strong> {sorted_year_quarters[0] if sorted_year_quarters else 'N/A'} to {sorted_year_quarters[-1] if sorted_year_quarters else 'N/A'}</p>
+        # Count institutions with no transcripts at all
+        all_tickers = set()
+        for cat_info in self.institution_categories.values():
+            all_tickers.update(cat_info['institutions'])
+        institutions_with_no_coverage = all_tickers - institutions_with_any_transcripts
+        
+        # Calculate total ignored transcripts
+        total_ignored_transcripts = sum(self.ignored_transcript_counts.values())
+        
+        # Calculate total transcripts (earnings + ignored)
+        total_all_transcripts = total_earnings_transcripts + total_ignored_transcripts
+        
+        # Calculate percentages
+        pct_with_any = (len(institutions_with_any_transcripts) / total_institutions * 100) if total_institutions > 0 else 0
+        pct_with_earnings = (len(institutions_with_earnings) / total_institutions * 100) if total_institutions > 0 else 0
+        pct_no_coverage = (len(institutions_with_no_coverage) / total_institutions * 100) if total_institutions > 0 else 0
+        
+        html_content += f"""        <h4>Transcript Counts:</h4>
+        <p><strong>Total Transcripts (All Types):</strong> {total_all_transcripts:,}</p>
+        <p style="margin-left: 20px;">• <strong>Earnings Call Transcripts:</strong> {total_earnings_transcripts:,}</p>
+        <p style="margin-left: 40px;">- Raw: {earnings_by_type['Raw']:,}</p>
+        <p style="margin-left: 40px;">- Corrected: {earnings_by_type['Corrected']:,}</p>
+        <p style="margin-left: 40px;">- NearRealTime: {earnings_by_type['NearRealTime']:,}</p>
+        <p style="margin-left: 20px;">• <strong>Ignored Transcripts (Non-Earnings):</strong> {total_ignored_transcripts:,}</p>
+        
+        <h4>Institution Coverage:</h4>
+        <p><strong>Total Institutions Monitored:</strong> {total_institutions}</p>
+        <p><strong>Institutions with Any Transcripts:</strong> {len(institutions_with_any_transcripts)} ({pct_with_any:.1f}%)</p>
+        <p><strong>Institutions with Earnings Call Transcripts:</strong> {len(institutions_with_earnings)} ({pct_with_earnings:.1f}%)</p>
+        <p><strong>Institutions with No Coverage:</strong> {len(institutions_with_no_coverage)} ({pct_no_coverage:.1f}%)</p>
+        
+        <h4>Date Range:</h4>
+        <p><strong>Coverage Period:</strong> {sorted_year_quarters[0] if sorted_year_quarters else 'N/A'} to {sorted_year_quarters[-1] if sorted_year_quarters else 'N/A'}</p>
     </div>
     
 </body>
@@ -729,15 +807,18 @@ class NASTranscriptScanner:
         
         logger.info(f"HTML report generated: {output_file}")
         print(f"\nReport generated: {output_file}")
-        print(f"Total institutions monitored: {total_institutions}")
-        print(f"Institutions with valid transcripts: {len(institutions_with_data)}")
-        print(f"Institutions in ignore list: {institutions_in_ignore_list}")
-        print(f"  - With both valid and ignored: {institutions_with_data_and_ignore}")
-        print(f"  - Only ignored transcripts: {institutions_only_ignore}")
-        print(f"Total valid transcripts found: {total_transcripts:,}")
-        print(f"  - Raw: {transcripts_by_type['Raw']:,}")
-        print(f"  - Corrected: {transcripts_by_type['Corrected']:,}")
-        print(f"  - NearRealTime: {transcripts_by_type['NearRealTime']:,}")
+        print(f"\n=== TRANSCRIPT COUNTS ===")
+        print(f"Total Transcripts (All Types): {total_all_transcripts:,}")
+        print(f"  • Earnings Call Transcripts: {total_earnings_transcripts:,}")
+        print(f"    - Raw: {earnings_by_type['Raw']:,}")
+        print(f"    - Corrected: {earnings_by_type['Corrected']:,}")
+        print(f"    - NearRealTime: {earnings_by_type['NearRealTime']:,}")
+        print(f"  • Ignored Transcripts (Non-Earnings): {total_ignored_transcripts:,}")
+        print(f"\n=== INSTITUTION COVERAGE ===")
+        print(f"Total Institutions Monitored: {total_institutions}")
+        print(f"Institutions with Any Transcripts: {len(institutions_with_any_transcripts)} ({pct_with_any:.1f}%)")
+        print(f"Institutions with Earnings Call Transcripts: {len(institutions_with_earnings)} ({pct_with_earnings:.1f}%)")
+        print(f"Institutions with No Coverage: {len(institutions_with_no_coverage)} ({pct_no_coverage:.1f}%)")
 
 def main():
     """Main execution function"""
