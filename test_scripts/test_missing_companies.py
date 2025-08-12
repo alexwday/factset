@@ -30,37 +30,28 @@ load_dotenv()
 config = {}
 ssl_cert_path = None
 
-# Missing companies grouped by category
+# Companies that aren't providing ANY transcripts (not even in ignore list)
+# These need ticker verification
 MISSING_COMPANIES = {
-    "Canadian Monoline Lenders": {
-        "MKP-CA": "MCAN Mortgage Corporation"
-    },
     "European Banks": {
-        "BCS-GB": "Barclays PLC",
-        "ING-NL": "ING Groep N.V.",
+        "BCS": "Barclays PLC",
+        "ING": "ING Groep N.V.",
         "ISP-IT": "Intesa Sanpaolo",
-        "LLOY-GB": "Lloyds Banking Group plc",
-        "STAN-GB": "Standard Chartered PLC",
-        "UBS-CH": "UBS Group AG",
-        "UCG-IT": "UniCredit S.p.A."
+        "UBS": "UBS Group AG"
     },
     "Nordic Banks": {
-        "DANSKE-DK": "Danske Bank A/S",
         "NDA-FI": "Nordea Bank Abp",
         "SEBA-SE": "Skandinaviska Enskilda Banken AB",
         "SWEDA-SE": "Swedbank AB"
     },
     "UK Wealth & Asset Managers": {
-        "QLT-GB": "Quilter plc",
-        "RAT-GB": "Rathbones Group Plc",
         "SJP-GB": "St. James's Place plc"
     },
     "US Banks": {
-        "JEF-US": "Jefferies Financial Group Inc."
+        "JEF": "Jefferies Financial Group Inc."
     },
     "US Wealth & Asset Managers": {
-        "SCHW-US": "Charles Schwab Corporation",
-        "TROW-US": "T. Rowe Price Group Inc."
+        "SCHW": "Charles Schwab Corporation"
     }
 }
 
@@ -231,6 +222,42 @@ def setup_factset_api_client():
         print(f"✗ Error setting up FactSet API client: {e}")
         raise
 
+def search_by_company_name(api_instance, company_name: str) -> List[Dict[str, Any]]:
+    """Search for transcripts using company name keywords."""
+    global config
+    results = []
+    
+    # Extract key words from company name
+    # Remove common suffixes
+    clean_name = company_name.replace(" PLC", "").replace(" plc", "")
+    clean_name = clean_name.replace(" AG", "").replace(" N.V.", "")
+    clean_name = clean_name.replace(" Group", "").replace(" Corporation", "")
+    clean_name = clean_name.replace(" Inc.", "").replace(" AB", "")
+    clean_name = clean_name.replace(" Abp", "").replace(" S.p.A.", "")
+    
+    # Get main company name (first significant word)
+    name_parts = clean_name.split()
+    search_terms = []
+    
+    if name_parts:
+        # Try full clean name
+        search_terms.append(clean_name)
+        # Try first word (often the main identifier)
+        if name_parts[0] not in ["The", "St", "St."]:
+            search_terms.append(name_parts[0])
+        # For St. James's Place, try "James"
+        if "James" in company_name:
+            search_terms.append("James")
+    
+    print(f"\n  Searching by company name: {company_name}")
+    print(f"  Search terms: {search_terms}")
+    
+    # Note: FactSet API doesn't support direct name search in transcripts endpoint
+    # This is a placeholder for alternative search methods
+    # In practice, you might need to use FactSet's entity search API first
+    
+    return results
+
 def test_ticker_formats(api_instance, ticker: str, company_name: str) -> Dict[str, Any]:
     """Test various ticker format variations."""
     global config
@@ -240,88 +267,91 @@ def test_ticker_formats(api_instance, ticker: str, company_name: str) -> Dict[st
     end_date = datetime.now().date()
     start_date = (datetime.now() - timedelta(days=365*3)).date()
     
-    # Different ticker formats to try
+    # Base ticker (remove any country code if present)
+    base_ticker = ticker.split('-')[0] if '-' in ticker else ticker
+    
+    # Start with common variations
     ticker_variations = [
-        ticker,                              # Original: MKP-CA
-        ticker.split('-')[0] if '-' in ticker else ticker,  # Without country: MKP
-        ticker.replace('-', '.'),            # Dot notation: MKP.CA
-        ticker.replace('-', ':'),            # Colon notation: MKP:CA
-        ticker.lower(),                      # Lowercase: mkp-ca
-        ticker.upper(),                      # Uppercase: MKP-CA
+        ticker,                              # Original
+        base_ticker,                         # Without country code
+        ticker.upper(),                      # Uppercase
     ]
     
-    # For European tickers, try various exchange suffixes
-    if '-' in ticker:
-        base_ticker = ticker.split('-')[0]
-        country_code = ticker.split('-')[1]
-        
-        # Add country-specific variations
-        if country_code == 'GB':  # UK companies
-            ticker_variations.extend([
-                f"{base_ticker}",           # Just base
-                f"{base_ticker}-GB",         # Original
-                f"{base_ticker}.L",          # London Stock Exchange
-                f"{base_ticker}-LON",        # London
-                f"LON:{base_ticker}",        # Bloomberg style
-            ])
-        elif country_code in ['CH', 'SW']:  # Swiss companies
-            ticker_variations.extend([
-                f"{base_ticker}",
-                f"{base_ticker}-CH",
-                f"{base_ticker}.SW",
-                f"{base_ticker}.S",
-                f"{base_ticker}-SWX",
-            ])
-        elif country_code == 'IT':  # Italian companies
-            ticker_variations.extend([
-                f"{base_ticker}",
-                f"{base_ticker}-IT",
-                f"{base_ticker}.MI",         # Milan
-                f"{base_ticker}-MIL",
-            ])
-        elif country_code == 'NL':  # Dutch companies
-            ticker_variations.extend([
-                f"{base_ticker}",
-                f"{base_ticker}-NL",
-                f"{base_ticker}.AS",         # Amsterdam
-                f"{base_ticker}-AMS",
-            ])
-        elif country_code == 'DK':  # Danish companies
-            ticker_variations.extend([
-                f"{base_ticker}",
-                f"{base_ticker}-DK",
-                f"{base_ticker}.CO",         # Copenhagen
-                f"{base_ticker}-CPH",
-            ])
-        elif country_code in ['SE', 'SW']:  # Swedish companies
-            ticker_variations.extend([
-                f"{base_ticker}",
-                f"{base_ticker}-SE",
-                f"{base_ticker}.ST",         # Stockholm
-                f"{base_ticker}-STO",
-            ])
-        elif country_code == 'FI':  # Finnish companies
-            ticker_variations.extend([
-                f"{base_ticker}",
-                f"{base_ticker}-FI",
-                f"{base_ticker}.HE",         # Helsinki
-                f"{base_ticker}-HEL",
-            ])
-        elif country_code == 'CA':  # Canadian companies
-            ticker_variations.extend([
-                f"{base_ticker}",
-                f"{base_ticker}-CA",
-                f"{base_ticker}.TO",         # Toronto
-                f"{base_ticker}-TSE",
-                f"TSE:{base_ticker}",
-            ])
-        elif country_code == 'US':  # US companies
-            ticker_variations.extend([
-                f"{base_ticker}",
-                f"{base_ticker}-US",
-                f"{base_ticker}-NYSE",
-                f"{base_ticker}-NASDAQ",
-            ])
+    # Add company-specific variations based on known exchange listings
+    if base_ticker == "BCS":  # Barclays
+        ticker_variations.extend([
+            "BARC",         # Alternative ticker
+            "BARC.L",       # London Stock Exchange
+            "BARC-GB",
+            "BCS-US",       # US ADR
+            "BCS-N",        # NYSE
+        ])
+    elif base_ticker == "ING":  # ING Group
+        ticker_variations.extend([
+            "INGA",         # Amsterdam listing
+            "INGA.AS",      # Euronext Amsterdam
+            "ING-US",       # US ADR
+            "ING-N",        # NYSE
+        ])
+    elif base_ticker == "ISP":  # Intesa Sanpaolo
+        ticker_variations.extend([
+            "ISP",
+            "ISP.MI",       # Borsa Italiana Milan
+            "ISP-IT",
+            "ISNPY",        # US ADR
+        ])
+    elif base_ticker == "UBS":  # UBS Group
+        ticker_variations.extend([
+            "UBSG",         # SIX Swiss Exchange ticker
+            "UBSG.SW",      
+            "UBSG.S",
+            "UBS-US",       # US listing
+            "UBS-N",        # NYSE
+        ])
+    elif base_ticker == "NDA":  # Nordea Bank
+        ticker_variations.extend([
+            "NDA",
+            "NDA-SE",       # Swedish listing
+            "NDA.ST",       # Stockholm
+            "NDA-FI",
+            "NDA.HE",       # Helsinki
+            "NRBAY",        # US ADR
+        ])
+    elif base_ticker == "SEBA":  # SEB
+        ticker_variations.extend([
+            "SEB-A",        # A shares
+            "SEB-A.ST",     # Stockholm
+            "SEBA",
+            "SEBA.ST",
+            "SEBA-SE",
+        ])
+    elif base_ticker == "SWEDA":  # Swedbank
+        ticker_variations.extend([
+            "SWED-A",       # A shares
+            "SWEDA",
+            "SWEDA.ST",     # Stockholm
+            "SWED-A.ST",
+            "SWDBY",        # US ADR
+        ])
+    elif base_ticker == "SJP":  # St. James's Place
+        ticker_variations.extend([
+            "STJ",          # Alternative ticker
+            "STJ.L",        # London Stock Exchange
+            "SJP.L",
+            "SJP-GB",
+        ])
+    elif base_ticker == "JEF":  # Jefferies
+        ticker_variations.extend([
+            "JEF",
+            "JEF-US",
+            "JEF-N",        # NYSE
+        ])
+    elif base_ticker == "SCHW":  # Charles Schwab
+        ticker_variations.extend([
+            "SCHW",
+            "SCHW-US",
+            "SCHW-N",       # NYSE
+        ])
     
     print(f"\nTesting {company_name} ({ticker})...")
     print(f"  Date range: {start_date} to {end_date}")
@@ -598,26 +628,43 @@ def main():
     
     # Recommendations based on results
     print("\n" + "=" * 80)
-    print("RECOMMENDATIONS:")
+    print("RECOMMENDATIONS FOR CONFIG.YAML UPDATES:")
     print("-" * 80)
     
     if successful_variants:
         print("\n✓ Update config.yaml with working ticker variants:")
+        print("\nmonitored_institutions:")
         for ticker, info in successful_variants.items():
             best_variant = info['working_tickers'][0]
-            if best_variant != ticker:
-                print(f"  Change {ticker} to {best_variant}")
+            # Get the transcript count for best variant
+            count = info['transcript_counts'][best_variant]
+            
+            # Show the YAML format for easy copy-paste
+            print(f"  {best_variant}:")
+            print(f"    name: \"{info['company']}\"")
+            print(f"    type: # Update with correct type")
+            print(f"    # Found {count} transcripts with this ticker")
+            
+            # Show what the actual API returns as primary IDs
+            if info.get('sample_data') and info['sample_data'][0].get('primary_ids'):
+                print(f"    # API returns primary_ids: {info['sample_data'][0]['primary_ids']}")
     
-    print("\n✓ For companies with no results:")
-    print("  1. Contact FactSet support to verify correct identifiers")
-    print("  2. Check if companies are covered in FactSet's transcript database")
-    print("  3. Some companies may use SEDOL, CUSIP, or ISIN identifiers instead")
-    print("  4. Verify companies haven't been delisted, merged, or renamed")
-    print("  5. Check if transcripts are available under parent company tickers")
+    print("\n✗ Companies with NO working tickers found:")
+    print("\nThese companies may need alternative approaches:")
+    for company in sorted(no_results):
+        print(f"  - {company}")
+    
+    print("\n✓ SUGGESTED ACTIONS for companies with no results:")
+    print("  1. These companies might not have earnings call coverage in FactSet")
+    print("  2. Try using FactSet's entity search API to find correct identifiers")
+    print("  3. Check FactSet Workstation or contact support for these specific companies")
+    print("  4. Some might use SEDOL, CUSIP, or ISIN identifiers instead of tickers")
+    print("  5. Verify if companies have been delisted, merged, or renamed recently")
     
     print("\n✓ Configuration insights from successful queries:")
     print(f"  - Industry categories used: {config['api_settings']['industry_categories']}")
-    print(f"  - Consider if missing companies are in different categories")
+    print(f"  - API date range: 3 years rolling window")
+    print(f"  - Consider if missing companies are in different industry categories")
     
     # Cleanup
     print("\n" + "=" * 80)
