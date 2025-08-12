@@ -22,6 +22,7 @@ from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 import re
 import io
+import pandas as pd
 
 # Load environment variables
 load_dotenv()
@@ -106,6 +107,9 @@ class NASTranscriptScanner:
             "NearRealTime": 0
         })))
         
+        # Store companies with transcripts in ignore list
+        self.companies_in_ignore_list = set()
+        
         self.years_quarters = set()
     
     def _build_categories_from_config(self) -> Dict:
@@ -161,6 +165,35 @@ class NASTranscriptScanner:
             
         logger.info("Successfully connected to NAS")
         return conn
+    
+    def load_ignore_list(self, conn: SMBConnection):
+        """Load the invalid transcript list from NAS to identify companies with ignored transcripts"""
+        try:
+            # Path to the ignore list Excel file
+            base_path = os.getenv('NAS_BASE_PATH', 'Finance Data and Analytics/DSA/Earnings Call Transcripts')
+            ignore_list_path = f"{base_path}/Outputs/Data/InvalidTranscripts/invalid_transcripts.xlsx"
+            
+            logger.info(f"Loading ignore list from: {ignore_list_path}")
+            
+            # Download the Excel file
+            file_obj = io.BytesIO()
+            conn.retrieveFile(self.nas_share_name, ignore_list_path, file_obj)
+            file_obj.seek(0)
+            
+            # Read Excel file
+            df = pd.read_excel(file_obj)
+            
+            # Extract unique tickers from the ignore list
+            if 'ticker' in df.columns:
+                unique_tickers = df['ticker'].unique()
+                self.companies_in_ignore_list = set(unique_tickers)
+                logger.info(f"Loaded ignore list with {len(df)} entries covering {len(self.companies_in_ignore_list)} unique companies")
+            else:
+                logger.warning("No 'ticker' column found in ignore list")
+                
+        except Exception as e:
+            logger.warning(f"Could not load ignore list (may not exist yet): {e}")
+            self.companies_in_ignore_list = set()
     
     def scan_transcript_folders(self, conn: SMBConnection):
         """Scan the NAS folder structure for transcripts"""
@@ -535,10 +568,13 @@ class NASTranscriptScanner:
     <div class="legend">
         <strong>Legend:</strong>
         <span class="legend-item">
-            <span class="legend-box has-transcripts"></span> Has Transcripts
+            <span class="legend-box has-transcripts"></span> Has Valid Transcripts
         </span>
         <span class="legend-item">
-            <span class="legend-box no-transcripts"></span> No Transcripts
+            <span class="legend-box no-transcripts"></span> No Valid Transcripts
+        </span>
+        <span class="legend-item">
+            <span class="legend-box" style="background-color: #ffe6e6; border-color: #6B0F24;"></span> In Ignore List (non-earnings transcripts)
         </span>
         <span class="legend-item">
             <span class="transcript-display corrected" style="font-size: 12px;">C</span> Corrected
@@ -564,6 +600,7 @@ class NASTranscriptScanner:
         <thead>
             <tr>
                 <th style="text-align: left; min-width: 300px;">Institution</th>
+                <th style="min-width: 80px; background-color: #6B0F24; color: white;">In Ignore List</th>
 """
         
         # Add year-quarter headers
@@ -587,6 +624,13 @@ class NASTranscriptScanner:
                 </td>
 """
             
+            # Count institutions in ignore list for this category
+            ignore_count = sum(1 for ticker in cat_info['institutions'] if ticker in self.companies_in_ignore_list)
+            if ignore_count > 0:
+                html_content += f'                <td style="background-color: #ffe6e6; color: #6B0F24; font-weight: bold;">{ignore_count}</td>\n'
+            else:
+                html_content += '                <td style="background-color: #f8f8f8;">-</td>\n'
+            
             # Calculate category totals for each year-quarter
             for yq in sorted_year_quarters:
                 total_count = 0
@@ -607,6 +651,12 @@ class NASTranscriptScanner:
                 html_content += f"""            <tr class="{safe_category_id}-inst institution-row">
                 <td class="institution-name">{ticker} - {inst_name}</td>
 """
+                
+                # Add ignore list status cell
+                if ticker in self.companies_in_ignore_list:
+                    html_content += '                <td style="background-color: #ffe6e6; color: #6B0F24; text-align: center; font-weight: bold;">Yes</td>\n'
+                else:
+                    html_content += '                <td style="background-color: #f0f8f0; color: #2e7d32; text-align: center;">No</td>\n'
                 
                 for yq in sorted_year_quarters:
                     counts = self.coverage_data.get(category, {}).get(ticker, {}).get(yq, {})
@@ -655,9 +705,16 @@ class NASTranscriptScanner:
                         total_transcripts += count
                         transcripts_by_type[transcript_type] += count
         
+        # Calculate ignore list statistics
+        institutions_in_ignore_list = len(self.companies_in_ignore_list)
+        institutions_with_data_and_ignore = len(institutions_with_data.intersection(self.companies_in_ignore_list))
+        institutions_only_ignore = len(self.companies_in_ignore_list - institutions_with_data)
+        
         html_content += f"""        <p><strong>Total Institutions Monitored:</strong> {total_institutions}</p>
-        <p><strong>Institutions with Transcripts:</strong> {len(institutions_with_data)} ({len(institutions_with_data)/total_institutions*100:.1f}%)</p>
-        <p><strong>Total Transcripts Found:</strong> {total_transcripts:,}</p>
+        <p><strong>Institutions with Valid Transcripts:</strong> {len(institutions_with_data)} ({len(institutions_with_data)/total_institutions*100:.1f}%)</p>
+        <p><strong>Institutions with Ignored Transcripts:</strong> {institutions_in_ignore_list} 
+            ({institutions_with_data_and_ignore} also have valid transcripts, {institutions_only_ignore} have only ignored transcripts)</p>
+        <p><strong>Total Valid Transcripts Found:</strong> {total_transcripts:,}</p>
         <p><strong>Transcript Types:</strong> Raw: {transcripts_by_type['Raw']:,}, Corrected: {transcripts_by_type['Corrected']:,}, NearRealTime: {transcripts_by_type['NearRealTime']:,}</p>
         <p><strong>Date Range:</strong> {sorted_year_quarters[0] if sorted_year_quarters else 'N/A'} to {sorted_year_quarters[-1] if sorted_year_quarters else 'N/A'}</p>
     </div>
@@ -673,8 +730,11 @@ class NASTranscriptScanner:
         logger.info(f"HTML report generated: {output_file}")
         print(f"\nReport generated: {output_file}")
         print(f"Total institutions monitored: {total_institutions}")
-        print(f"Institutions with transcripts: {len(institutions_with_data)}")
-        print(f"Total transcripts found: {total_transcripts:,}")
+        print(f"Institutions with valid transcripts: {len(institutions_with_data)}")
+        print(f"Institutions in ignore list: {institutions_in_ignore_list}")
+        print(f"  - With both valid and ignored: {institutions_with_data_and_ignore}")
+        print(f"  - Only ignored transcripts: {institutions_only_ignore}")
+        print(f"Total valid transcripts found: {total_transcripts:,}")
         print(f"  - Raw: {transcripts_by_type['Raw']:,}")
         print(f"  - Corrected: {transcripts_by_type['Corrected']:,}")
         print(f"  - NearRealTime: {transcripts_by_type['NearRealTime']:,}")
@@ -694,6 +754,10 @@ def main():
         conn = scanner.connect_to_nas()
         
         try:
+            # Load ignore list first
+            logger.info("Loading ignore list from NAS...")
+            scanner.load_ignore_list(conn)
+            
             # Scan transcript folders
             logger.info("Scanning transcript folders on NAS...")
             scanner.scan_transcript_folders(conn)
