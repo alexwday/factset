@@ -814,24 +814,43 @@ def save_invalid_transcript_list(nas_conn: SMBConnection, df: pd.DataFrame) -> b
             return False
         
         # Save DataFrame to Excel in memory
+        log_console(f"DEBUG: Creating Excel buffer for {len(df)} entries...")
         excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Invalid_Transcripts')
+        try:
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Invalid_Transcripts')
+        except Exception as excel_error:
+            log_error(f"Failed to create Excel buffer: {excel_error}", "excel_creation")
+            log_console(f"ERROR: Excel creation failed: {excel_error}")
+            return False
         
         excel_buffer.seek(0)
         buffer_size = len(excel_buffer.getvalue())
-        log_console(f"DEBUG: Excel buffer created, size: {buffer_size} bytes")
+        log_console(f"DEBUG: Excel buffer created successfully, size: {buffer_size} bytes")
         
         # Upload to NAS
-        if nas_upload_file(nas_conn, excel_buffer, invalid_list_path):
+        log_console(f"DEBUG: Starting upload to NAS...")
+        upload_success = False
+        try:
+            upload_success = nas_upload_file(nas_conn, excel_buffer, invalid_list_path)
+        except Exception as upload_error:
+            log_error(f"Exception during upload: {upload_error}", "upload_exception")
+            log_console(f"ERROR: Upload exception: {upload_error}")
+            return False
+            
+        if upload_success:
             log_console(f"✓ Successfully saved invalid transcript list with {len(df)} entries to {invalid_list_path}")
             return True
         else:
-            log_error(f"Failed to upload invalid list to NAS path: {invalid_list_path}", "save_invalid_list")
+            log_error(f"Upload returned False for path: {invalid_list_path}", "save_invalid_list")
+            log_console(f"ERROR: Upload failed (returned False)")
             return False
             
     except Exception as e:
-        log_error(f"Error saving invalid transcript list: {e}", "save_invalid_list", {"error": str(e)})
+        log_error(f"Unexpected error saving invalid transcript list: {e}", "save_invalid_list", {"error": str(e), "type": type(e).__name__})
+        log_console(f"ERROR: Unexpected error in save_invalid_transcript_list: {e}")
+        import traceback
+        log_console(f"DEBUG: Traceback: {traceback.format_exc()}")
         return False
 
 
@@ -1233,10 +1252,18 @@ def compare_transcripts_with_invalid_list(
     # Process each event_id in API
     for event_id, api_versions in api_by_event_id.items():
         for api_transcript in api_versions:
-            # Check if this transcript is in the invalid list
+            # Check if this transcript is in the invalid list FIRST
             if is_transcript_in_invalid_list(invalid_df, api_transcript["event_id"], api_transcript["version_id"]):
                 skipped_invalid += 1
-                continue
+                log_execution(
+                    f"Skipping transcript already in invalid list",
+                    {
+                        "event_id": api_transcript["event_id"],
+                        "version_id": api_transcript["version_id"],
+                        "ticker": api_transcript.get("ticker", ""),
+                    },
+                )
+                continue  # Skip this transcript entirely - don't download it
             
             if event_id in nas_by_event_id:
                 # Event exists in both API and NAS - compare versions
@@ -1266,7 +1293,8 @@ def compare_transcripts_with_invalid_list(
                     to_download.append(api_transcript)
                     new_transcript_types += 1
             else:
-                # New event_id - download it (will be validated during download)
+                # New event_id - will be validated during download
+                # But it's NOT in the invalid list (we checked above)
                 to_download.append(api_transcript)
                 new_events += 1
 
