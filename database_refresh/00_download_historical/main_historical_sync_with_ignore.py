@@ -774,6 +774,16 @@ def load_invalid_transcript_list(nas_conn: SMBConnection) -> pd.DataFrame:
         excel_data = nas_download_file(nas_conn, invalid_list_path)
         if excel_data:
             df = pd.read_excel(io.BytesIO(excel_data))
+            
+            # Ensure event_id and version_id are strings for consistent comparison
+            if not df.empty:
+                df['event_id'] = df['event_id'].astype(str)
+                df['version_id'] = df['version_id'].astype(str)
+                
+                # Remove any potential whitespace
+                df['event_id'] = df['event_id'].str.strip()
+                df['version_id'] = df['version_id'].str.strip()
+            
             log_console(f"Loaded invalid transcript list with {len(df)} entries")
             return df
     except Exception as e:
@@ -858,17 +868,23 @@ def add_to_invalid_list(df: pd.DataFrame, ticker: str, institution_info: Dict[st
                         transcript: Dict[str, Any], title: str, reason: str) -> pd.DataFrame:
     """Add a transcript to the invalid list."""
     
+    # Convert IDs to strings for consistent storage
+    event_id = str(transcript.get('event_id', ''))
+    version_id = str(transcript.get('version_id', ''))
+    
     new_entry = pd.DataFrame([{
         'ticker': ticker,
         'institution_name': institution_info['name'],
-        'event_id': transcript.get('event_id', ''),
-        'version_id': transcript.get('version_id', ''),
+        'event_id': event_id,
+        'version_id': version_id,
         'title_found': title,
         'event_date': transcript.get('event_date', ''),
         'transcript_type': transcript.get('transcript_type', ''),
         'reason': reason,
         'date_added': datetime.now().isoformat()
     }])
+    
+    log_console(f"Adding to invalid list: {ticker} event_id={event_id} version_id={version_id}")
     
     df = pd.concat([df, new_entry], ignore_index=True)
     return df
@@ -879,7 +895,20 @@ def is_transcript_in_invalid_list(df: pd.DataFrame, event_id: str, version_id: s
     if df.empty:
         return False
     
-    return ((df['event_id'] == str(event_id)) & (df['version_id'] == str(version_id))).any()
+    # Convert both to strings for comparison (strip whitespace too)
+    event_id_str = str(event_id).strip()
+    version_id_str = str(version_id).strip()
+    
+    # DataFrame already has strings from load_invalid_transcript_list
+    result = ((df['event_id'] == event_id_str) & (df['version_id'] == version_id_str)).any()
+    
+    if result:
+        log_execution(
+            f"Found transcript in invalid list - SKIPPING",
+            {"event_id": event_id_str, "version_id": version_id_str}
+        )
+    
+    return result
 
 
 # ===== CORE BUSINESS LOGIC FUNCTIONS =====
@@ -1593,6 +1622,20 @@ def main() -> None:
         invalid_df = load_invalid_transcript_list(nas_conn)
         stage_summary["invalid_transcripts_found"] = len(invalid_df)
         
+        # Debug: Show invalid list details
+        if not invalid_df.empty:
+            log_console(f"Invalid list has {len(invalid_df)} entries")
+            
+            # Show sample entries for debugging
+            sample_size = min(5, len(invalid_df))
+            log_execution(
+                "Invalid list sample entries",
+                {
+                    "total_entries": len(invalid_df),
+                    "sample_entries": invalid_df[['ticker', 'event_id', 'version_id', 'title_found']].head(sample_size).to_dict('records')
+                }
+            )
+        
         # Determine approach based on configuration
         start_year_config = config["stage_00_download_historical"].get("start_year", None)
         approach = f"Fixed start year ({start_year_config})" if start_year_config else "3-year rolling window"
@@ -1664,6 +1707,36 @@ def main() -> None:
                 api_transcript_list = create_api_transcript_list(
                     api_transcripts, ticker, institution_info
                 )
+                
+                # Debug: Check invalid list matching for this company
+                company_invalid_entries = invalid_df[invalid_df['ticker'] == ticker] if not invalid_df.empty else pd.DataFrame()
+                if not company_invalid_entries.empty:
+                    log_console(f"\n{ticker}: Found {len(company_invalid_entries)} entries in invalid list")
+                    
+                    # Check how many API transcripts match invalid list
+                    matched_count = 0
+                    unmatched_api = []
+                    for api_t in api_transcript_list:
+                        if is_transcript_in_invalid_list(invalid_df, api_t['event_id'], api_t['version_id']):
+                            matched_count += 1
+                        else:
+                            unmatched_api.append({'event_id': api_t['event_id'], 'version_id': api_t['version_id']})
+                    
+                    log_console(f"{ticker}: {matched_count}/{len(api_transcript_list)} API transcripts match invalid list")
+                    
+                    if matched_count < len(company_invalid_entries):
+                        log_console(f"WARNING: {ticker} has {len(company_invalid_entries)} invalid entries but only {matched_count} matched from API")
+                        log_execution(
+                            f"Invalid list matching details for {ticker}",
+                            {
+                                "ticker": ticker,
+                                "invalid_list_entries": len(company_invalid_entries),
+                                "api_transcripts": len(api_transcript_list),
+                                "matched_from_api": matched_count,
+                                "invalid_entries_sample": company_invalid_entries[['event_id', 'version_id']].head(3).to_dict('records'),
+                                "unmatched_api_sample": unmatched_api[:3] if unmatched_api else []
+                            }
+                        )
 
                 # Filter NAS inventory for this company
                 company_nas_transcripts = [
@@ -1688,6 +1761,9 @@ def main() -> None:
 
                 # Download new/updated transcripts with validation
                 for transcript in to_download:
+                    # Debug: Log what we're about to download
+                    log_console(f"Attempting to download: {ticker} event_id={transcript.get('event_id')} version_id={transcript.get('version_id')}")
+                    
                     result, invalid_df = download_transcript_with_validation(
                         nas_conn,
                         transcript,
@@ -1701,6 +1777,7 @@ def main() -> None:
                         log_console(f"Downloaded valid transcript: {result['filename']}")
                     else:
                         rejected_count += 1
+                        log_console(f"Rejected transcript (invalid title): event_id={transcript.get('event_id')} version_id={transcript.get('version_id')}")
 
                     # Rate limit between downloads
                     time.sleep(config["api_settings"]["request_delay"])
