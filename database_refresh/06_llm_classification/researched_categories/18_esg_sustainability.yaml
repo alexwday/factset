@@ -1,0 +1,544 @@
+# ESG & Sustainability Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Increasingly important topic with growing investor focus
+
+- name: "ESG & Sustainability"
+  
+  description: |
+    Discussion of environmental, social, and governance initiatives, climate change strategy,
+    sustainable finance, diversity and inclusion, community investment, and responsible banking.
+    Includes net-zero commitments, green financing, social bonds, ESG risk management, and
+    stakeholder capitalism. Growing area of focus for investors and regulators.
+  
+  detailed_scope:
+    includes:
+      # Environmental
+      - Climate change strategy
+      - Net-zero commitments
+      - Carbon footprint/emissions
+      - Green financing/loans
+      - Renewable energy financing
+      - Sustainable bonds
+      - Environmental risk management
+      - TCFD reporting
+      
+      # Social
+      - Diversity, equity & inclusion (DEI)
+      - Community investment
+      - Financial inclusion
+      - Affordable housing
+      - Small business support
+      - Employee wellbeing
+      - Human rights
+      - Indigenous relations (Canada)
+      
+      # Governance
+      - Board diversity
+      - ESG governance structure
+      - Executive compensation linkage
+      - Stakeholder engagement
+      - Responsible banking
+      - Ethics and conduct
+      - ESG risk framework
+      
+      # Sustainable Finance
+      - ESG investment products
+      - Impact investing
+      - Sustainable advisory
+      - Green bonds underwriting
+      - Social bonds
+      - Sustainability-linked loans
+      - Transition finance
+      
+      # Reporting & Metrics
+      - ESG ratings/scores
+      - Sustainability reporting
+      - UN SDG alignment
+      - PRB (Principles for Responsible Banking)
+      - Climate scenarios
+      - Scope 1/2/3 emissions
+      
+    excludes:
+      - Regular business operations
+      - Standard risk management
+      - Regular community banking
+      - Traditional governance (unless ESG-linked)
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "ESG"
+      - "sustainability"
+      - "sustainable"
+      - "climate"
+      - "climate change"
+      - "net zero"
+      - "net-zero"
+      - "carbon"
+      - "emissions"
+      - "green"
+      - "renewable"
+      - "diversity"
+      - "inclusion"
+      - "DEI"
+      - "environmental"
+      - "social responsibility"
+      - "responsible banking"
+      - "impact investing"
+      - "sustainable finance"
+      
+    # Secondary indicators
+    secondary:
+      - "TCFD" # Task Force on Climate-related Financial Disclosures
+      - "scope 1" # Direct emissions
+      - "scope 2" # Indirect emissions
+      - "scope 3" # Value chain emissions
+      - "carbon neutral"
+      - "carbon footprint"
+      - "GHG" # Greenhouse gas
+      - "greenhouse gas"
+      - "renewable energy"
+      - "clean energy"
+      - "energy transition"
+      - "fossil fuel"
+      - "stranded assets"
+      - "climate risk"
+      - "physical risk"
+      - "transition risk"
+      - "green bonds"
+      - "social bonds"
+      - "sustainability bonds"
+      - "sustainability-linked"
+      - "impact measurement"
+      - "SDG" # Sustainable Development Goals
+      - "UN Global Compact"
+      - "PRI" # Principles for Responsible Investment
+      - "PRB" # Principles for Responsible Banking
+      - "equator principles"
+      - "diversity targets"
+      - "gender equality"
+      - "pay equity"
+      - "racial equity"
+      - "LGBTQ+"
+      - "minority-owned"
+      - "women-owned"
+      - "community development"
+      - "community investment"
+      - "CRA" # (in community context)
+      - "affordable housing"
+      - "financial inclusion"
+      - "unbanked"
+      - "underbanked"
+      - "microfinance"
+      - "social impact"
+      - "philanthropy"
+      - "charitable giving"
+      - "volunteer hours"
+      - "stakeholder capitalism"
+      - "purpose-driven"
+      - "B Corp"
+      - "benefit corporation"
+      - "ESG integration"
+      - "ESG risk"
+      - "ESG scores"
+      - "MSCI ESG"
+      - "Sustainalytics"
+      - "CDP" # Carbon Disclosure Project
+      - "SASB" # Sustainability Accounting Standards Board
+      - "GRI" # Global Reporting Initiative
+      - "human rights"
+      - "modern slavery"
+      - "supply chain sustainability"
+      - "circular economy"
+      - "biodiversity"
+      
+    # Contextual indicators
+    contextual:
+      - "responsible" # (responsible banking)
+      - "ethical"
+      - "sustainable" # (in context)
+      - "green" # (in context)
+      - "impact" # (social impact)
+      - "community" # (community investment)
+      - "stakeholder" # (stakeholder focus)
+      - "purpose"
+      - "values"
+      - "commitment" # (ESG commitment)
+      - "transition" # (energy transition)
+      - "inclusive" # (inclusive banking)
+  
+  common_phrases:
+    positive_signals:
+      # Environmental Progress
+      - "net-zero by 2050"
+      - "reduced emissions by X%"
+      - "$X billion in green financing"
+      - "renewable energy portfolio grew"
+      - "climate strategy advancing"
+      - "TCFD-aligned reporting"
+      
+      # Social Impact
+      - "increased diversity to X%"
+      - "$X billion to underserved communities"
+      - "financial inclusion expanded"
+      - "affordable housing commitments met"
+      - "employee engagement improved"
+      
+      # Governance & Recognition
+      - "ESG ratings upgraded"
+      - "sustainability goals achieved"
+      - "recognized for ESG leadership"
+      - "linked compensation to ESG"
+      
+    negative_signals:
+      - "ESG targets missed"
+      - "emissions increased"
+      - "diversity goals not met"
+      - "ESG ratings downgraded"
+      - "greenwashing concerns"
+      - "climate risk exposure"
+      - "fossil fuel financing controversy"
+  
+  quantitative_patterns:
+    # Environmental metrics
+    - "$X billion in sustainable finance"
+    - "X% reduction in emissions"
+    - "X MW renewable energy financed"
+    - "carbon intensity of X"
+    
+    # Social metrics
+    - "X% women in leadership"
+    - "X% minority representation"
+    - "$X million community investment"
+    - "X thousand volunteer hours"
+    
+    # ESG finance
+    - "$X billion green bonds issued"
+    - "X ESG funds launched"
+    - "$X trillion ESG AUM"
+    - "X% of portfolio ESG-integrated"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      commitments: ["$2.5 trillion sustainable finance by 2030", "Net zero by 2050"]
+      programs: ["Racial Equity Commitment", "Advancing Black Pathways"]
+      focus: "ESG leadership position"
+      
+    Bank_of_America:
+      framework: ["Environmental Business Initiative", "$1.5 trillion by 2030"]
+      social: ["$2 billion racial equality commitment"]
+      
+    Wells_Fargo:
+      initiatives: ["Climate strategy", "Diverse segments commitment"]
+      focus: "Rebuilding trust through ESG"
+      
+    Citigroup:
+      targets: ["$1 trillion sustainable finance", "Net Zero Banking Alliance"]
+      social: ["Action for Racial Equity"]
+      
+    Goldman_Sachs:
+      programs: ["Sustainable Finance Group", "10,000 Small Businesses"]
+      target: "$750 billion sustainable finance"
+      
+    Morgan_Stanley:
+      commitment: ["Net Zero Financed Emissions", "$1 trillion by 2030"]
+      focus: "Sustainable investing leadership"
+    
+    # Canadian Banks
+    Royal_Bank_RY:
+      targets: ["Net-zero by 2050", "$500B sustainable finance by 2025"]
+      programs: ["Climate Blueprint", "Indigenous partnerships"]
+      focus: "Climate leadership"
+      
+    TD_Bank:
+      framework: ["TD Ready Commitment", "Net-zero aligned"]
+      target: "$100B in low-carbon economy by 2030"
+      indigenous: "Indigenous Banking unit"
+      
+    Bank_of_Montreal_BMO:
+      commitment: ["Climate Institute", "Net Zero Banking Alliance"]
+      social: ["BMO EMpower", "Zero Barriers to Inclusion"]
+      
+    Scotiabank_BNS:
+      initiatives: ["Net-Zero Pathways", "ScotiaRISE"]
+      focus: "Climate commitments across footprint"
+      
+    CIBC_CM:
+      programs: ["Net-zero ambition", "Building an Inclusive Bank"]
+      focus: "ESG integration"
+      
+    National_Bank_NA:
+      approach: ["ESG principles", "Sustainable development"]
+      focus: "Quebec sustainability leadership"
+  
+  canadian_specific_patterns:
+    unique_elements:
+      - Indigenous reconciliation focus
+      - Truth and Reconciliation commitments
+      - First Nations partnerships
+      - French language inclusion
+      - Provincial sustainability requirements
+      
+    terminology:
+      - "Indigenous peoples" (not Native American)
+      - "Reconciliation"
+      - "Treaty acknowledgments"
+      - "Low-carbon economy"
+      - "Just transition"
+      
+    reporting:
+      - TCFD adoption widespread
+      - CSA climate disclosure
+      - Taxonomy alignment
+      - Transition pathways
+  
+  climate_strategy_language:
+    commitments:
+      - "net-zero financed emissions"
+      - "Paris Agreement aligned"
+      - "science-based targets"
+      - "1.5-degree pathway"
+      - "carbon neutrality"
+      
+    implementation:
+      - "sector-specific targets"
+      - "interim 2030 targets"
+      - "portfolio alignment"
+      - "client engagement"
+      - "transition finance"
+      
+    risk_management:
+      - "climate scenario analysis"
+      - "stress testing"
+      - "physical risk assessment"
+      - "transition risk modeling"
+      - "stranded asset analysis"
+  
+  social_impact_language:
+    diversity:
+      - "representation goals"
+      - "inclusive culture"
+      - "unconscious bias training"
+      - "diverse slate approach"
+      - "pay equity analysis"
+      
+    community:
+      - "place-based investment"
+      - "capacity building"
+      - "economic mobility"
+      - "wealth gap closing"
+      - "small business support"
+      
+    inclusion:
+      - "banking deserts"
+      - "digital divide"
+      - "language access"
+      - "disability inclusion"
+      - "senior banking"
+  
+  sustainable_finance_products:
+    lending:
+      - "green loans"
+      - "sustainability-linked loans"
+      - "transition loans"
+      - "social loans"
+      - "blue bonds" # Ocean
+      
+    capital_markets:
+      - "green bond underwriting"
+      - "social bond issuance"
+      - "sustainability advisory"
+      - "ESG IPOs"
+      
+    investing:
+      - "ESG integration"
+      - "impact funds"
+      - "thematic investing"
+      - "exclusion screening"
+      - "active ownership"
+  
+  esg_governance_structure:
+    board_level:
+      - "ESG committee"
+      - "sustainability committee"
+      - "board oversight"
+      - "director ESG expertise"
+      
+    management:
+      - "Chief Sustainability Officer"
+      - "ESG steering committee"
+      - "business line integration"
+      - "ESG risk committee"
+      
+    accountability:
+      - "ESG-linked compensation"
+      - "ESG KPIs"
+      - "third-party assurance"
+      - "stakeholder feedback"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "We committed to net-zero financed emissions by 2050"
+        reason: "Climate commitment"
+        
+      - text: "Increased sustainable finance to $100 billion this year"
+        reason: "ESG finance metric"
+        
+      - text: "Board diversity reached 40% women and minorities"
+        reason: "Diversity governance metric"
+        
+      - text: "Launched new ESG investment products for wealth clients"
+        reason: "Sustainable finance products"
+        
+      - text: "Community investment totaled $500 million"
+        reason: "Social impact metric"
+        
+      - text: "TCFD report shows improved climate risk management"
+        reason: "Climate disclosure and risk"
+        
+      - text: "Indigenous partnership program expanded" # Canadian
+        reason: "Social responsibility and reconciliation"
+    
+    should_not_classify:
+      - text: "Regular small business lending grew"
+        reason: "Standard business, not ESG-focused"
+        
+      - text: "Risk management framework updated"
+        reason: "Risk Management category unless ESG-specific"
+        
+      - text: "Board composition unchanged"
+        reason: "Governance but not ESG-focused"
+        
+      - text: "Energy sector lending declined"
+        reason: "Business decision unless ESG-driven"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Strategic Initiatives" # ESG as strategy
+      - "Risk Management" # Climate risk
+      - "Regulatory" # ESG regulations
+      
+    sometimes_with:
+      - "Customer Experience" # Inclusive banking
+      - "Workforce" # DEI initiatives
+      - "Community Banking" # Social impact
+      
+    rarely_with:
+      - "Trading" # Different focus
+      - "Net Interest Income" # Different domain
+  
+  reporting_frameworks:
+    standards:
+      - "TCFD recommendations"
+      - "SASB standards"
+      - "GRI guidelines"
+      - "CDP questionnaire"
+      - "UN SDGs"
+      - "UN Global Compact"
+      
+    ratings:
+      - "MSCI ESG ratings"
+      - "Sustainalytics scores"
+      - "ISS ESG"
+      - "S&P ESG scores"
+      - "Bloomberg ESG"
+      
+    indices:
+      - "DJSI" # Dow Jones Sustainability Index
+      - "FTSE4Good"
+      - "MSCI ESG Leaders"
+  
+  red_flags_for_misclassification:
+    - "Regular community banking is not ESG unless impact-focused"
+    - "Standard governance is not ESG governance"
+    - "Regular risk management needs ESG context"
+    - "Small business lending needs ESG/impact angle"
+    - "Employee topics need DEI/wellbeing focus"
+    - "Environmental can mean office environment (not ESG)"
+    - "Green can mean new/inexperienced (not ESG)"
+
+  prompt_guidance_for_llm: |
+    When classifying content as ESG & Sustainability:
+    
+    CORE IDENTIFICATION:
+    1. Look for ENVIRONMENTAL, SOCIAL, GOVERNANCE initiatives
+    2. Key themes: Climate, diversity, sustainable finance, impact
+    3. Stakeholder capitalism and purpose-driven banking
+    4. Long-term sustainability focus
+    5. Non-financial performance metrics
+    
+    KEY COMPONENTS:
+    6. Environmental: Climate, emissions, green finance
+    7. Social: DEI, community, inclusion, human rights
+    8. Governance: Board diversity, ESG oversight, ethics
+    9. Sustainable Finance: Green bonds, ESG products
+    10. Impact: Measurement, reporting, ratings
+    
+    ENVIRONMENTAL FOCUS:
+    - Climate strategy and net-zero
+    - Carbon emissions (Scope 1/2/3)
+    - Green/renewable financing
+    - Environmental risk management
+    - TCFD reporting
+    - Energy transition support
+    
+    SOCIAL PRIORITIES:
+    - Diversity, equity, inclusion
+    - Community investment
+    - Financial inclusion
+    - Affordable housing
+    - Indigenous relations (Canada)
+    - Employee wellbeing
+    - Human rights
+    
+    GOVERNANCE ASPECTS:
+    - ESG board oversight
+    - Sustainability governance
+    - ESG-linked compensation
+    - Stakeholder engagement
+    - Responsible banking
+    - Ethics and conduct
+    
+    SUSTAINABLE FINANCE:
+    - Green/social/sustainability bonds
+    - ESG investment products
+    - Impact investing
+    - Sustainability-linked loans
+    - Transition finance
+    - ESG advisory services
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - Racial equity focus
+    - Large $ commitments
+    - CRA overlap
+    - SEC climate rules
+    
+    CANADIAN BANKS:
+    - Indigenous reconciliation
+    - Just transition emphasis
+    - TCFD adoption mature
+    - Bilingual inclusion
+    
+    METRICS & REPORTING:
+    - ESG ratings and scores
+    - Sustainability targets
+    - Impact measurements
+    - UN SDG alignment
+    - Framework compliance
+    
+    EXCLUSIONS:
+    - Regular business operations
+    - Standard risk management
+    - Traditional governance
+    - Regular community banking
+    - Normal employee matters
+    
+    REMEMBER:
+    - This is about PURPOSE and IMPACT
+    - Long-term sustainability focus
+    - Stakeholder vs shareholder
+    - Measurable commitments
+    - Growing investor priority

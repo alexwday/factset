@@ -1,480 +1,236 @@
-# Stage 6: LLM-Based Financial Content Classification
+# 🚀 Stage 6: LLM-Based Financial Content Classification
 
-> **Version**: 2.0 | **Created**: 2025-07-30  
-> **Purpose**: Apply detailed financial category classification to Management Discussion sections and Q&A conversations using LLM
-> **Script**: `database_refresh/06_llm_classification/main_llm_classification.py`
+## 🎯 PROJECT CONTEXT
+- Stage: 06_llm_classification - Financial content categorization using LLM
+- Purpose: Classify Management Discussion and Q&A sections into financial categories
+- Input: Stage 5 output (structured speaker blocks and Q&A groups)
+- Output: Classified content with category assignments and confidence scores
+- Architecture: OpenAI client with OAuth authentication, speaker-block windowing, conversation-level classification
 
----
+## 🚨 CRITICAL RULES
+- ALWAYS validate financial categories against predefined set in config
+- NEVER expose OAuth tokens or LLM credentials in logs
+- MUST handle token costs and usage tracking for all LLM calls
+- Monitor classification confidence scores and fallback to "Other" for errors
+- Handle authentication token refresh per transcript to prevent expiration
+- Validate all NAS paths to prevent directory traversal attacks
 
-## Project Context
+## 🛠️ DEVELOPMENT WORKFLOW
 
-- **Stage**: Stage 6 - LLM-Based Financial Content Classification
-- **Primary Purpose**: Process Stage 5 output to add detailed financial category classifications using speaker blocks (MD) and Q&A groups
-- **Pipeline Position**: Between Stage 5 (Q&A Pairing) and Stage 7 (Summarization)
-- **Production Status**: PRODUCTION READY ✅ (v2.0 - rebuilt with Stage 5 architecture)
+### Classification Process
+1. Load Stage 5 output with structured speaker blocks and Q&A groups
+2. Group Management Discussion by speaker blocks, process in configurable windows
+3. Process Q&A groups as complete conversations (single LLM call per group)
+4. Apply CO-STAR prompt methodology with comprehensive category descriptions
+5. Save results incrementally using Stage 5's JSON array pattern
 
----
-
-## Tech Stack & Dependencies
-
-### Core Technologies
-- **Language**: Python 3.8+
-- **Primary Framework**: OpenAI API for LLM-based classification
-- **Authentication**: OAuth 2.0 for LLM API + Corporate proxy (MAPLE domain) + NAS NTLM v2
-- **Storage**: NAS (SMB/CIFS) with NTLM v2 authentication
-- **Configuration**: YAML-based configuration from NAS
-
-### Required Dependencies
-```python
-# Core dependencies for this stage
-import os                           # File system operations
-import tempfile                     # Temporary file handling for SSL cert
-import logging                      # Logging system
-import json                         # JSON processing
-import time                         # Rate limiting and retries
-from datetime import datetime       # Timestamp handling
-from urllib.parse import quote      # URL encoding for OAuth
-from typing import Dict, Any, Optional, List, Tuple  # Type hints
-import io                          # BytesIO for NAS operations
-import re                          # Pattern matching
-import requests                    # OAuth token requests
-
-# Third-party dependencies
-import yaml                        # Configuration parsing
-from smb.SMBConnection import SMBConnection  # NAS connectivity
-from dotenv import load_dotenv     # Environment variables
-from openai import OpenAI          # LLM client
-from collections import defaultdict  # Data structures
-```
-
-### Environment Requirements
+### Quality Standards
 ```bash
-# Required .env variables (16 required)
-API_USERNAME=                # FactSet API credentials (consistency)
-API_PASSWORD=
-PROXY_USER=                  # Corporate proxy (MAPLE domain)
-PROXY_PASSWORD=
-PROXY_URL=
-PROXY_DOMAIN=               # Default: MAPLE
-NAS_USERNAME=               # NAS authentication
-NAS_PASSWORD=
-NAS_SERVER_IP=
-NAS_SERVER_NAME=
-NAS_SHARE_NAME=
-NAS_BASE_PATH=
-NAS_PORT=                   # Default: 445
-CONFIG_PATH=                # NAS configuration path
-CLIENT_MACHINE_NAME=
-LLM_CLIENT_ID=              # OAuth client ID for LLM API
-LLM_CLIENT_SECRET=          # OAuth client secret for LLM API
+# Validate classification results
+python -c "import json; data=json.load(open('output.json')); print(f'Records: {len(data)}')"
+
+# Check category validation
+python -c "from main_llm_classification import validate_categories; print(validate_categories(['Revenue', 'Other']))"
+
+# Test OAuth token acquisition
+python -c "from main_llm_classification import get_oauth_token; print('Token acquired' if get_oauth_token() else 'Failed')"
 ```
 
----
+## 🤖 AI/ML CONFIGURATION
 
-## Architecture & Design
+### LLM Setup
+- Client: OpenAI-compatible with OAuth client credentials flow
+- Model: Configured in stage_06_llm_classification.llm_config.model
+- Temperature: Low (0.1-0.3) for consistent financial categorization
+- Token refresh: Per transcript to prevent expiration during long processes
+- Cost tracking: Automatic accumulation with detailed breakdown
 
-### Core Design Patterns (Based on Stage 5)
-- **Per-Transcript OAuth Refresh**: New token for each transcript to prevent expiration
-- **Incremental Saving**: Results saved after each transcript completion
-- **Failed Transcript Tracking**: Separate file for failed transcripts
-- **Enhanced Error Logging**: Categorized error tracking with separate files
-- **Cost Tracking**: Real-time token usage and cost monitoring
-- **Development Mode**: Configurable transcript limits for testing
-
-### Classification Approach
-- **Management Discussion**: Speaker block windowing (5 paragraphs at a time)
-- **Q&A Section**: Complete conversation classification (entire Q&A group)
-- **Category Application**: Multiple categories per paragraph/conversation allowed
-- **Validation**: Category validation with automatic correction
+### Classification Methodology
+- **Management Discussion**: Speaker-block windowing with configurable window size
+- **Q&A Conversations**: Complete conversation analysis (all paragraphs together)
+- **CO-STAR Prompts**: Context, Objective, Style, Tone, Audience, Response format
+- **Function Calling**: Structured outputs with category validation
 - **Fallback Strategy**: "Other" category for failed classifications
 
-### File Structure
+### Financial Categories
+- Loaded from config.yaml `financial_categories` section
+- Each category includes: name, description, key_indicators, use_when, do_not_use_when, example_phrases
+- Validation ensures only valid categories are assigned
+- Support for multiple categories per content section
+
+## 📁 PROJECT STRUCTURE
 ```
-database_refresh/06_llm_classification/
-├── main_llm_classification.py     # Primary execution script (v2.0)
-├── main_classification.py         # Legacy version (deprecated)
-└── CLAUDE.md                      # This context file
+06_llm_classification/
+  main_llm_classification.py    # Complete self-contained script
+  CLAUDE.md                     # This file
 ```
 
-### Key Components
-1. **OAuth Manager**: Per-transcript token refresh system
-2. **Classification Engine**: MD windowing and Q&A conversation processors
-3. **Category Validator**: Ensures valid category assignments
-4. **Incremental Saver**: Saves results after each transcript
-5. **Error Logger**: Enhanced error tracking with categorization
-6. **Cost Tracker**: Monitors LLM usage and costs
+## 🔧 ESSENTIAL COMMANDS
 
----
+### Development & Testing
+```bash
+# Run Stage 6 classification
+python database_refresh/06_llm_classification/main_llm_classification.py
 
-## Configuration Management
+# Development mode (limited transcripts)
+# Set dev_mode: true and dev_max_transcripts in config.yaml
 
-### Configuration Schema
+# Test OAuth authentication
+python -c "from main_llm_classification import get_oauth_token; print(get_oauth_token())"
+
+# Validate categories from config
+python -c "from main_llm_classification import validate_categories, VALID_CATEGORIES; print(f'Categories: {len(VALID_CATEGORIES)}')"
+```
+
+### Environment Setup
+```bash
+# Required environment variables
+export API_USERNAME="your_api_username"
+export API_PASSWORD="your_api_password"
+export PROXY_USER="your_proxy_user"
+export PROXY_PASSWORD="your_proxy_password"
+export PROXY_URL="proxy.company.com:8080"
+export NAS_USERNAME="nas_user"
+export NAS_PASSWORD="nas_password"
+export NAS_SERVER_IP="192.168.1.100"
+export NAS_SERVER_NAME="NAS_SERVER"
+export NAS_SHARE_NAME="shared_folder"
+export NAS_BASE_PATH="/base/path"
+export NAS_PORT="445"
+export CONFIG_PATH="config/config.yaml"
+export CLIENT_MACHINE_NAME="CLIENT_PC"
+export LLM_CLIENT_ID="your_llm_client_id"
+export LLM_CLIENT_SECRET="your_llm_client_secret"
+```
+
+### Configuration Validation
+```bash
+# Check config structure
+python -c "from main_llm_classification import validate_config_structure; import yaml; validate_config_structure(yaml.safe_load(open('config.yaml')))"
+
+# Verify SSL certificate path
+python -c "from main_llm_classification import setup_ssl_certificate; print('SSL setup successful')"
+```
+
+## 🔗 INTEGRATIONS
+
+### Stage Dependencies
+- **Input**: Stage 5 output (`stage_05_qa_pairs.json`)
+- **Output**: `stage_06_classified_content.json` (incremental JSON array)
+- **Logs**: Execution logs, error logs by type (classification, authentication, validation, processing)
+- **Failed Records**: `stage_06_failed_transcripts.json`
+
+### External Services
+- **LLM Service**: OpenAI-compatible API with OAuth authentication
+- **NAS Storage**: SMB/CIFS connection for config, input/output data
+- **SSL Certificates**: Corporate SSL certificate for secure connections
+- **Proxy**: Corporate proxy with domain authentication
+
+## 📋 CURRENT FOCUS
+- **Classification Accuracy**: CO-STAR prompt methodology with comprehensive category descriptions
+- **Processing Efficiency**: Speaker-block windowing for Management Discussion, conversation-level for Q&A
+- **Error Handling**: Enhanced error logging by type with detailed failure analysis
+- **Cost Management**: Token usage tracking and cost calculation per transcript
+- **OAuth Management**: Per-transcript token refresh to prevent expiration
+
+## ⚠️ KNOWN ISSUES
+- **Authentication**: OAuth tokens may expire during processing - refresh per transcript implemented
+- **Category Validation**: Invalid categories from LLM responses - validation and fallback to "Other"
+- **Large Conversations**: Q&A groups with many paragraphs may exceed token limits
+- **Network Timeouts**: LLM API calls may timeout - retry logic implemented
+- **SSL Certificate**: Corporate certificates require proper path setup
+
+## 🚫 DO NOT MODIFY
+- OAuth token refresh mechanism - critical for long-running processes
+- Category validation logic - ensures data integrity
+- Incremental saving pattern - follows Stage 5 JSON array format
+- Security validation functions - prevent directory traversal attacks
+
+## 💡 DEVELOPMENT NOTES
+
+### Classification Patterns
+- **Management Discussion**: Process in windows (configurable size) with full speaker block context
+- **Q&A Conversations**: Single classification call per complete conversation
+- **Category Assignment**: Multiple categories allowed per content section
+- **Confidence Scores**: Required for all classifications (0.0-1.0 range)
+- **Error Fallback**: Always assign "Other" category if classification fails
+
+### CO-STAR Prompt Structure
+```
+Context: Institution, fiscal period, speaker, section type
+Objective: Classify content with all applicable financial categories
+Style: Analyze against category descriptions, apply all relevant categories
+Tone: Professional financial analysis
+Audience: Financial analysts requiring content categorization
+Response: Use function calling for structured output
+```
+
+### Performance Optimization
+- OAuth token refresh per transcript (not per API call)
+- Incremental saving to prevent data loss
+- Configurable window sizes for processing efficiency
+- Cost tracking with detailed breakdown
+- Enhanced error logging by failure type
+
+## 🔍 CODE CONVENTIONS
+- **Error Handling**: Use EnhancedErrorLogger for categorized error tracking
+- **Logging**: Separate execution logs and error logs with timestamps
+- **Security**: Validate all file paths and sanitize URLs before logging
+- **NAS Operations**: Use utility functions with path validation
+- **Function Naming**: Descriptive names reflecting financial domain (e.g., `classify_management_discussion_paragraphs`)
+
+## 📊 DATA HANDLING
+- **Input Format**: Stage 5 JSON array with speaker blocks and Q&A groups
+- **Output Format**: JSON array with added `category_type`, `category_type_confidence`, `category_type_method` fields
+- **Category Validation**: All categories must exist in config `financial_categories`
+- **Incremental Saving**: JSON array pattern with proper opening/closing brackets
+- **Failed Records**: Separate tracking of failed transcripts with failure reasons
+- **Cost Tracking**: Detailed token usage and cost calculation per transcript
+
+## 🏗️ ARCHITECTURE DETAILS
+
+### Processing Flow
+1. **Initialization**: Environment validation, NAS connection, config loading
+2. **SSL Setup**: Download and configure corporate SSL certificate
+3. **LLM Authentication**: OAuth client credentials flow with token management
+4. **Data Loading**: Stage 5 output parsing and transcript grouping
+5. **Classification Processing**: Speaker-block windowing (MD) and conversation-level (Q&A)
+6. **Result Saving**: Incremental JSON array writing with proper formatting
+7. **Logging**: Comprehensive execution and error logging to NAS
+
+### Function Categories
+- **Setup Functions**: Environment, NAS, SSL, OAuth, proxy configuration
+- **Classification Functions**: Management Discussion and Q&A processing
+- **Utility Functions**: NAS operations, security validation, cost calculation
+- **Error Handling**: Enhanced logging by error type with structured output
+- **Data Processing**: Incremental saving, JSON array management
+
+## 🎛️ CONFIGURATION PARAMETERS
+
+### Stage 6 Specific Config
 ```yaml
-# NAS configuration structure for Stage 6
 stage_06_llm_classification:
   description: "LLM-based financial content classification"
-  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_05_qa_paired_content.json"
-  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
-  dev_mode: true
+  input_data_path: "path/to/stage_05_qa_pairs.json"
+  output_data_path: "path/to/output/directory"
+  output_logs_path: "path/to/logs/directory"
+  dev_mode: false
   dev_max_transcripts: 2
-  
-  # Processing configuration
-  processing_config:
-    md_paragraph_window_size: 5          # Paragraphs per MD classification call
-    max_speaker_blocks_context: 2        # Prior speaker blocks for context
-    prior_block_preview_chars: 750       # Characters to show from prior blocks
-  
-  # LLM configuration
   llm_config:
-    base_url: "https://api.llm.internal.com/v1"
-    model: "gpt-4o-2024-08-06"
-    temperature: 0.0
-    max_tokens: 500
-    cost_per_1k_prompt_tokens: 0.0025
-    cost_per_1k_completion_tokens: 0.01
-    timeout: 30
+    base_url: "https://llm.api.endpoint"
+    model: "gpt-4-turbo"
+    temperature: 0.1
+    max_tokens: 4096
+    timeout: 120
     max_retries: 3
-    token_endpoint: "https://auth.llm.internal.com/oauth/token"
-  
-  # Financial categories
+    token_endpoint: "https://auth.endpoint/token"
+    cost_per_1k_prompt_tokens: 0.01
+    cost_per_1k_completion_tokens: 0.03
+  processing_config:
+    md_paragraph_window_size: 5
   financial_categories:
-    - name: "Revenue & Growth"
-      description: "Discussions about revenue performance, growth rates, and sales trends"
-      key_indicators: "revenue, sales, growth, top-line"
-    - name: "Profitability & Margins"
-      description: "Content about profit margins, profitability metrics, and margin expansion/compression"
-      key_indicators: "margin, profit, profitability, bottom-line"
-    # ... more categories ...
+    - name: "Revenue"
+      description: "Revenue recognition, sales figures, and top-line growth"
+      key_indicators: "sales, revenue, top-line, booking"
+      # ... additional category details
 ```
-
-### Validation Requirements
-- **Schema Validation**: All required parameters must exist
-- **Category Validation**: Financial categories must be defined
-- **Security Validation**: NAS paths and file paths validated
-- **Configuration Completeness**: All sections properly structured
-
----
-
-## Business Logic & Workflow
-
-### Primary Workflow Steps
-1. **Environment Setup**: Validate environment variables and establish NAS connection
-2. **Configuration Loading**: Load and validate configuration from NAS
-3. **SSL/Proxy Setup**: Configure SSL certificates and corporate proxy
-4. **Stage 5 Data Loading**: Load qa_paired_content.json
-5. **Development Mode**: Apply transcript limits if enabled
-6. **Transcript Grouping**: Organize records by transcript and section type
-7. **Per-Transcript Processing**:
-   - Refresh OAuth token
-   - Process Management Discussion speaker blocks
-   - Process Q&A conversation groups
-   - Save results incrementally
-   - Track any failures
-8. **Failed Transcript Handling**: Save failed transcripts to separate file
-9. **Summary Generation**: Calculate costs and processing metrics
-10. **Log Cleanup**: Save execution and error logs
-
-### Key Business Rules
-- **Speaker Block Integrity**: MD classification maintains speaker context
-- **Conversation Unity**: Q&A groups classified as complete conversations
-- **Multi-Category Support**: Paragraphs/conversations can have multiple categories
-- **Validation & Correction**: Invalid categories automatically corrected
-- **Complete Coverage**: All records receive classification (including "Other")
-- **Cost Transparency**: Real-time tracking of LLM costs
-
-### Classification Methods
-```
-Management Discussion:
-1. Group paragraphs by speaker_block_id
-2. Process in 5-paragraph windows
-3. Provide speaker block context
-4. Apply categories to individual paragraphs
-
-Q&A Section:
-1. Group paragraphs by qa_group_id
-2. Process entire conversation at once
-3. Apply same categories to all paragraphs in group
-4. Maintain conversation coherence
-```
-
----
-
-## Security & Compliance
-
-### Security Requirements (MANDATORY)
-```python
-# Required security functions - ALL IMPLEMENTED ✅
-def validate_file_path(path: str) -> bool:
-    """Prevent directory traversal attacks."""
-    
-def validate_nas_path(path: str) -> bool:
-    """Ensure safe NAS paths only."""
-    
-def sanitize_url_for_logging(url: str) -> str:
-    """Remove auth tokens from URLs before logging."""
-    
-def validate_environment_variables() -> None:
-    """Validate all required environment variables."""
-```
-
-### OAuth Security
-- **Token Storage**: OAuth tokens stored in memory only
-- **Per-Transcript Refresh**: New token for each transcript
-- **Credential Protection**: Client ID/secret from environment only
-- **URL Sanitization**: Auth tokens removed from logs
-
----
-
-## Core Functions Reference
-
-### OAuth & Authentication Functions
-- `get_oauth_token()`: Acquires OAuth token with retry logic
-- `refresh_oauth_token_for_transcript()`: Per-transcript token refresh
-- `setup_llm_client()`: Initializes OpenAI client with OAuth
-
-### Classification Functions
-- `process_management_discussion_section()`: Classifies MD speaker blocks
-- `process_qa_group()`: Classifies complete Q&A conversations
-- `process_transcript()`: Orchestrates single transcript processing
-
-### Category Management Functions
-- `validate_categories()`: Validates categories against allowed set
-- `build_categories_description()`: Builds prompt descriptions
-- `create_management_discussion_tools()`: MD function calling schema
-- `create_qa_conversation_tools()`: Q&A function calling schema
-
-### Prompt Generation Functions
-- `create_management_discussion_costar_prompt()`: CO-STAR prompt for MD
-- `create_qa_conversation_costar_prompt()`: CO-STAR prompt for Q&A
-- `format_management_discussion_context()`: Formats MD context
-- `format_qa_group_context()`: Formats Q&A conversation context
-
-### Utility Functions
-- `save_results_incrementally()`: Saves results after each transcript
-- `calculate_token_cost()`: Calculates LLM usage costs
-
----
-
-## Error Handling & Logging
-
-### Error Categories
-```python
-class EnhancedErrorLogger:
-    """Handles separate error logging for different failure types."""
-    
-    def __init__(self):
-        self.classification_errors = []  # LLM classification failures
-        self.authentication_errors = []  # OAuth failures
-        self.validation_errors = []      # Category validation issues
-        self.processing_errors = []      # General processing errors
-        self.total_cost = 0.0           # Track total LLM costs
-        self.total_tokens = 0            # Track total token usage
-```
-
-### Error Tracking Methods
-- `log_classification_error()`: Records classification failures
-- `log_authentication_error()`: Records OAuth/auth failures
-- `log_validation_error()`: Records category validation issues
-- `log_processing_error()`: Records general processing errors
-- `accumulate_costs()`: Tracks token usage and costs
-
-### Logging Strategy
-- **Console Logging**: Minimal progress updates
-- **Execution Log**: Detailed operation tracking
-- **Error Log**: Structured error recording
-- **Cost Tracking**: Real-time usage monitoring
-
----
-
-## Input/Output Specifications
-
-### Input Format (from Stage 5)
-```json
-{
-  "schema_version": "1.0",
-  "processing_timestamp": "2024-01-15T10:30:00",
-  "records": [
-    {
-      "ticker": "RY-CA",
-      "fiscal_year": 2024,
-      "fiscal_quarter": "Q1",
-      "section_type": "Management Discussion",
-      "speaker_block_id": 1,
-      "speaker": "David McKay, CEO",
-      "paragraph_content": "Thank you and good morning...",
-      "qa_group_id": null
-    },
-    {
-      "ticker": "RY-CA",
-      "fiscal_year": 2024,
-      "fiscal_quarter": "Q1",
-      "section_type": "Investor Q&A",
-      "speaker_block_id": 42,
-      "speaker": "John Smith, Analyst",
-      "paragraph_content": "My first question is about...",
-      "qa_group_id": 1
-    }
-  ]
-}
-```
-
-### Output Format (Stage 6)
-```json
-{
-  "schema_version": "1.0",
-  "processing_timestamp": "2024-01-15T11:45:00",
-  "stage": "stage_06_llm_classification",
-  "description": "Financial content classification using LLM",
-  "records": [
-    {
-      // All original fields preserved
-      "ticker": "RY-CA",
-      "fiscal_year": 2024,
-      "fiscal_quarter": "Q1",
-      "section_type": "Management Discussion",
-      "speaker_block_id": 1,
-      
-      // New Stage 6 fields
-      "category_type": ["Revenue & Growth", "Geographic Performance"],
-      "category_type_confidence": 0.95,
-      "category_type_method": "speaker_block_windowing"
-    }
-  ]
-}
-```
-
-### Failed Transcripts Format
-```json
-{
-  "timestamp": "2024-01-15T11:45:00",
-  "total_failed": 2,
-  "failed_transcripts": [
-    {
-      "transcript": "ABC-US_2024_Q1",
-      "timestamp": "2024-01-15T11:30:00",
-      "reason": "Processing failed - see error logs"
-    }
-  ]
-}
-```
-
----
-
-## Performance & Optimization
-
-### Token Usage Optimization
-- **Window Processing**: MD classified in 5-paragraph windows
-- **Conversation Batching**: Entire Q&A groups in single calls
-- **Context Management**: Limited prior speaker block context
-- **Structured Prompts**: CO-STAR framework for efficiency
-
-### Processing Efficiency
-- **Per-Transcript OAuth**: Prevents mid-transcript auth failures
-- **Incremental Saving**: No data loss on failures
-- **Parallel Processing**: Multiple speaker blocks/Q&A groups per transcript
-- **Rate Limiting**: 1-second pause between transcripts
-
-### Cost Management
-- **Real-Time Tracking**: Monitors usage during execution
-- **Configurable Rates**: Adjustable token pricing
-- **Per-Transcript Costs**: Individual transcript cost tracking
-- **Summary Reporting**: Total costs in execution summary
-
----
-
-## Common Issues & Solutions
-
-### OAuth Token Expiration
-- **Issue**: Token expires during processing
-- **Solution**: Per-transcript refresh implemented
-
-### Invalid Categories
-- **Issue**: LLM returns categories not in allowed set
-- **Solution**: Automatic validation and correction
-
-### Large Speaker Blocks
-- **Issue**: Speaker blocks with many paragraphs
-- **Solution**: Window-based processing with context
-
-### Failed Classifications
-- **Issue**: LLM call fails or returns invalid data
-- **Solution**: Fallback to "Other" category
-
----
-
-## Development & Testing
-
-### Development Mode
-```yaml
-dev_mode: true
-dev_max_transcripts: 2  # Limits processing for testing
-```
-
-### Testing Approach
-1. Enable dev_mode in configuration
-2. Process limited transcripts
-3. Review classifications
-4. Check cost tracking
-5. Validate incremental saving
-
-### Key Testing Areas
-- Category validation and correction
-- OAuth token refresh per transcript
-- Incremental saving functionality
-- Failed transcript tracking
-- Cost calculation accuracy
-
----
-
-## Maintenance & Operations
-
-### Daily Operations
-1. Monitor OAuth authentication success
-2. Check classification error rates
-3. Review token usage and costs
-4. Validate output completeness
-5. Check failed transcript counts
-
-### Configuration Updates
-- Adjust window sizes for better performance
-- Update token cost rates as needed
-- Add/modify financial categories
-- Fine-tune LLM parameters
-
-### Error Recovery
-1. Failed transcripts saved separately
-2. Can reprocess individual transcripts
-3. OAuth issues auto-retry
-4. Comprehensive error logging
-
----
-
-## Integration Points
-
-### Dependencies on Previous Stages
-- **Stage 5 Output**: Requires stage_05_qa_paired_content.json
-- **Q&A Groups**: Uses qa_group_id for conversation grouping
-- **Speaker Blocks**: Uses speaker_block_id for MD grouping
-
-### Data Flow to Next Stages
-- **Preserved Fields**: All Stage 5 fields maintained
-- **New Fields**: category_type, category_type_confidence, category_type_method
-- **Classification Coverage**: All records classified (no gaps)
-
----
-
-## Version History
-
-### Version 2.0 (2025-07-30)
-- Complete rebuild using Stage 5 architecture patterns
-- Per-transcript OAuth refresh
-- Incremental saving after each transcript
-- Failed transcript tracking
-- Enhanced error logging with categorization
-- Preserved Stage 6 classification logic and prompts
-
-### Version 1.0 (Original)
-- Initial implementation
-- Basic classification functionality
-- Batch processing approach

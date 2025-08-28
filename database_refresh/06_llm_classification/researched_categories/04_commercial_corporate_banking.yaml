@@ -1,0 +1,452 @@
+# Commercial & Corporate Banking Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Sources: JPM, BAC, WFC, C, PNC, USB (US) and RY, TD, BMO, BNS, CM, NA (Canadian)
+
+- name: "Commercial & Corporate Banking"
+  
+  description: |
+    Banking services for businesses, from small enterprises to large corporations.
+    Includes commercial lending, treasury management, cash management, and corporate
+    deposits. Covers C&I (commercial & industrial) loans, commercial real estate,
+    equipment financing, and working capital solutions. Focus on business clients
+    rather than individual consumers or capital markets activities.
+  
+  detailed_scope:
+    includes:
+      # Lending Products
+      - Commercial & Industrial (C&I) loans
+      - Commercial real estate (CRE) loans
+      - Equipment financing and leasing
+      - Working capital facilities
+      - Revolving credit facilities
+      - Term loans
+      - Asset-based lending (ABL)
+      - Trade finance
+      - Letters of credit
+      - Commercial mortgages
+      
+      # Deposit & Treasury Services
+      - Commercial deposits
+      - Corporate deposits
+      - Treasury management services
+      - Cash management services
+      - Liquidity management
+      - Payment and collection services
+      - Merchant services
+      - Foreign exchange (operational FX)
+      
+      # Client Segments
+      - Small business banking
+      - Middle market banking
+      - Large corporate banking
+      - Commercial banking
+      - Business banking
+      - Corporate clients
+      
+    excludes:
+      - Investment banking fees (M&A, underwriting)
+      - Trading revenues
+      - Consumer/retail banking (unless combined)
+      - Wealth management
+      - Principal investments
+      - Syndication fees (usually in IB)
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "commercial banking"
+      - "corporate banking"
+      - "business banking"
+      - "commercial lending"
+      - "commercial loans"
+      - "C&I" # Commercial & Industrial
+      - "commercial deposits"
+      - "corporate deposits"
+      - "middle market"
+      - "large corporate"
+      - "commercial clients"
+      - "corporate clients"
+      - "business clients"
+      - "treasury management"
+      - "cash management"
+      - "commercial real estate"
+      - "CRE"
+      
+    # Secondary indicators
+    secondary:
+      - "working capital"
+      - "revolving credit"
+      - "term loans"
+      - "credit facilities"
+      - "asset-based lending"
+      - "ABL"
+      - "equipment finance"
+      - "trade finance"
+      - "letters of credit"
+      - "standby letters"
+      - "merchant services"
+      - "treasury services"
+      - "payment services"
+      - "lockbox"
+      - "ACH" # Automated Clearing House
+      - "wire transfers" # (commercial context)
+      - "commercial utilization"
+      - "line utilization"
+      - "commercial commitments"
+      - "corporate trust"
+      - "escrow services"
+      - "commercial mortgage"
+      - "construction loans"
+      - "bridge loans" # (commercial context)
+      - "sponsor finance"
+      - "acquisition finance" # (lending not IB fees)
+      - "commercial originations"
+      - "commercial balances"
+      - "commercial margins"
+      - "commercial spreads"
+      
+    # Contextual indicators
+    contextual:
+      - "SME" # Small-Medium Enterprise
+      - "enterprise"
+      - "business deposits"
+      - "operating accounts"
+      - "payroll"
+      - "receivables"
+      - "payables"
+      - "supply chain finance"
+      - "invoice financing"
+      - "factoring"
+      - "fleet" # (fleet financing)
+      - "franchise finance"
+      - "healthcare finance"
+      - "non-profit banking"
+      - "government banking"
+      - "institutional" # (in banking context)
+  
+  common_phrases:
+    positive_signals:
+      # Growth indicators
+      - "strong commercial loan growth"
+      - "increased C&I lending"
+      - "higher commercial deposits"
+      - "improved commercial utilization"
+      - "strong middle market activity"
+      - "grew commercial relationships"
+      - "increased treasury management fees"
+      - "higher commercial originations"
+      - "expanded corporate banking"
+      - "strong commercial pipeline"
+      - "improved commercial margins"
+      - "record commercial banking revenue"
+      
+      # Performance indicators  
+      - "commercial deposits up"
+      - "C&I balances increased"
+      - "CRE portfolio grew"
+      - "higher line utilization rates"
+      - "increased commercial commitments"
+      - "treasury services revenue growth"
+      - "improved commercial spreads"
+      
+    negative_signals:
+      - "commercial loan paydowns"
+      - "lower C&I utilization"
+      - "decreased commercial lending"
+      - "commercial deposit outflows"
+      - "reduced corporate banking activity"
+      - "lower line utilization"
+      - "commercial margin compression"
+      - "CRE concerns"
+      - "commercial charge-offs"
+      - "weak commercial demand"
+      - "declining middle market"
+  
+  quantitative_patterns:
+    # US patterns
+    - "commercial loans of $X billion"
+    - "C&I loans grew X%"
+    - "commercial deposits up X%"
+    - "middle market revenues of $X million"
+    - "commercial utilization rate of X%"
+    - "treasury management fees up X%"
+    - "added X new commercial relationships"
+    - "commercial commitments of $X billion"
+    
+    # Canadian patterns
+    - "business loans and acceptances up X%"
+    - "commercial banking revenue grew X%"
+    - "business deposits increased X%"
+    - "commercial margins of X basis points"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      division: "Commercial Banking"
+      segments: ["Middle Market", "Corporate Client Banking", "Commercial Real Estate"]
+      metrics: ["Gross investment banking revenue", "Client segments"]
+      notes: "Includes some IB revenue allocation"
+      
+    Bank_of_America:
+      division: "Global Commercial Banking"
+      segments: ["Business Banking", "Middle Market", "Large Corporate"]
+      metrics: ["Commercial relationships", "Treasury solutions"]
+      special: ["CashPro" # treasury platform]
+      
+    Wells_Fargo:
+      division: "Commercial Banking"
+      segments: ["Middle Market", "Asset-Based Lending", "Corporate Banking"]
+      notes: "Separate from Corporate & Investment Banking"
+      
+    Citigroup:
+      division: "Commercial Bank (within ICG)"
+      metrics: ["Commercial revenues", "Treasury and Trade Solutions (TTS)"]
+      notes: "Part of Institutional Clients Group"
+      
+    PNC:
+      division: "Corporate & Institutional Banking"
+      segments: ["Corporate Banking", "Commercial Real Estate", "Business Credit"]
+      
+    US_Bank:
+      division: "Corporate & Commercial Banking"
+      notes: "Sometimes includes small business"
+    
+    # Canadian Banks - CRITICAL DIFFERENCES
+    Royal_Bank_RY:
+      division: "Personal & Commercial Banking" # COMBINED
+      segments: ["Business Financial Services", "Commercial Financial Services"]
+      metrics: ["Business loans and acceptances", "Business deposits"]
+      special_terms: ["All-in commercial margins"]
+      notes: "P&C combines personal AND commercial"
+      
+    TD_Bank:
+      division: "Canadian Commercial Banking" # Separate from Personal
+      also: "Business Banking" # Small business often with personal
+      metrics: ["Commercial loan volumes", "Commercial deposits"]
+      notes: "Some separation but reporting varies"
+      
+    Bank_of_Montreal_BMO:
+      division: "Canadian Personal & Commercial (P&C)" # COMBINED
+      segments: ["Commercial Banking", "Business Banking"]
+      special: ["Operating leverage", "Commercial productivity"]
+      notes: "Reports P&C together, some sub-segment detail"
+      
+    Scotiabank_BNS:
+      division: "Canadian Banking - Commercial"
+      segments: ["Small Business", "Commercial Banking"]
+      metrics: ["Commercial loan growth", "Operating accounts"]
+      notes: "Within broader Canadian Banking"
+      
+    CIBC_CM:
+      division: "Canadian Personal and Business Banking" # COMBINED
+      segments: ["Business Banking", "Commercial Banking"]
+      metrics: ["Business lending volumes", "Commercial deposits"]
+      notes: "Combined reporting common"
+      
+    National_Bank_NA:
+      division: "Personal & Commercial Banking" # COMBINED
+      segments: ["Commercial", "Corporate"]
+      notes: "Smaller scale, Quebec-focused"
+  
+  canadian_specific_patterns:
+    terminology:
+      - "Business loans and acceptances" (includes banker's acceptances)
+      - "Operating accounts" for commercial deposits
+      - "Commercial margins" discussed more explicitly
+      - "Business Financial Services" (BFS) at some banks
+      - "Commercial Financial Services" (CFS) for larger clients
+      
+    products:
+      - "Operating lines of credit"
+      - "Equipment loans and leases"
+      - "Commercial mortgages" (specified separately)
+      - "Agricultural lending" (important segment)
+      - "Energy sector lending" (oil & gas focus)
+      - "Banker's acceptances" (BA)
+      
+    client_segments:
+      - "Small business" (often <$5MM revenue)
+      - "Mid-market" ($5MM-$50MM)
+      - "Commercial" ($50MM-$500MM)
+      - "Corporate" (>$500MM)
+      - Thresholds vary by bank
+      
+    reporting_quirks:
+      - Often COMBINED with Personal as "P&C"
+      - May not break out commercial separately
+      - Agricultural and energy sectors highlighted
+      - Government banking included
+  
+  segment_specific_language:
+    small_business:
+      - "business credit cards"
+      - "small business loans"
+      - "business checking"
+      - "SBA loans" # US
+      - "CEBA loans" # Canada (COVID program)
+      - "micro-business"
+      
+    middle_market:
+      - "mid-market"
+      - "middle market banking"
+      - "$10-500 million in revenues"
+      - "regional companies"
+      - "growth companies"
+      
+    large_corporate:
+      - "large corporate"
+      - "corporate banking"
+      - "multinational clients"
+      - "Fortune 500/1000"
+      - "investment grade"
+      
+    commercial_real_estate:
+      - "CRE"
+      - "commercial mortgages"
+      - "construction loans"
+      - "multifamily"
+      - "office properties"
+      - "retail properties"
+      - "industrial properties"
+      - "hospitality"
+  
+  treasury_services_language:
+    - "cash management"
+    - "liquidity solutions"
+    - "payments and collections"
+    - "merchant services"
+    - "commercial card"
+    - "purchasing cards"
+    - "integrated payables"
+    - "receivables management"
+    - "account reconciliation"
+    - "fraud prevention services"
+    - "positive pay"
+    - "sweep accounts"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "Commercial loans grew 8% led by strong C&I demand"
+        reason: "Direct commercial lending discussion"
+        
+      - text: "Middle market banking revenues increased 12%"
+        reason: "Middle market is commercial banking"
+        
+      - text: "Treasury management fees rose with higher commercial deposits"
+        reason: "Treasury management is commercial service"
+        
+      - text: "CRE portfolio remained stable with disciplined underwriting"
+        reason: "Commercial real estate lending"
+        
+      - text: "Business banking added 5,000 new relationships"
+        reason: "Business banking is commercial"
+        
+      - text: "Commercial utilization rates improved to 45%"
+        reason: "Commercial line utilization metric"
+        
+      - text: "Business loans and acceptances grew 6%" # Canadian
+        reason: "Canadian commercial lending terminology"
+        
+      - text: "P&C segment saw strong commercial growth" # Canadian
+        reason: "Commercial within P&C segment"
+    
+    should_not_classify:
+      - text: "Investment banking fees from M&A advisory increased"
+        reason: "IB fees not commercial banking"
+        
+      - text: "Consumer deposits grew significantly"
+        reason: "Consumer not commercial"
+        
+      - text: "Trading revenues improved"
+        reason: "Trading not commercial banking"
+        
+      - text: "Wealth management AUM increased"
+        reason: "Wealth not commercial banking"
+        
+      - text: "Syndication fees were strong"
+        reason: "Syndication fees typically in IB"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Net Interest Income & Margins" # Loan spreads, deposit costs
+      - "Credit Quality & Provisions" # Commercial credit losses
+      - "Consumer Banking" # Canadian banks combine them
+      - "Capital Management" # RWA allocation
+      
+    sometimes_with:
+      - "Investment Banking" # Relationship synergies
+      - "Treasury Services" # Part of commercial offering
+      - "Economic Environment" # Impacts commercial demand
+      
+    rarely_with:
+      - "Trading & Markets"
+      - "Wealth Management" # Different client base
+  
+  credit_quality_context:
+    # How commercial banking intersects with credit
+    - "Commercial charge-offs"
+    - "C&I loss rates"
+    - "CRE provisioning"
+    - "Commercial criticized assets"
+    - "Commercial NPLs" # Non-performing loans
+    - "Commercial recoveries"
+    - Note: Credit metrics specific to commercial often discussed
+  
+  red_flags_for_misclassification:
+    - "Investment banking FEES are not commercial banking"
+    - "Syndication FEES usually IB (syndication lending/spread is commercial)"
+    - "Trading revenues are not commercial banking"
+    - "Consumer/retail is separate (except when explicitly combined)"
+    - "Canadian banks often COMBINE Personal & Commercial (P&C)"
+    - "Small business may be with consumer OR commercial (varies)"
+    - "Treasury/cash management can be standalone or within commercial"
+    - "Don't confuse corporate (client type) with corporate banking (service)"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Commercial & Corporate Banking:
+    
+    CORE IDENTIFICATION:
+    1. Look for BUSINESS/CORPORATE client banking services
+    2. Key products: C&I loans, CRE, commercial deposits, treasury services
+    3. Client types: small business, middle market, large corporate
+    4. Focus on lending SPREADS not investment banking FEES
+    5. Includes both lending and deposit/treasury services
+    
+    KEY COMPONENTS:
+    6. Lending: C&I, CRE, equipment finance, working capital, term loans
+    7. Deposits: commercial/corporate deposits, operating accounts
+    8. Treasury: cash management, payments, merchant services
+    9. Trade: letters of credit, trade finance, supply chain
+    10. Segments: small business, middle market, large corporate
+    
+    CRITICAL DISTINCTIONS:
+    - Commercial LENDING (spreads) vs IB FEES (advisory/underwriting)
+    - Syndication lending (commercial) vs syndication fees (IB)
+    - Operational FX (commercial) vs FX trading (markets)
+    - Business banking (commercial) vs consumer banking
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - "Commercial Banking" typically separate division
+    - May include or exclude small business
+    - Middle Market commonly defined $10-500MM revenue
+    
+    CANADIAN BANKS:
+    - Often COMBINED as "P&C" (Personal & Commercial)
+    - "Business loans and acceptances" common term
+    - May not separate commercial metrics clearly
+    - Agricultural and energy sectors emphasized
+    - Government and institutional banking included
+    
+    SIZE SEGMENTS:
+    - Small Business: <$5-10MM revenue
+    - Middle Market: $10-500MM revenue  
+    - Large Corporate: >$500MM revenue
+    - (Thresholds vary by bank)
+    
+    REMEMBER:
+    - This is relationship banking for businesses
+    - Focus on LENDING SPREADS not fees
+    - Includes deposits and treasury services
+    - Canadian banks often combine with Personal

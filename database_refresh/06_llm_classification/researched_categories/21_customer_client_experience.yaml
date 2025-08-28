@@ -1,0 +1,551 @@
+# Customer & Client Experience Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Customer satisfaction, retention, and experience initiatives
+
+- name: "Customer & Client Experience"
+  
+  description: |
+    Discussion of customer satisfaction, client experience improvements, customer acquisition and
+    retention, service quality, customer feedback metrics, and client-centric initiatives. Includes
+    NPS scores, customer journey optimization, personalization efforts, and customer service
+    investments. Focus on how banks serve and retain their customer base.
+  
+  detailed_scope:
+    includes:
+      # Customer Metrics
+      - Customer satisfaction scores
+      - Net Promoter Score (NPS)
+      - Customer retention rates
+      - Attrition/churn rates
+      - Customer acquisition
+      - Customer growth
+      - Customer lifetime value
+      - Customer complaints
+      
+      # Experience Initiatives
+      - Customer experience improvements
+      - Client journey optimization
+      - Service quality enhancements
+      - Personalization efforts
+      - Customer segmentation
+      - Relationship deepening
+      - Cross-sell/upsell
+      - Customer onboarding
+      
+      # Service Delivery
+      - Contact center performance
+      - Branch experience
+      - Digital experience
+      - Omnichannel experience
+      - Self-service capabilities
+      - Response times
+      - First-call resolution
+      - Service level agreements
+      
+      # Customer Insights
+      - Voice of customer programs
+      - Customer feedback
+      - Customer analytics
+      - Behavioral insights
+      - Customer preferences
+      - Pain point resolution
+      
+      # Relationship Banking
+      - Primary bank relationships
+      - Wallet share
+      - Product penetration
+      - Household relationships
+      - Client advisory
+      - Relationship management
+      
+    excludes:
+      - Product features (unless experience-focused)
+      - Technology infrastructure
+      - Employee satisfaction
+      - Marketing campaigns
+      - Pricing strategies
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "customer experience"
+      - "client experience"
+      - "customer satisfaction"
+      - "client satisfaction"
+      - "NPS"
+      - "Net Promoter Score"
+      - "customer service"
+      - "client service"
+      - "customer retention"
+      - "customer acquisition"
+      - "customer growth"
+      - "customer attrition"
+      - "churn"
+      - "customer feedback"
+      - "customer journey"
+      - "personalization"
+      - "customer-centric"
+      - "client-centric"
+      - "customer first"
+      - "client first"
+      
+    # Secondary indicators
+    secondary:
+      - "CX" # Customer experience
+      - "voice of customer"
+      - "VOC"
+      - "customer insights"
+      - "client insights"
+      - "customer analytics"
+      - "behavioral analytics"
+      - "customer preferences"
+      - "pain points"
+      - "friction points"
+      - "seamless experience"
+      - "effortless"
+      - "convenient"
+      - "user-friendly"
+      - "intuitive"
+      - "customer onboarding"
+      - "client onboarding"
+      - "relationship deepening"
+      - "wallet share"
+      - "share of wallet"
+      - "primary bank"
+      - "main bank"
+      - "household relationships"
+      - "customer lifetime value"
+      - "CLV"
+      - "cross-sell"
+      - "upsell"
+      - "product penetration"
+      - "products per customer"
+      - "relationship banking"
+      - "relationship management"
+      - "client advisory"
+      - "customer complaints"
+      - "complaint resolution"
+      - "service quality"
+      - "service levels"
+      - "SLA" # Service level agreement
+      - "contact center"
+      - "call center"
+      - "customer support"
+      - "help desk"
+      - "first-call resolution"
+      - "FCR"
+      - "average handle time"
+      - "AHT"
+      - "response time"
+      - "wait times"
+      - "queue times"
+      - "customer effort score"
+      - "CES"
+      - "customer loyalty"
+      - "brand loyalty"
+      - "customer advocacy"
+      - "referrals"
+      - "recommendations"
+      - "customer centricity"
+      - "human-centered"
+      - "empathy"
+      - "trust" # (in customer context)
+      
+    # Contextual indicators
+    contextual:
+      - "experience" # (customer experience)
+      - "satisfaction"
+      - "service" # (customer service)
+      - "retention"
+      - "acquisition" # (customer acquisition)
+      - "relationship" # (customer relationship)
+      - "engagement" # (customer engagement)
+      - "loyalty"
+      - "feedback"
+      - "journey"
+      - "touchpoint"
+      - "interaction"
+      - "ease"
+      - "simplicity"
+      - "convenience"
+  
+  common_phrases:
+    positive_signals:
+      # Metrics Improvement
+      - "NPS increased to X"
+      - "customer satisfaction improved"
+      - "retention rates rising"
+      - "customer growth accelerating"
+      - "attrition declining"
+      - "primary bank relationships growing"
+      
+      # Experience Success
+      - "customer experience enhancements"
+      - "simplified customer journey"
+      - "reduced friction points"
+      - "improved onboarding process"
+      - "personalization driving engagement"
+      
+      # Service Excellence
+      - "service levels improved"
+      - "faster response times"
+      - "complaint resolution enhanced"
+      - "customer feedback positive"
+      
+    negative_signals:
+      - "customer attrition elevated"
+      - "NPS declined"
+      - "satisfaction scores down"
+      - "customer complaints increased"
+      - "retention challenges"
+      - "service issues"
+      - "experience gaps"
+      - "customer friction"
+  
+  quantitative_patterns:
+    # Customer metrics
+    - "NPS of +X"
+    - "X% customer retention rate"
+    - "X% attrition rate"
+    - "X million customers"
+    - "X% customer growth"
+    
+    # Relationship metrics
+    - "X products per customer"
+    - "X% primary bank relationships"
+    - "X% wallet share"
+    - "X% cross-sell rate"
+    
+    # Service metrics
+    - "X% first-call resolution"
+    - "X minute response time"
+    - "X% satisfaction score"
+    - "X complaints per thousand"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      focus: ["Customer obsessed", "Complete relationship banking"]
+      metrics: ["#1 customer satisfaction", "Primary bank relationships"]
+      
+    Bank_of_America:
+      programs: ["High-touch, high-tech", "Preferred Rewards"]
+      focus: "Relationship deepening strategy"
+      metrics: "Client balances and flows"
+      
+    Wells_Fargo:
+      priority: ["Rebuilding customer trust", "Customer remediation"]
+      focus: "Customer-focused culture transformation"
+      
+    Citigroup:
+      approach: ["Client-centric organization", "Simplifying client experience"]
+      
+    Goldman_Sachs:
+      focus: ["Client franchise", "One Goldman Sachs for clients"]
+      differentiation: "White-glove service"
+      
+    Morgan_Stanley:
+      emphasis: ["Client assets", "Advisor-client relationships"]
+      metrics: "Client asset retention"
+    
+    # Canadian Banks
+    Royal_Bank_RY:
+      framework: ["Client-focused strategy", "Exceptional client experiences"]
+      differentiator: "Advice-centered relationships"
+      metrics: "Client loyalty scores"
+      
+    TD_Bank:
+      brand: ["Legendary customer experience", "WOW experiences"]
+      focus: "Convenience and service"
+      hours: "Longer hours differentiation"
+      
+    Bank_of_Montreal_BMO:
+      purpose: ["Customer first culture", "Real financial progress"]
+      focus: "Personalized banking"
+      
+    Scotiabank_BNS:
+      commitment: ["Customer focus", "Become more customer-centric"]
+      programs: "Customer experience transformation"
+      
+    CIBC_CM:
+      strategy: ["Client-focused strategy", "Relationship-oriented"]
+      ambition: "#1 in client relationships"
+      
+    National_Bank_NA:
+      approach: ["Client proximity", "Personalized service"]
+      advantage: "Local market knowledge"
+  
+  canadian_specific_patterns:
+    service_culture:
+      - Extended branch hours (TD)
+      - Advice-based model
+      - Relationship focus
+      - Community connection
+      
+    metrics_focus:
+      - Client loyalty
+      - Relationship depth
+      - Advice quality
+      - Service excellence
+      
+    terminology:
+      - "Client" often preferred over "customer"
+      - "Advice" and "advisory" emphasized
+      - "Financial progress" themes
+      - "Partnership" language
+  
+  experience_design:
+    journey_stages:
+      - "awareness"
+      - "consideration"
+      - "onboarding"
+      - "engagement"
+      - "retention"
+      - "advocacy"
+      
+    touchpoints:
+      - "branch interactions"
+      - "digital channels"
+      - "contact center"
+      - "ATM network"
+      - "mobile app"
+      - "website"
+      - "social media"
+      
+    design_principles:
+      - "human-centered design"
+      - "design thinking"
+      - "customer co-creation"
+      - "agile experience design"
+      - "continuous improvement"
+  
+  personalization_approaches:
+    data_driven:
+      - "predictive analytics"
+      - "recommendation engines"
+      - "next best action"
+      - "propensity models"
+      - "behavioral segmentation"
+      
+    delivery:
+      - "targeted offers"
+      - "customized products"
+      - "personalized communications"
+      - "relevant insights"
+      - "timely advice"
+  
+  service_excellence:
+    channels:
+      - "branch transformation"
+      - "digital self-service"
+      - "video banking"
+      - "chat support"
+      - "social media service"
+      
+    capabilities:
+      - "24/7 availability"
+      - "real-time support"
+      - "proactive service"
+      - "issue prevention"
+      - "rapid resolution"
+  
+  customer_segmentation:
+    retail:
+      - "mass market"
+      - "mass affluent"
+      - "affluent"
+      - "high net worth"
+      - "ultra high net worth"
+      
+    commercial:
+      - "small business"
+      - "middle market"
+      - "large corporate"
+      - "institutional"
+      
+    behavioral:
+      - "digital natives"
+      - "traditional users"
+      - "hybrid preferences"
+      - "self-directed"
+      - "advice-seeking"
+  
+  feedback_mechanisms:
+    collection:
+      - "surveys"
+      - "focus groups"
+      - "advisory panels"
+      - "social listening"
+      - "transaction surveys"
+      
+    action:
+      - "closed-loop feedback"
+      - "root cause analysis"
+      - "improvement initiatives"
+      - "employee training"
+      - "process redesign"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "NPS improved to +45, highest in our history"
+        reason: "Customer satisfaction metric"
+        
+      - text: "Customer retention rate increased to 95%"
+        reason: "Retention metric"
+        
+      - text: "Simplified onboarding reduces time by 50%"
+        reason: "Customer journey improvement"
+        
+      - text: "Personalization driving 20% more engagement"
+        reason: "Personalized experience results"
+        
+      - text: "Primary bank relationships grew 10%"
+        reason: "Relationship banking metric"
+        
+      - text: "Customer complaints down 30% after service improvements"
+        reason: "Service quality and feedback"
+        
+      - text: "Launched voice of customer program"
+        reason: "Customer feedback initiative"
+    
+    should_not_classify:
+      - text: "New mobile app features launched"
+        reason: "Technology category unless experience focus"
+        
+      - text: "Employee engagement scores improved"
+        reason: "Workforce category, not customer"
+        
+      - text: "Marketing campaign successful"
+        reason: "Marketing, not experience"
+        
+      - text: "Product pricing adjusted"
+        reason: "Pricing strategy, not experience"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Technology & Digital" # Digital experience
+      - "Retail Banking" # Customer-facing business
+      - "Strategic Initiatives" # CX transformation
+      
+    sometimes_with:
+      - "ESG" # Financial inclusion
+      - "Workforce" # Employee-customer interaction
+      - "Brand/Marketing" # Brand experience
+      
+    rarely_with:
+      - "Capital Management" # Different focus
+      - "Credit Quality" # Different domain
+  
+  loyalty_and_advocacy:
+    metrics:
+      - "customer loyalty index"
+      - "advocacy rate"
+      - "referral rate"
+      - "repeat business"
+      - "share of wallet trends"
+      
+    drivers:
+      - "trust building"
+      - "consistent experience"
+      - "problem resolution"
+      - "value delivery"
+      - "emotional connection"
+  
+  red_flags_for_misclassification:
+    - "Employee experience is Workforce category"
+    - "Product features alone are business line categories"
+    - "Technology infrastructure is Technology category"
+    - "Marketing campaigns are not customer experience"
+    - "Sales metrics without experience focus are Revenue"
+    - "Digital adoption may be Technology not CX"
+    - "Complaints about regulations are Regulatory"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Customer & Client Experience:
+    
+    CORE IDENTIFICATION:
+    1. Look for CUSTOMER SATISFACTION and EXPERIENCE discussions
+    2. Key themes: NPS, retention, service quality, personalization
+    3. Customer journey and touchpoint optimization
+    4. Relationship banking and deepening
+    5. Voice of customer and feedback
+    
+    KEY COMPONENTS:
+    6. Metrics: NPS, satisfaction, retention, attrition
+    7. Experience: Journey, touchpoints, friction reduction
+    8. Service: Quality, speed, resolution, channels
+    9. Relationships: Depth, primary bank, wallet share
+    10. Personalization: Tailored offerings, relevant advice
+    
+    CUSTOMER METRICS:
+    - NPS (Net Promoter Score)
+    - CSAT (Customer Satisfaction)
+    - CES (Customer Effort Score)
+    - Retention/attrition rates
+    - Customer growth
+    - Lifetime value
+    
+    EXPERIENCE FOCUS:
+    - Journey mapping
+    - Touchpoint optimization
+    - Omnichannel consistency
+    - Friction removal
+    - Simplification
+    - Convenience
+    
+    SERVICE DIMENSIONS:
+    - Speed (response times)
+    - Quality (resolution rates)
+    - Access (channel availability)
+    - Empathy (human touch)
+    - Proactivity (anticipation)
+    
+    RELATIONSHIP METRICS:
+    - Products per customer
+    - Primary relationships
+    - Wallet/relationship share
+    - Cross-sell success
+    - Household penetration
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - "Customer" terminology
+    - Digital-first experience
+    - Self-service emphasis
+    - Efficiency focus
+    
+    CANADIAN BANKS:
+    - "Client" often preferred
+    - Advice-based model
+    - Relationship emphasis
+    - Community connection
+    - Extended service hours (TD)
+    
+    PERSONALIZATION:
+    - Data-driven insights
+    - Behavioral analytics
+    - Predictive offerings
+    - Relevant communications
+    - Customized solutions
+    
+    FEEDBACK LOOP:
+    - Voice of customer
+    - Complaint analysis
+    - Survey insights
+    - Social listening
+    - Continuous improvement
+    
+    EXCLUSIONS:
+    - Employee experience/satisfaction
+    - Product features without CX angle
+    - Technology infrastructure
+    - Marketing campaigns
+    - Pricing strategies
+    
+    REMEMBER:
+    - This is about SERVING CUSTOMERS
+    - Experience and satisfaction focus
+    - Relationship depth matters
+    - Service quality critical
+    - Measurable customer outcomes

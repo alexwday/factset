@@ -1,0 +1,493 @@
+# Technology & Digital Innovation Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Critical transformation and competitive differentiator
+
+- name: "Technology & Digital Innovation"
+  
+  description: |
+    Discussion of digital transformation initiatives, technology investments, digital banking
+    platforms, mobile/online banking growth, IT infrastructure, cloud adoption, and innovation
+    programs. Includes both customer-facing digital solutions and internal technology modernization.
+    Critical for competitive positioning and cost efficiency.
+  
+  detailed_scope:
+    includes:
+      # Digital Banking
+      - Digital banking adoption/usage
+      - Mobile banking metrics
+      - Online banking platforms
+      - Digital account openings
+      - Digital sales/transactions
+      - App downloads/ratings
+      - Digital engagement metrics
+      
+      # Technology Infrastructure
+      - Cloud migration/adoption
+      - Core banking modernization
+      - API development
+      - Platform consolidation
+      - Data center optimization
+      - Legacy system replacement
+      - Tech stack modernization
+      
+      # Innovation Programs
+      - Innovation labs/centers
+      - Fintech partnerships
+      - Digital products/features
+      - AI/ML initiatives
+      - Automation programs
+      - Digital transformation
+      - Agile development
+      
+      # Data & Analytics
+      - Data analytics capabilities
+      - Big data initiatives
+      - Real-time processing
+      - Data governance
+      - Customer analytics
+      - Predictive modeling
+      
+    excludes:
+      - Digital assets/crypto (separate category)
+      - Cybersecurity (part of Risk Management)
+      - Regulatory technology compliance
+      - Basic IT maintenance
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "digital"
+      - "technology"
+      - "tech"
+      - "mobile"
+      - "online"
+      - "app"
+      - "platform"
+      - "cloud"
+      - "innovation"
+      - "transformation"
+      - "modernization"
+      - "API"
+      - "automation"
+      - "AI"
+      - "artificial intelligence"
+      - "machine learning"
+      - "ML"
+      - "data analytics"
+      - "digital banking"
+      
+    # Secondary indicators
+    secondary:
+      - "fintech"
+      - "agile"
+      - "DevOps"
+      - "microservices"
+      - "containerization"
+      - "digital adoption"
+      - "digital engagement"
+      - "digital sales"
+      - "straight-through processing"
+      - "STP"
+      - "robotics"
+      - "RPA" # Robotic Process Automation
+      - "chatbot"
+      - "virtual assistant"
+      - "digital wallet"
+      - "contactless"
+      - "biometric"
+      - "authentication"
+      - "digital onboarding"
+      - "e-signature"
+      - "paperless"
+      - "digital channels"
+      - "omnichannel"
+      - "user experience"
+      - "UX"
+      - "customer journey"
+      - "digital transformation"
+      - "tech modernization"
+      - "core banking system"
+      - "data lake"
+      - "data warehouse"
+      - "real-time"
+      - "instant"
+      - "digital-first"
+      - "mobile-first"
+      - "cloud-native"
+      - "SaaS"
+      - "infrastructure as code"
+      - "digital capabilities"
+      - "innovation hub"
+      - "accelerator"
+      - "incubator"
+      
+    # Contextual indicators
+    contextual:
+      - "upgrade" # (system upgrade)
+      - "migrate" # (cloud migration)
+      - "modernize"
+      - "digitize"
+      - "automate"
+      - "streamline"
+      - "optimize" # (technology optimization)
+      - "integrate"
+      - "consolidate" # (platform consolidation)
+      - "simplify" # (technology simplification)
+      - "enhance" # (digital enhancement)
+      - "launch" # (digital launch)
+      - "rollout"
+      - "deployment"
+      - "implementation"
+  
+  common_phrases:
+    positive_signals:
+      # Adoption/Growth
+      - "digital adoption increased X%"
+      - "mobile users grew to X million"
+      - "digital sales up X%"
+      - "X% of transactions are digital"
+      - "digital engagement improved"
+      - "successful platform launch"
+      
+      # Infrastructure
+      - "cloud migration on track"
+      - "modernized core banking"
+      - "reduced technology debt"
+      - "improved system resilience"
+      - "enhanced digital capabilities"
+      
+      # Innovation
+      - "launched new digital features"
+      - "AI-powered solutions"
+      - "automation driving efficiency"
+      - "fintech partnership success"
+      - "innovation delivering results"
+      
+    negative_signals:
+      - "technology challenges"
+      - "system outages"
+      - "migration delays"
+      - "digital adoption lagging"
+      - "legacy system constraints"
+      - "technology debt increasing"
+      - "platform integration issues"
+      - "implementation setbacks"
+  
+  quantitative_patterns:
+    # Adoption metrics
+    - "X million digital users"
+    - "X% digital adoption rate"
+    - "X% of sales through digital"
+    - "X million mobile app users"
+    - "X% increase in digital transactions"
+    
+    # Performance metrics
+    - "X% system uptime"
+    - "X millisecond response time"
+    - "X% straight-through processing"
+    - "X% automation rate"
+    
+    # Investment metrics
+    - "$X billion technology investment"
+    - "X% of revenue on technology"
+    - "$X million in tech savings"
+    - "X% reduction in tech costs"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      initiatives: ["Digital everything", "Cloud-first strategy"]
+      metrics: ["Digital adoption", "Active digital customers"]
+      special: ["Chase app", "Code for Good", "Tech investment $14B+"]
+      
+    Bank_of_America:
+      platforms: ["Erica (virtual assistant)", "CashPro platform"]
+      metrics: ["Digital sales %", "Erica interactions"]
+      focus: "Responsible growth through technology"
+      
+    Wells_Fargo:
+      programs: ["Digital infrastructure", "Technology transformation"]
+      focus: "Rebuilding technology platforms"
+      metrics: "Digital active customers"
+      
+    Citigroup:
+      initiatives: ["Digital factory", "Technology modernization"]
+      focus: "Simplification through technology"
+      special: "API-first architecture"
+      
+    Goldman_Sachs:
+      platforms: ["Marcus platform", "Transaction banking platform"]
+      focus: "Engineering-driven culture"
+      special: "Developer productivity metrics"
+      
+    Morgan_Stanley:
+      initiatives: ["Digital wealth platform", "Technology integration"]
+      focus: "Advisor technology tools"
+    
+    # Canadian Banks
+    Royal_Bank_RY:
+      platforms: ["NOMI (AI insights)", "MyAdvisor digital"]
+      metrics: ["Digital adoption rate", "Mobile active users"]
+      special: ["Borealis AI research", "Venture investments"]
+      
+    TD_Bank:
+      initiatives: ["Digital-first strategy", "TD Digital"]
+      platforms: ["TD app", "Layer 6 AI"]
+      focus: "Legendary customer experience digitally"
+      
+    Bank_of_Montreal_BMO:
+      programs: ["Digital First", "BMO Digital Banking"]
+      special: ["BMO Insights", "Real financial progress digitally"]
+      
+    Scotiabank_BNS:
+      initiatives: ["Digital transformation", "Digital factories"]
+      focus: "Digital leadership in international markets"
+      
+    CIBC_CM:
+      platforms: ["CIBC Mobile Banking", "Digital banking platform"]
+      focus: "Client-focused digital strategy"
+      
+    National_Bank_NA:
+      initiatives: ["Digital acceleration", "Technology modernization"]
+      focus: "Efficiency through digital"
+  
+  canadian_specific_patterns:
+    terminology:
+      - "Digital-first" commonly used
+      - "Omnichannel" emphasis
+      - "Digital adoption" vs "penetration"
+      - "Self-serve" capabilities highlighted
+      
+    metrics:
+      - Digital adoption rate %
+      - Mobile/online transaction %
+      - Digital sales as % of total
+      - Cost per digital transaction
+      
+    focus_areas:
+      - Branch/digital integration
+      - Canadian-specific regulations (PIPEDA)
+      - Bilingual platform requirements
+      - Interac integration
+  
+  technology_stack_language:
+    infrastructure:
+      - "public cloud"
+      - "private cloud"
+      - "hybrid cloud"
+      - "multi-cloud"
+      - "cloud-native"
+      - "microservices architecture"
+      - "containerization"
+      - "Kubernetes"
+      - "serverless"
+      
+    platforms:
+      - "digital banking platform"
+      - "mobile platform"
+      - "API gateway"
+      - "integration platform"
+      - "data platform"
+      - "analytics platform"
+      
+    capabilities:
+      - "real-time processing"
+      - "event-driven architecture"
+      - "low latency"
+      - "high availability"
+      - "scalability"
+      - "resilience"
+  
+  innovation_language:
+    programs:
+      - "innovation lab"
+      - "digital factory"
+      - "innovation hub"
+      - "fintech accelerator"
+      - "venture studio"
+      - "technology incubator"
+      
+    partnerships:
+      - "fintech collaboration"
+      - "strategic technology partnership"
+      - "ecosystem partnerships"
+      - "API partnerships"
+      - "white-label solutions"
+      
+    emerging_tech:
+      - "artificial intelligence"
+      - "machine learning"
+      - "natural language processing"
+      - "computer vision"
+      - "robotic process automation"
+      - "quantum computing research"
+      - "blockchain experiments"
+  
+  digital_metrics_language:
+    customer_metrics:
+      - "monthly active users (MAU)"
+      - "daily active users (DAU)"
+      - "digital engagement rate"
+      - "app store ratings"
+      - "net promoter score (NPS)"
+      - "digital customer satisfaction"
+      
+    transaction_metrics:
+      - "digital transaction volume"
+      - "mobile deposit adoption"
+      - "bill pay usage"
+      - "P2P payment volume"
+      - "digital wallet transactions"
+      
+    efficiency_metrics:
+      - "cost per digital transaction"
+      - "straight-through processing rate"
+      - "digital servicing rate"
+      - "call deflection rate"
+      - "digital sales conversion"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "Digital adoption increased to 75% of our customer base"
+        reason: "Direct digital adoption metric"
+        
+      - text: "We're investing $2 billion in technology modernization"
+        reason: "Technology investment discussion"
+        
+      - text: "Our mobile app users grew 20% year-over-year"
+        reason: "Mobile banking growth"
+        
+      - text: "Cloud migration is 60% complete and on schedule"
+        reason: "Cloud infrastructure update"
+        
+      - text: "AI-powered fraud detection reduced losses by 30%"
+        reason: "AI/ML initiative results"
+        
+      - text: "Launched 15 new digital features this quarter"
+        reason: "Digital product innovation"
+        
+      - text: "API calls increased 40% as we expand partnerships"
+        reason: "API/platform development"
+    
+    should_not_classify:
+      - text: "Cybersecurity investments increased"
+        reason: "Cybersecurity is Risk Management"
+        
+      - text: "Digital asset trading volumes grew"
+        reason: "Digital assets separate category"
+        
+      - text: "Technology expense was $500 million"
+        reason: "Expense category, not innovation"
+        
+      - text: "Regulatory technology compliance costs"
+        reason: "Regulatory category"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Expenses & Efficiency" # Tech drives efficiency
+      - "Customer Experience" # Digital improves CX
+      - "Strategic Initiatives" # Digital transformation
+      
+    sometimes_with:
+      - "Payments" # Digital payment solutions
+      - "Risk Management" # When discussing tech risk
+      
+    rarely_with:
+      - "Credit Quality" # Different focus
+      - "Capital Management" # Different topic
+  
+  transformation_language:
+    phases:
+      - "digital transformation journey"
+      - "multi-year modernization"
+      - "phased cloud migration"
+      - "iterative development"
+      - "agile transformation"
+      
+    outcomes:
+      - "enhanced customer experience"
+      - "improved operational efficiency"
+      - "reduced time to market"
+      - "increased straight-through processing"
+      - "lower cost to serve"
+      - "improved risk management"
+  
+  red_flags_for_misclassification:
+    - "Digital ASSETS are cryptocurrency, not digital banking"
+    - "Cybersecurity is Risk Management category"
+    - "RegTech is Regulatory category"
+    - "Basic IT maintenance is not innovation"
+    - "Technology EXPENSE alone goes to Expenses category"
+    - "Digital marketing is not digital banking"
+    - "Technology headcount is Workforce category"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Technology & Digital Innovation:
+    
+    CORE IDENTIFICATION:
+    1. Look for DIGITAL TRANSFORMATION and TECHNOLOGY discussions
+    2. Key themes: Digital banking, cloud, AI/ML, innovation
+    3. Customer-facing digital solutions
+    4. Internal technology modernization
+    5. Innovation programs and partnerships
+    
+    KEY COMPONENTS:
+    6. Digital Banking: Mobile, online, app metrics
+    7. Infrastructure: Cloud, APIs, modernization
+    8. Innovation: AI/ML, automation, fintech partnerships
+    9. Data & Analytics: Big data, real-time processing
+    10. Transformation: Multi-year programs, agile development
+    
+    DIGITAL METRICS:
+    - Adoption: % digital users, MAU/DAU
+    - Transactions: % digital, mobile deposits
+    - Engagement: App ratings, NPS scores
+    - Efficiency: STP rates, cost per transaction
+    
+    TECHNOLOGY FOCUS:
+    - Cloud migration and adoption
+    - Core system modernization
+    - API development and partnerships
+    - Platform consolidation
+    - Legacy replacement
+    
+    INNOVATION AREAS:
+    - AI/ML applications
+    - Process automation (RPA)
+    - Fintech partnerships
+    - Digital products/features
+    - Innovation labs/hubs
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - "Digital everything" mindset
+    - Large tech investment amounts
+    - Platform-specific metrics
+    
+    CANADIAN BANKS:
+    - "Digital-first" terminology
+    - Omnichannel emphasis
+    - Self-serve capabilities
+    - Bilingual requirements
+    
+    TRANSFORMATION STAGES:
+    1. Foundation (infrastructure)
+    2. Digitization (processes)
+    3. Digital (customer experience)
+    4. Innovation (new capabilities)
+    5. Ecosystem (partnerships)
+    
+    EXCLUSIONS:
+    - Cryptocurrency/digital assets
+    - Cybersecurity details
+    - Regulatory technology
+    - Basic IT operations
+    - Technology expenses alone
+    
+    REMEMBER:
+    - This is about TRANSFORMATION and INNOVATION
+    - Both customer-facing and internal
+    - Competitive advantage focus
+    - Efficiency and experience drivers
+    - Future-oriented investments

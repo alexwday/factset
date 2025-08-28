@@ -1,0 +1,482 @@
+# Credit Quality & Provisions Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Critical risk metric for all lending activities
+
+- name: "Credit Quality & Provisions"
+  
+  description: |
+    Discussion of credit losses, loan loss provisions, charge-offs, recoveries, and reserve levels.
+    Includes credit metrics, risk indicators, portfolio quality, and forward-looking credit expectations.
+    Covers both consumer and commercial credit performance, non-performing loans, and criticized assets.
+    Critical for assessing bank risk and earnings quality.
+  
+  detailed_scope:
+    includes:
+      # Provision Expense
+      - Provision for credit losses (PCL)
+      - Loan loss provisions
+      - Reserve build/release
+      - Credit loss expense
+      - Impairment charges
+      - CECL provisions (US)
+      - IFRS 9 provisions (Canada)
+      
+      # Credit Metrics
+      - Net charge-offs (NCO)
+      - Gross charge-offs
+      - Recoveries
+      - Charge-off rates
+      - Loss rates
+      - Delinquency rates
+      - Non-performing loans (NPL)
+      - Non-performing assets (NPA)
+      
+      # Reserve Levels
+      - Allowance for credit losses (ACL)
+      - Reserve coverage ratios
+      - Reserve to loans ratio
+      - Reserve to NPL ratio
+      - Day 1 CECL reserves
+      
+      # Portfolio Quality
+      - Criticized assets
+      - Special mention loans
+      - Substandard loans
+      - Doubtful loans
+      - Past due loans (30/60/90+ days)
+      - Modified loans
+      - Forbearance
+      
+      # Risk Indicators
+      - Early warning indicators
+      - Credit migration
+      - Risk rating changes
+      - Watchlist assets
+      - Probability of default (PD)
+      - Loss given default (LGD)
+      
+    excludes:
+      - Interest income (unless impaired)
+      - Trading credit risk (mark-to-market)
+      - Operational risk losses
+      - Market risk
+      - Investment securities gains/losses
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "provision"
+      - "provision for credit losses"
+      - "PCL"
+      - "credit losses"
+      - "loan losses"
+      - "charge-off"
+      - "charge-offs"
+      - "NCO"
+      - "net charge-offs"
+      - "reserves"
+      - "allowance"
+      - "ACL"
+      - "allowance for credit losses"
+      - "credit quality"
+      - "NPL"
+      - "non-performing"
+      - "non-performing loans"
+      - "delinquency"
+      - "delinquent"
+      - "past due"
+      
+    # Secondary indicators
+    secondary:
+      - "impairment"
+      - "impaired loans"
+      - "recovery"
+      - "recoveries"
+      - "criticized"
+      - "criticized assets"
+      - "special mention"
+      - "substandard"
+      - "doubtful"
+      - "loss rate"
+      - "default"
+      - "default rate"
+      - "forbearance"
+      - "modification"
+      - "restructured"
+      - "TDR" # Troubled Debt Restructuring
+      - "watchlist"
+      - "early stage delinquency"
+      - "late stage delinquency"
+      - "30 days past due"
+      - "60 days past due"
+      - "90 days past due"
+      - "current expected credit losses"
+      - "CECL"
+      - "lifetime losses"
+      - "expected losses"
+      - "incurred losses"
+      - "stage 1" # IFRS 9
+      - "stage 2" # IFRS 9
+      - "stage 3" # IFRS 9
+      - "performing"
+      - "coverage ratio"
+      - "coverage level"
+      - "reserve ratio"
+      - "credit migration"
+      - "risk rating"
+      - "PD" # Probability of Default
+      - "LGD" # Loss Given Default
+      - "EAD" # Exposure at Default
+      
+    # Contextual indicators
+    contextual:
+      - "credit" # (in risk context)
+      - "losses" # (credit losses)
+      - "risk" # (credit risk)
+      - "quality" # (portfolio quality)
+      - "deterioration"
+      - "improvement"
+      - "normalization"
+      - "seasoning"
+      - "vintage"
+      - "cohort"
+      - "roll rate"
+      - "cure rate"
+      - "write-off"
+      - "write-down"
+  
+  common_phrases:
+    positive_signals:
+      # Improving Credit
+      - "credit quality improved"
+      - "lower charge-offs"
+      - "declining NCO rate"
+      - "reserve release"
+      - "provision benefit"
+      - "reduced NPLs"
+      - "improving delinquencies"
+      - "strong credit performance"
+      - "better than expected losses"
+      - "favorable credit trends"
+      - "lower criticized assets"
+      - "reduced provision expense"
+      
+      # Stable Credit
+      - "stable credit metrics"
+      - "normalized charge-offs"
+      - "credit remains strong"
+      - "low loss rates"
+      - "minimal NPLs"
+      
+    negative_signals:
+      - "credit deterioration"
+      - "higher charge-offs"
+      - "increased provisions"
+      - "reserve build"
+      - "rising NPLs"
+      - "increasing delinquencies"
+      - "elevated loss rates"
+      - "credit normalization"
+      - "migration to criticized"
+      - "higher past dues"
+      - "stressed portfolios"
+      - "weakness in [segment]"
+  
+  quantitative_patterns:
+    # Provision metrics
+    - "provision expense of $X million"
+    - "PCL of $X billion"
+    - "provision of X basis points"
+    - "reserve build of $X million"
+    - "reserve release of $X million"
+    
+    # Charge-off metrics
+    - "NCO rate of X.XX%"
+    - "charge-offs of $X million"
+    - "X basis points of charge-offs"
+    - "recoveries of $X million"
+    
+    # Reserve metrics
+    - "ACL of $X billion"
+    - "reserve ratio of X.XX%"
+    - "coverage ratio of X%"
+    - "X% reserves to loans"
+    
+    # Asset quality metrics
+    - "NPL ratio of X.XX%"
+    - "NPLs of $X billion"
+    - "X% of loans past due"
+    - "criticized assets of $X billion"
+  
+  bank_specific_terminology:
+    # US Banks - CECL Framework
+    JPMorgan:
+      metrics: ["Net charge-off rate", "Reserve to loans", "Card NCO rate"]
+      segments: ["Card", "Consumer", "Wholesale"]
+      special: ["Credit card reserves", "Wholesale reserves"]
+      
+    Bank_of_America:
+      metrics: ["Net charge-offs", "NPLs", "Provision expense"]
+      reporting: "Consumer vs Commercial split"
+      focus: "Consumer credit trends"
+      
+    Wells_Fargo:
+      metrics: ["Charge-off rates by portfolio", "Commercial criticized"]
+      special: ["Auto portfolio", "CRE concerns"]
+      historical: "Higher reserves due to past issues"
+      
+    Citigroup:
+      metrics: ["Cost of credit", "NCO rates", "Reserve ratios"]
+      segments: ["Cards", "Retail Banking", "ICG"]
+      geographic: "International credit costs"
+      
+    US_Bank:
+      metrics: ["Credit losses", "NPAs", "Criticized assets"]
+      focus: "Commercial credit quality"
+      
+    PNC:
+      metrics: ["Provision", "NCOs", "NPLs"]
+      special: "Purchase accounting impacts"
+    
+    # Canadian Banks - IFRS 9 Framework
+    Royal_Bank_RY:
+      metrics: ["PCL", "PCL ratio", "Gross impaired loans (GIL)"]
+      stages: ["Stage 1", "Stage 2", "Stage 3" # IFRS 9]
+      special: ["PCL on impaired", "PCL on performing"]
+      reporting: "Basis points of average loans"
+      
+    TD_Bank:
+      metrics: ["PCL", "PCL ratio", "Gross impaired loans"]
+      segments: ["Canadian Retail", "US Retail", "Wholesale"]
+      special: ["Performing PCL", "Impaired PCL"]
+      focus: "Geographic split important"
+      
+    Bank_of_Montreal_BMO:
+      metrics: ["Provision for credit losses", "PCL ratio"]
+      reporting: ["Impaired", "Performing" # provisions]
+      special: "Total PCL ratio in basis points"
+      
+    Scotiabank_BNS:
+      metrics: ["PCL", "PCL ratio", "NPLs"]
+      geographic: "International PCL highlighted"
+      special: "Country-specific provisions"
+      
+    CIBC_CM:
+      metrics: ["Provision for credit losses", "Impaired loans"]
+      stages: "IFRS 9 stage migration"
+      focus: "Canadian mortgage quality"
+      
+    National_Bank_NA:
+      metrics: ["Provisions", "Impaired loans ratio"]
+      scale: "Lower absolute dollars, focus on ratios"
+  
+  canadian_specific_patterns:
+    framework:
+      - IFRS 9 vs US GAAP CECL
+      - Three-stage model (performing/underperforming/impaired)
+      - "Performing" vs "Impaired" provisions
+      - Stage migration disclosures
+      
+    terminology:
+      - "PCL" more common than "provision"
+      - "Gross impaired loans" (GIL)
+      - "Net impaired loans" (NIL)
+      - "Formations" (new impaired loans)
+      
+    products:
+      - Insured vs uninsured mortgages
+      - HELOC performance
+      - Canadian credit cards
+      - Auto loans
+      
+    metrics:
+      - PCL ratio in basis points
+      - PCL on performing loans
+      - PCL on impaired loans
+      - Stage 1/2/3 coverage ratios
+  
+  portfolio_specific_language:
+    consumer:
+      - "card losses"
+      - "mortgage delinquencies"
+      - "auto charge-offs"
+      - "HELOC performance"
+      - "unsecured lending"
+      - "FICO deterioration"
+      - "payment rates"
+      
+    commercial:
+      - "criticized loans"
+      - "commercial real estate"
+      - "C&I losses"
+      - "leveraged lending"
+      - "oil & gas reserves"
+      - "office CRE concerns"
+      
+    geographic:
+      - "international provisions"
+      - "emerging markets risk"
+      - "country risk provisions"
+  
+  forward_looking_language:
+    economic_scenarios:
+      - "base case scenario"
+      - "adverse scenario"
+      - "severely adverse"
+      - "probability weighting"
+      - "economic assumptions"
+      - "unemployment assumptions"
+      - "GDP forecast"
+      - "house price assumptions"
+      
+    guidance:
+      - "expect NCOs of X basis points"
+      - "provision expense guidance"
+      - "normalized loss rates"
+      - "through-the-cycle losses"
+      - "credit normalization path"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "Provision for credit losses was $2 billion this quarter"
+        reason: "Direct provision expense"
+        
+      - text: "Net charge-offs increased to 50 basis points"
+        reason: "NCO is key credit metric"
+        
+      - text: "We built reserves by $500 million given economic uncertainty"
+        reason: "Reserve build is credit topic"
+        
+      - text: "NPLs declined to 0.5% of total loans"
+        reason: "Non-performing loans metric"
+        
+      - text: "Credit card delinquencies are trending higher"
+        reason: "Delinquency is credit quality indicator"
+        
+      - text: "PCL ratio improved to 25 basis points" # Canadian
+        reason: "PCL is Canadian provision metric"
+        
+      - text: "Stage 2 loans increased reflecting credit migration" # Canadian
+        reason: "IFRS 9 stage migration"
+    
+    should_not_classify:
+      - text: "Net interest income increased 10%"
+        reason: "NII not credit losses"
+        
+      - text: "Loan growth was strong"
+        reason: "Growth not credit quality"
+        
+      - text: "Trading credit exposure increased"
+        reason: "Trading risk not loan losses"
+        
+      - text: "Operational losses were elevated"
+        reason: "Op risk not credit risk"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Commercial Banking" # Commercial credit
+      - "Consumer Banking" # Consumer credit
+      - "Macro Environment" # Economic impact on credit
+      - "Capital Management" # Reserve levels affect capital
+      
+    sometimes_with:
+      - "Net Interest Income" # Yield vs credit trade-off
+      - "Geographic" # Regional credit trends
+      
+    rarely_with:
+      - "Trading" # Different risk type
+      - "Investment Banking" # Fee business
+      - "Wealth Management" # Limited credit risk
+  
+  regulatory_context:
+    US_specific:
+      - "CECL (Current Expected Credit Losses)"
+      - "CCAR stress testing"
+      - "DFAST scenarios"
+      - "Regulatory guidance"
+      
+    Canadian_specific:
+      - "IFRS 9 requirements"
+      - "OSFI expectations"
+      - "Mortgage stress testing"
+      - "Expected credit loss model"
+  
+  red_flags_for_misclassification:
+    - "Interest income is NOT credit losses"
+    - "Loan GROWTH is different from loan LOSSES"
+    - "Trading credit risk is mark-to-market, not provisions"
+    - "Operational risk losses are NOT credit losses"
+    - "Investment securities losses are NOT loan losses"
+    - "Canadian PCL = US provision (same concept)"
+    - "IFRS 9 stages = credit quality buckets"
+    - "Gross vs Net (gross = before reserves, net = after)"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Credit Quality & Provisions:
+    
+    CORE IDENTIFICATION:
+    1. Look for LOAN LOSSES and CREDIT RISK discussion
+    2. Key metrics: Provisions, charge-offs, NPLs, reserves
+    3. Forward-looking (provisions) and backward-looking (charge-offs)
+    4. Critical risk metric for lending businesses
+    5. Directly impacts earnings through provision expense
+    
+    KEY COMPONENTS:
+    6. Provision: Expense taken for expected losses
+    7. Charge-offs: Actual losses realized
+    8. Reserves/Allowance: Balance sheet cushion
+    9. NPLs: Non-performing/impaired loans
+    10. Delinquencies: Early warning indicators
+    
+    CRITICAL METRICS:
+    - PCL/Provision = Income statement expense
+    - NCO = Net charge-offs (charge-offs - recoveries)
+    - ACL = Allowance (balance sheet reserve)
+    - NPL = Non-performing loans
+    - Coverage = Reserves / NPLs or Loans
+    
+    FRAMEWORKS:
+    US BANKS (CECL):
+    - Current Expected Credit Losses
+    - Life of loan provisions
+    - Day 1 reserves
+    - Forward-looking
+    
+    CANADIAN BANKS (IFRS 9):
+    - Three-stage model
+    - Stage 1: Performing (12-month ECL)
+    - Stage 2: Underperforming (lifetime ECL)
+    - Stage 3: Impaired (lifetime ECL)
+    - PCL on performing vs impaired
+    
+    PORTFOLIO SEGMENTS:
+    - Consumer: Cards, mortgages, auto, personal
+    - Commercial: C&I, CRE, leveraged loans
+    - Geographic: Domestic vs international
+    
+    ECONOMIC SENSITIVITY:
+    - Unemployment drives consumer losses
+    - GDP impacts commercial losses
+    - Home prices affect mortgage losses
+    - Scenarios and probability weighting
+    
+    CYCLE DYNAMICS:
+    - "Normalization" = returning to average
+    - Through-the-cycle vs point-in-time
+    - Vintage/cohort performance
+    - Seasoning effects
+    
+    EXCLUSIONS:
+    - Interest income (unless on impaired)
+    - Trading losses (mark-to-market)
+    - Operational losses
+    - Securities gains/losses
+    - Loan growth metrics
+    
+    REMEMBER:
+    - This is about CREDIT RISK in lending
+    - Both P&L impact (provisions) and balance sheet (reserves)
+    - Leading indicator of bank health
+    - Highly sensitive to economic conditions
+    - Canadian PCL = US provisions (terminology difference)

@@ -1,0 +1,445 @@
+# Revenue & Growth Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Overall revenue performance and growth drivers
+
+- name: "Revenue & Growth"
+  
+  description: |
+    Discussion of total revenue, revenue growth, fee income, and non-interest income.
+    Includes overall top-line performance, organic growth, revenue drivers, and fee-based
+    income streams. Covers both year-over-year and sequential growth metrics. Focus on
+    consolidated revenue trends rather than specific business line details.
+  
+  detailed_scope:
+    includes:
+      # Total Revenue
+      - Total revenue/total income
+      - Net revenue
+      - Operating revenue
+      - Revenue growth rates
+      - Organic growth
+      - Constant currency growth
+      
+      # Non-Interest Income
+      - Fee income/fee revenue
+      - Non-interest income
+      - Service charges
+      - Commission income
+      - Other income
+      - Ancillary revenue
+      
+      # Growth Metrics
+      - Year-over-year growth
+      - Sequential growth
+      - Compound annual growth rate (CAGR)
+      - Market share gains
+      - Revenue per customer/client
+      
+      # Revenue Quality
+      - Recurring vs transactional
+      - Fee-based vs spread-based
+      - Diversification metrics
+      - Revenue mix
+      
+    excludes:
+      - Specific NII discussion (separate category)
+      - Detailed provision discussion
+      - Specific business line revenues (unless total)
+      - Operating expenses
+      - One-time items (unless discussing adjusted revenue)
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "revenue"
+      - "revenues"
+      - "total revenue"
+      - "net revenue"
+      - "revenue growth"
+      - "top line"
+      - "top-line"
+      - "fee income"
+      - "fees"
+      - "non-interest income"
+      - "noninterest income"
+      - "fee revenue"
+      - "total income"
+      - "operating revenue"
+      - "growth"
+      - "grew"
+      - "increased"
+      
+    # Secondary indicators
+    secondary:
+      - "service charges"
+      - "commission"
+      - "commissions"
+      - "other income"
+      - "ancillary revenue"
+      - "organic growth"
+      - "constant currency"
+      - "year-over-year"
+      - "YoY"
+      - "sequential"
+      - "quarter-over-quarter"
+      - "QoQ"
+      - "CAGR"
+      - "compound growth"
+      - "market share"
+      - "wallet share"
+      - "revenue per"
+      - "ARPU" # Average Revenue Per User
+      - "diversification"
+      - "revenue mix"
+      - "fee-based"
+      - "recurring revenue"
+      - "transactional revenue"
+      - "operating leverage"
+      - "positive operating leverage"
+      - "PPNR" # Pre-provision net revenue
+      - "pre-provision"
+      - "core revenue"
+      - "adjusted revenue"
+      - "underlying revenue"
+      
+    # Contextual indicators
+    contextual:
+      - "performance" # (revenue performance)
+      - "momentum"
+      - "trajectory"
+      - "trend"
+      - "driver"
+      - "contribution"
+      - "headwind"
+      - "tailwind"
+      - "offset"
+      - "mix"
+      - "quality"
+      - "sustainable"
+      - "resilient"
+  
+  common_phrases:
+    positive_signals:
+      # Growth indicators
+      - "revenue grew X%"
+      - "strong revenue growth"
+      - "record revenues"
+      - "top-line growth"
+      - "increased fee income"
+      - "higher non-interest income"
+      - "positive operating leverage"
+      - "revenue momentum"
+      - "broad-based growth"
+      - "diversified revenue growth"
+      
+      # Quality indicators
+      - "improved revenue mix"
+      - "higher fee-based revenue"
+      - "recurring revenue growth"
+      - "gained market share"
+      - "strong fee generation"
+      
+    negative_signals:
+      - "revenue declined"
+      - "lower revenues"
+      - "fee income pressure"
+      - "revenue headwinds"
+      - "negative operating leverage"
+      - "top-line pressure"
+      - "challenged revenue environment"
+      - "lower non-interest income"
+      - "fee compression"
+      - "revenue mix deterioration"
+  
+  quantitative_patterns:
+    # Common metrics
+    - "total revenue of $X billion"
+    - "revenue grew/declined X%"
+    - "fee income of $X million"
+    - "non-interest income up/down X%"
+    - "X% organic growth"
+    - "constant currency growth of X%"
+    - "PPNR of $X billion"
+    - "revenue per client of $X"
+    - "X% of revenue from fees"
+    - "positive operating leverage of X%"
+    
+    # Comparison metrics
+    - "X% year-over-year growth"
+    - "X% sequential growth"
+    - "outpaced industry growth of X%"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      metrics: ["Managed revenue", "Firmwide net revenue"]
+      special: ["Revenue ex-DVA/FVA"]
+      reporting: "Managed basis reporting"
+      
+    Bank_of_America:
+      metrics: ["Total revenue, net of interest expense"]
+      focus: "Revenue by segment"
+      special: ["Revenue ex-market adjustments"]
+      
+    Wells_Fargo:
+      metrics: ["Total revenue", "Noninterest income"]
+      reporting: "Period-over-period comparisons"
+      
+    Citigroup:
+      metrics: ["Total revenues", "Constant dollar revenues"]
+      special: "Ex-divestitures view"
+      geographic: "Regional revenue splits"
+      
+    Goldman_Sachs:
+      metrics: ["Net revenues", "Total net revenues"]
+      reporting: "Investment banking vs trading split"
+      
+    Morgan_Stanley:
+      metrics: ["Net revenues", "Adjusted net revenues"]
+      focus: "Wealth and IM revenue growth"
+    
+    # Canadian Banks - UNIQUE ASPECTS
+    Royal_Bank_RY:
+      metrics: ["Total revenue", "Revenue (TEB)"]
+      special: ["Revenue growth ex-insurance"]
+      reporting: "Taxable equivalent basis"
+      
+    TD_Bank:
+      metrics: ["Total revenue", "Adjusted revenue"]
+      segments: "Canadian vs US revenue"
+      special: "Reported vs adjusted"
+      
+    Bank_of_Montreal_BMO:
+      metrics: ["Total revenue", "Net revenue"]
+      special: ["Operating leverage"]
+      reporting: "Revenue on TEB basis"
+      
+    Scotiabank_BNS:
+      metrics: ["Total revenue", "Core banking revenue"]
+      geographic: "International revenue contribution"
+      
+    CIBC_CM:
+      metrics: ["Total revenue", "Revenue growth"]
+      focus: "Domestic revenue focus"
+      
+    National_Bank_NA:
+      metrics: ["Total revenues", "Operating revenues"]
+      scale: "Percentage growth focus"
+  
+  canadian_specific_patterns:
+    terminology:
+      - "TEB revenue" common
+      - "Operating leverage" emphasized
+      - "Core banking revenue"
+      - "Adjusted revenue" for one-times
+      
+    reporting:
+      - Often show constant currency
+      - Geographic splits important
+      - Insurance revenue may be included
+      - Volume vs rate impacts shown
+      
+    metrics:
+      - Revenue per employee
+      - Revenue per branch
+      - Digital revenue contribution
+      - Cross-sell revenue
+  
+  fee_income_components:
+    # Common fee categories
+    service_fees:
+      - "deposit service charges"
+      - "account maintenance fees"
+      - "overdraft fees"
+      - "ATM fees"
+      - "wire transfer fees"
+      
+    investment_fees:
+      - "investment banking fees"
+      - "advisory fees"
+      - "underwriting fees"
+      - "management fees"
+      - "performance fees"
+      
+    transaction_fees:
+      - "card fees"
+      - "merchant fees"
+      - "payment processing"
+      - "foreign exchange fees"
+      - "trade finance fees"
+      
+    other_fees:
+      - "lending fees"
+      - "commitment fees"
+      - "mortgage servicing"
+      - "insurance commissions"
+      - "trust fees"
+  
+  growth_driver_language:
+    organic:
+      - "volume growth"
+      - "client acquisition"
+      - "market share gains"
+      - "new product revenue"
+      - "cross-sell success"
+      - "pricing actions"
+      
+    inorganic:
+      - "acquisition contribution"
+      - "merger synergies"
+      - "portfolio purchases"
+      
+    market:
+      - "market appreciation"
+      - "rate environment benefit"
+      - "favorable FX"
+      - "economic tailwinds"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "Total revenue increased 8% year-over-year to $35 billion"
+        reason: "Direct total revenue discussion"
+        
+      - text: "Fee income grew 12% driven by strong investment banking"
+        reason: "Fee income growth discussion"
+        
+      - text: "Non-interest income was up 5% on higher service charges"
+        reason: "Non-interest income is fee revenue"
+        
+      - text: "We delivered positive operating leverage of 200 basis points"
+        reason: "Operating leverage is revenue vs expense growth"
+        
+      - text: "PPNR increased 10% to $8 billion"
+        reason: "Pre-provision net revenue metric"
+        
+      - text: "Revenue momentum continued with broad-based growth"
+        reason: "Overall revenue trajectory"
+        
+      - text: "Total revenue on a TEB basis grew 7%" # Canadian
+        reason: "TEB revenue is Canadian reporting"
+    
+    should_not_classify:
+      - text: "Net interest income grew 15%"
+        reason: "NII is separate category"
+        
+      - text: "Trading revenues increased 20%"
+        reason: "Specific business line, not total"
+        
+      - text: "Provision expense was $2 billion"
+        reason: "Provisions are separate category"
+        
+      - text: "Operating expenses increased 5%"
+        reason: "Expenses not revenue"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Expenses & Efficiency" # Operating leverage
+      - "Profitability" # Revenue drives profits
+      - "Business Strategy" # Growth initiatives
+      
+    sometimes_with:
+      - All business line categories # When discussing drivers
+      - "Market Environment" # Market impacts
+      
+    rarely_with:
+      - "Credit Quality" # Different focus
+      - "Capital Management" # Different topic
+  
+  segment_contribution_language:
+    # How segments contribute to total
+    - "[Segment] contributed X% to revenue growth"
+    - "[Business] drove revenue increase"
+    - "Partially offset by [segment] decline"
+    - "Broad-based across businesses"
+    - "Led by [segment]"
+    - "Strong performance in [multiple segments]"
+  
+  quality_metrics:
+    # Revenue quality indicators
+    - "X% of revenue is fee-based"
+    - "Recurring revenue of X%"
+    - "Diversified revenue streams"
+    - "Low revenue concentration"
+    - "Stable revenue base"
+    - "Predictable fee income"
+  
+  red_flags_for_misclassification:
+    - "Specific NII discussion goes to NII category"
+    - "Specific business line revenue may be that category"
+    - "Provision/credit discussion is separate"
+    - "Expense discussion is different category"
+    - "Capital/liquidity is not revenue"
+    - "Canadian TEB adjustment affects revenue reporting"
+    - "One-time items may distort growth rates"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Revenue & Growth:
+    
+    CORE IDENTIFICATION:
+    1. Look for TOTAL or OVERALL revenue discussion
+    2. Key metrics: Total revenue, fee income, non-interest income
+    3. Growth rates and trends at consolidated level
+    4. Top-line performance and drivers
+    5. Both NII and fee income together = total revenue
+    
+    KEY COMPONENTS:
+    6. Total Revenue: NII + non-interest income
+    7. Fee Income: All non-interest revenue sources
+    8. Growth Metrics: YoY, sequential, organic, constant currency
+    9. Revenue Quality: Fee-based, recurring, diversified
+    10. Operating Leverage: Revenue growth vs expense growth
+    
+    COMMON METRICS:
+    - Total/Net Revenue = All income sources
+    - Non-interest Income = Fees and commissions
+    - PPNR = Pre-provision net revenue
+    - Operating Leverage = Revenue growth - Expense growth
+    - Organic Growth = Excluding acquisitions/FX
+    
+    FEE INCOME TYPES:
+    - Service charges and fees
+    - Investment/advisory fees
+    - Card and payment fees
+    - Trading revenues (when in total context)
+    - Other income
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - "Total revenue, net of interest expense"
+    - "Noninterest income"
+    - Focus on fee income ratio
+    
+    CANADIAN BANKS:
+    - "Total revenue (TEB)"
+    - "Operating leverage" emphasized
+    - "Core banking revenue"
+    - May include insurance
+    
+    GROWTH DRIVERS:
+    - Volume growth (balance sheet expansion)
+    - Rate/yield improvements
+    - Fee increases
+    - Market share gains
+    - New products/services
+    - Cross-sell success
+    
+    QUALITY INDICATORS:
+    - Fee-based vs spread-based mix
+    - Recurring vs transactional
+    - Diversification across businesses
+    - Stability and predictability
+    
+    EXCLUSIONS:
+    - Specific NII discussion alone
+    - Individual business line revenues (unless total context)
+    - Provision expense discussion
+    - Operating expense discussion
+    - Balance sheet metrics
+    
+    REMEMBER:
+    - This is about TOTAL top-line performance
+    - Includes both spread AND fee income
+    - Growth and momentum are key themes
+    - Quality and sustainability matter
+    - Different from individual business discussions

@@ -227,6 +227,23 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
         stage_config = yaml.safe_load(config_data.decode("utf-8"))
         log_execution("Configuration loaded successfully", {"sections": list(stage_config.keys())})
 
+        # Load monitored institutions from separate file
+        config_path = os.getenv("CONFIG_PATH")
+        config_dir = os.path.dirname(config_path) if config_path else ""
+        institutions_path = os.path.join(config_dir, "monitored_institutions.yaml")
+        log_execution("Loading monitored institutions from separate file", {"institutions_path": institutions_path})
+        
+        institutions_data = nas_download_file(nas_conn, institutions_path)
+        if institutions_data:
+            try:
+                stage_config["monitored_institutions"] = yaml.safe_load(institutions_data.decode("utf-8"))
+                log_execution("Loaded monitored institutions successfully", {"count": len(stage_config["monitored_institutions"])})
+            except yaml.YAMLError as e:
+                log_error("Failed to load monitored_institutions.yaml, falling back to config.yaml", "config_parse", {"yaml_error": str(e)})
+                # Keep monitored_institutions from main config if separate file fails
+        else:
+            log_execution("monitored_institutions.yaml not found, using main config file")
+
         # Validate configuration
         validate_config_structure(stage_config)
         return stage_config
@@ -655,11 +672,25 @@ def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str,
                             log_execution(f"Could not validate title for {file_path}: {e}")
                             non_earnings_count += 1
                         
-                        # Create file record with earnings call flag
+                        # Extract ticker from filename to get institution_id
+                        institution_id = None
+                        ticker = None
+                        if filename.endswith('.xml'):
+                            # Extract ticker from filename pattern: ticker_quarter_year_type_eventid_versionid.xml
+                            parts = filename.replace('.xml', '').split('_')
+                            if parts:
+                                ticker = parts[0]
+                                # Look up institution ID from config
+                                if ticker in config.get("monitored_institutions", {}):
+                                    institution_id = config["monitored_institutions"][ticker].get("id")
+                        
+                        # Create file record with earnings call flag and institution_id
                         file_record = {
                             "file_path": file_path,
                             "date_last_modified": modified_time.isoformat() if modified_time else datetime.now().isoformat(),
-                            "is_earnings_call": is_earnings_call
+                            "is_earnings_call": is_earnings_call,
+                            "institution_id": institution_id,
+                            "ticker": ticker
                         }
                         
                         # Use file_path as key for direct comparison
@@ -784,7 +815,9 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
         if nas_record.get("is_earnings_call", False):
             record = {
                 "file_path": file_path,
-                "date_last_modified": nas_record.get("date_last_modified", datetime.now().isoformat())
+                "date_last_modified": nas_record.get("date_last_modified", datetime.now().isoformat()),
+                "institution_id": nas_record.get("institution_id"),
+                "ticker": nas_record.get("ticker")
             }
             process_records.append(record)
             earnings_calls_count += 1

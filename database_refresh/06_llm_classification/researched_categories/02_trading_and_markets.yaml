@@ -1,0 +1,384 @@
+# Trading & Markets Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Sources: JPM, GS, MS, BAC, C, WFC (US) and RY, TD, BMO, BNS, CM, NA (Canadian)
+
+- name: "Trading & Markets"
+  
+  description: |
+    Revenue from market-making, client facilitation, and trading activities across asset classes.
+    Includes FICC (Fixed Income, Currencies & Commodities) and Equities trading, derivatives,
+    and related client services. Focus on flow trading and client-driven revenue rather than
+    proprietary trading. Includes both cash and derivative products.
+  
+  detailed_scope:
+    includes:
+      # FICC Components
+      - Fixed income trading (rates, credit, municipals)
+      - Foreign exchange (FX/Currencies) trading
+      - Commodities trading
+      - Structured products and derivatives
+      - Securitized products trading
+      - Emerging markets trading
+      
+      # Equities Components  
+      - Cash equities trading
+      - Equity derivatives
+      - Prime brokerage revenues (financing and securities lending)
+      - Synthetic equity products
+      - Delta one trading
+      - ETF market making
+      
+      # Client Services
+      - Client execution services
+      - Market-making revenues
+      - Client facilitation
+      - Algorithmic trading services
+      - Electronic trading platforms
+      - Clearing revenues
+      
+    excludes:
+      - Investment banking fees (advisory, underwriting)
+      - Principal investments (private equity, merchant banking)
+      - Asset management fees
+      - Pure lending interest income
+      - Deposit-taking spreads
+      - Research fees (unless bundled with execution)
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "trading revenue"
+      - "trading income"
+      - "markets revenue"
+      - "FICC"
+      - "fixed income trading"
+      - "equities trading"
+      - "equity trading"
+      - "FX trading"
+      - "foreign exchange"
+      - "commodities trading"
+      - "trading results"
+      - "markets income"
+      - "sales and trading"
+      - "S&T"
+      
+    # Secondary indicators - supporting signals  
+    secondary:
+      - "client facilitation"
+      - "market making"
+      - "market-making"
+      - "flow trading"
+      - "client execution"
+      - "derivatives"
+      - "structured products"
+      - "rates"
+      - "credit trading"
+      - "spread products"
+      - "securitized products"
+      - "prime brokerage"
+      - "prime services"
+      - "securities lending"
+      - "financing revenues"
+      - "electronic trading"
+      - "algorithmic trading"
+      - "volatility"
+      - "bid-ask spreads"
+      - "client activity"
+      - "client flows"
+      - "trading volumes"
+      - "market volumes"
+      - "inventory"
+      - "VAR" # Value at Risk
+      - "trading VAR"
+      - "risk-weighted assets"
+      - "XVA" # Credit/Debit/Funding value adjustments
+      
+    # Contextual indicators - need other signals
+    contextual:
+      - "desk" # (when with trading context)
+      - "portfolio" # (in trading context)
+      - "positions"
+      - "exposure"
+      - "hedging" # (client hedging services)
+      - "liquidity provision"
+      - "order flow"
+      - "execution"
+      - "spreads" # (bid-ask, not lending)
+      - "volumes" # (trading volumes)
+      - "momentum"
+      - "performance" # (with trading context)
+  
+  common_phrases:
+    # Phrases indicating strong trading performance
+    positive_signals:
+      - "strong trading results"
+      - "robust client activity"
+      - "increased market volatility"
+      - "higher trading volumes"
+      - "strong FICC performance"
+      - "record trading revenues"
+      - "improved client flows"
+      - "wider bid-ask spreads"
+      - "strong market-making revenues"
+      - "increased client facilitation"
+      - "favorable trading conditions"
+      - "strong equities trading"
+      - "higher client balances"
+      - "increased market share in trading"
+      - "strong performance across products"
+      - "benefited from market volatility"
+      - "record sales and trading"
+      
+    # Phrases indicating weak trading performance
+    negative_signals:
+      - "lower trading revenues"
+      - "decreased client activity"
+      - "challenging trading environment"
+      - "compressed spreads"
+      - "reduced market volatility"
+      - "lower trading volumes"
+      - "weak FICC results"
+      - "subdued client flows"
+      - "difficult trading conditions"
+      - "lower market-making revenues"
+      - "decreased trading income"
+      - "muted trading activity"
+      - "tighter bid-ask spreads"
+      - "lower inventory levels"
+  
+  quantitative_patterns:
+    # How trading metrics are typically presented
+    - "trading revenues of $X billion"
+    - "FICC revenues up/down X%"
+    - "equities trading increased/decreased X%"
+    - "markets revenue grew X% year-over-year"
+    - "trading VAR averaged $X million"
+    - "client balances of $X billion"
+    - "market share of X% in [product]"
+    - "prime brokerage balances up X%"
+    - "average trading volume of X billion shares"
+    - "derivatives notional of $X trillion"
+    
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      division: "Markets & Securities Services"
+      segments: ["Fixed Income Markets", "Equity Markets", "Securities Services"]
+      common_refs: ["Markets revenue", "Trading revenue", "FICC and Equities"]
+      
+    Goldman_Sachs:
+      division: "Global Markets"
+      segments: ["FICC", "Equities", "Securities Services"]
+      common_refs: ["Trading revenues", "Market Making", "FICC financing"]
+      special_terms: ["FICC intermediation", "Equities intermediation"]
+      
+    Morgan_Stanley:
+      division: "Institutional Securities - Sales & Trading"
+      segments: ["Fixed Income", "Equity"]
+      common_refs: ["Sales and trading net revenues", "Trading revenues"]
+      
+    Bank_of_America:
+      division: "Global Markets"
+      segments: ["FICC", "Equities"]
+      common_refs: ["Sales and trading revenue", "Trading-related revenue"]
+      special_terms: ["Trading account profits"]
+      
+    Citigroup:
+      division: "Markets and Securities Services"
+      segments: ["Fixed Income Markets", "Equity Markets"]
+      common_refs: ["Markets revenues", "Trading revenues"]
+      
+    Wells_Fargo:
+      division: "Corporate & Investment Banking - Markets"
+      common_refs: ["Trading revenues", "Customer accommodation trading"]
+      notes: "Smaller trading operation vs peers"
+    
+    # Canadian Banks - IMPORTANT DIFFERENCES
+    Royal_Bank_RY:
+      division: "Capital Markets - Trading"
+      common_refs: ["Trading revenue", "Global Markets revenue"]
+      special_terms: ["Trading revenue (teb)" # taxable equivalent basis]
+      notes: "Reports on taxable equivalent basis (teb)"
+      
+    TD_Bank:
+      division: "Wholesale Banking - Trading"
+      common_refs: ["Trading-related revenue", "Trading income (TEB)"]
+      notes: "Emphasizes client-driven vs proprietary"
+      
+    Bank_of_Montreal_BMO:
+      division: "BMO Capital Markets - Trading Products"
+      common_refs: ["Trading revenues", "Trading and securities services"]
+      special_terms: ["Trading products revenue"]
+      
+    Scotiabank_BNS:
+      division: "Global Banking and Markets - Markets"
+      common_refs: ["Capital markets revenue", "Trading revenues"]
+      special_terms: ["Client-related trading"]
+      
+    CIBC_CM:
+      division: "Capital Markets - Trading"
+      common_refs: ["Trading revenue", "Markets revenue"]
+      notes: "Combines with other capital markets activities"
+      
+    National_Bank_NA:
+      division: "Financial Markets - Trading"
+      common_refs: ["Trading revenues", "Market revenues"]
+      notes: "Smaller scale, focus on Canadian markets"
+  
+  canadian_specific_patterns:
+    terminology_differences:
+      - "TEB (taxable equivalent basis)" frequently used
+      - "Client-driven" emphasized more than US banks
+      - "Trading products" as a segment name
+      - Less granular FICC/Equities split in reporting
+      
+    reporting_differences:
+      - Often combined with other capital markets activities
+      - May not separate FICC vs Equities clearly
+      - Include securities services with trading
+      - Emphasize domestic vs international split
+      
+    market_focus:
+      - Canadian dollar rates and FX
+      - Resource sector commodities (oil, metals)
+      - Canadian government bonds
+      - TSX-listed equities
+      - Cross-border (CAD/USD) products
+      
+    common_canadian_phrases:
+      - "trading revenue (TEB)"
+      - "client-driven trading"
+      - "trading products revenue"
+      - "Canadian fixed income trading"
+      - "foreign exchange revenue excluding translation"
+      - "commodity derivatives"
+      - "equity trading commissions"
+      - "fixed income trading net of funding costs"
+  
+  product_specific_language:
+    rates_trading:
+      - "government bonds"
+      - "interest rate swaps"
+      - "treasury trading"
+      - "sovereign debt"
+      - "rates derivatives"
+      
+    credit_trading:
+      - "investment grade credit"
+      - "high yield trading"
+      - "credit derivatives"
+      - "CDS" # Credit Default Swaps
+      - "distressed debt"
+      
+    fx_commodities:
+      - "foreign exchange"
+      - "currency derivatives"
+      - "precious metals"
+      - "energy trading"
+      - "commodity derivatives"
+      
+    equities_specific:
+      - "cash equities"
+      - "equity derivatives"
+      - "options and futures"
+      - "ETF trading"
+      - "program trading"
+      - "block trading"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "FICC revenues increased 25% driven by strong rates and FX trading"
+        reason: "Direct mention of FICC and trading products"
+        
+      - text: "Equities trading delivered record results with higher client volumes"
+        reason: "Explicit equities trading reference"
+        
+      - text: "Market-making revenues benefited from increased volatility"
+        reason: "Market-making is core trading activity"
+        
+      - text: "Our trading desk captured wider bid-ask spreads this quarter"
+        reason: "Trading desk and bid-ask spreads indicate trading"
+        
+      - text: "Prime brokerage balances grew 15% with increased hedge fund activity"
+        reason: "Prime brokerage is part of trading services"
+        
+      - text: "Trading revenue (TEB) was up reflecting strong client flows" # Canadian
+        reason: "TEB trading revenue is Canadian reporting style"
+        
+      - text: "Client facilitation in commodities drove trading results"
+        reason: "Client facilitation is trading activity"
+    
+    should_not_classify:
+      - text: "Investment banking fees from equity underwriting increased"
+        reason: "Underwriting is IB, not trading"
+        
+      - text: "Net interest margin improved on higher rates"
+        reason: "NIM is banking/lending, not trading"
+        
+      - text: "Advisory revenues were strong this quarter"
+        reason: "Advisory is IB, not trading"
+        
+      - text: "Our loan portfolio performed well"
+        reason: "Lending activity, not trading"
+        
+      - text: "Asset management fees increased with higher AUM"
+        reason: "Asset management, not trading"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Capital Markets & Investment Banking" # Often in same division
+      - "Macro & Market Environment" # Market conditions drive trading
+      - "Risk Management" # VAR and risk metrics
+      - "Capital & Liquidity" # RWA allocation
+      
+    rarely_with:
+      - "Consumer & Retail Banking"
+      - "Credit Quality & Provisions" # Trading is mark-to-market
+      - "Net Interest Income" # Different revenue type
+  
+  volatility_relationship:
+    # How volatility impacts classification
+    - "Higher volatility → generally positive for trading"
+    - "Low volatility → often negative for trading"
+    - "VIX references indicate equity vol impact"
+    - "Rate volatility affects FICC performance"
+    - "FX volatility drives currency trading"
+  
+  red_flags_for_misclassification:
+    - "Investment banking fees are NOT trading revenue"
+    - "Lending spreads are NOT trading income"
+    - "Advisory fees are NOT trading"
+    - "Underwriting is NOT trading (even if in same division)"
+    - "Principal investments are NOT flow trading"
+    - "Pure research revenue is NOT trading"
+    - "Wealth management brokerage is different from institutional trading"
+    - "Canadian 'TEB' adjustment is still trading revenue"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Trading & Markets:
+    
+    CORE IDENTIFICATION:
+    1. Look for MARKET-MAKING and CLIENT FACILITATION activities
+    2. FICC = Fixed Income, Currencies & Commodities
+    3. Equities = Cash equities and equity derivatives
+    4. Trading is FLOW business (client-driven) not proprietary positions
+    5. Includes prime brokerage and securities lending
+    
+    KEY DIFFERENTIATORS:
+    6. Trading = spread capture and facilitation (not fees)
+    7. Different from IB = IB charges fees, trading captures spreads
+    8. Mark-to-market accounting (not accrual like loans)
+    9. Volatility generally HELPS trading (more activity, wider spreads)
+    10. VAR (Value at Risk) indicates trading exposure
+    
+    CANADIAN SPECIFICS:
+    11. "TEB" (taxable equivalent basis) is Canadian reporting convention
+    12. "Trading products" or "Markets" may combine multiple activities
+    13. "Client-driven" emphasized to show not proprietary
+    14. May combine with securities services or prime brokerage
+    15. Less granular FICC/Equities split than US banks
+    
+    REMEMBER:
+    - Trading = market-making, client execution, spread capture
+    - NOT = advisory fees, underwriting, lending margins, asset management

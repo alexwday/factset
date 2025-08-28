@@ -1,0 +1,579 @@
+# Workforce & Talent Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Human capital, talent management, and organizational culture
+
+- name: "Workforce & Talent"
+  
+  description: |
+    Discussion of human capital management, talent acquisition and retention, employee engagement,
+    workforce development, compensation and benefits, organizational culture, and workplace
+    initiatives. Includes diversity in workforce, skills development, succession planning,
+    and employee wellbeing. Critical for understanding organizational capabilities.
+  
+  detailed_scope:
+    includes:
+      # Workforce Metrics
+      - Headcount/FTE numbers
+      - Hiring and recruitment
+      - Turnover/retention rates
+      - Employee engagement scores
+      - Productivity metrics
+      - Workforce composition
+      - Demographics
+      
+      # Talent Management
+      - Talent acquisition
+      - Talent retention
+      - Talent development
+      - Leadership development
+      - Succession planning
+      - Performance management
+      - Career development
+      - Skills training
+      
+      # Compensation & Benefits
+      - Compensation philosophy
+      - Incentive compensation
+      - Benefits programs
+      - Retirement plans
+      - Employee stock programs
+      - Wellbeing initiatives
+      - Work-life balance
+      
+      # Culture & Engagement
+      - Organizational culture
+      - Employee engagement
+      - Employee satisfaction
+      - Values and behaviors
+      - Purpose-driven culture
+      - Innovation culture
+      - Risk culture
+      
+      # Workplace Initiatives
+      - Hybrid work models
+      - Remote work policies
+      - Workplace flexibility
+      - Office strategies
+      - Collaboration tools
+      - Employee resource groups
+      - Mental health support
+      
+      # Skills & Development
+      - Reskilling programs
+      - Upskilling initiatives
+      - Digital skills training
+      - Leadership programs
+      - Mentoring
+      - Continuous learning
+      
+    excludes:
+      - Customer service (unless employee impact)
+      - Executive compensation details
+      - Board composition
+      - Labor relations/unions (unless strategic)
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "employees"
+      - "employee"
+      - "workforce"
+      - "talent"
+      - "human capital"
+      - "people"
+      - "culture"
+      - "engagement"
+      - "retention" # (employee retention)
+      - "turnover" # (employee turnover)
+      - "hiring"
+      - "recruitment"
+      - "headcount"
+      - "FTE"
+      - "full-time equivalent"
+      - "compensation" # (employee context)
+      - "benefits"
+      - "training"
+      - "development" # (employee development)
+      - "skills"
+      
+    # Secondary indicators
+    secondary:
+      - "talent acquisition"
+      - "talent management"
+      - "talent pipeline"
+      - "war for talent"
+      - "employer of choice"
+      - "great place to work"
+      - "best workplace"
+      - "employee experience"
+      - "employee satisfaction"
+      - "employee engagement survey"
+      - "pulse survey"
+      - "attrition" # (employee attrition)
+      - "voluntary turnover"
+      - "involuntary turnover"
+      - "succession planning"
+      - "bench strength"
+      - "leadership pipeline"
+      - "high potential"
+      - "high performers"
+      - "performance management"
+      - "performance reviews"
+      - "career development"
+      - "career paths"
+      - "mobility" # (internal mobility)
+      - "promotions"
+      - "lateral moves"
+      - "reskilling"
+      - "upskilling"
+      - "digital skills"
+      - "future skills"
+      - "learning and development"
+      - "L&D"
+      - "training programs"
+      - "leadership development"
+      - "mentoring"
+      - "coaching"
+      - "apprenticeships"
+      - "internships"
+      - "campus recruiting"
+      - "early careers"
+      - "compensation and benefits"
+      - "total rewards"
+      - "pay equity"
+      - "competitive compensation"
+      - "incentive compensation"
+      - "bonus"
+      - "stock options"
+      - "ESPP" # Employee Stock Purchase Plan
+      - "401(k)" # US
+      - "pension" # (employee pension)
+      - "health benefits"
+      - "wellness"
+      - "wellbeing"
+      - "mental health" # (employee mental health)
+      - "work-life balance"
+      - "flexibility"
+      - "hybrid work"
+      - "remote work"
+      - "return to office"
+      - "RTO"
+      - "workplace strategy"
+      - "office footprint"
+      - "collaboration"
+      - "teamwork"
+      - "employee resource groups"
+      - "ERGs"
+      - "affinity groups"
+      - "inclusion" # (workplace inclusion)
+      - "belonging"
+      - "psychological safety"
+      - "speak-up culture"
+      - "values"
+      - "behaviors"
+      - "purpose" # (organizational purpose)
+      - "mission" # (employee context)
+      - "employee value proposition"
+      - "EVP"
+      
+    # Contextual indicators
+    contextual:
+      - "people" # (our people)
+      - "team" # (our team)
+      - "staff"
+      - "associates"
+      - "colleagues"
+      - "organization" # (people organization)
+      - "organizational" # (organizational capability)
+      - "capability" # (people capability)
+      - "capacity" # (human capacity)
+      - "productivity" # (employee productivity)
+      - "efficiency" # (workforce efficiency)
+      - "morale"
+      - "motivation"
+  
+  common_phrases:
+    positive_signals:
+      # Talent Success
+      - "attracted top talent"
+      - "retention rates improved"
+      - "employee engagement increased"
+      - "culture strengthening"
+      - "productivity gains"
+      - "successful hiring"
+      
+      # Development & Growth
+      - "invested in our people"
+      - "upskilling programs successful"
+      - "leadership development advancing"
+      - "internal mobility increased"
+      - "promotion rates up"
+      
+      # Workplace Excellence
+      - "employer of choice"
+      - "best place to work award"
+      - "employee satisfaction high"
+      - "flexible work model working"
+      
+    negative_signals:
+      - "talent shortage"
+      - "retention challenges"
+      - "turnover elevated"
+      - "hiring difficulties"
+      - "engagement declining"
+      - "culture issues"
+      - "productivity pressures"
+      - "skills gaps"
+  
+  quantitative_patterns:
+    # Workforce metrics
+    - "X employees globally"
+    - "headcount of X thousand"
+    - "hired X people"
+    - "X% turnover rate"
+    - "X% retention rate"
+    
+    # Engagement metrics
+    - "X% engagement score"
+    - "X point improvement in engagement"
+    - "X% participation rate"
+    
+    # Development metrics
+    - "X hours of training per employee"
+    - "X% promoted internally"
+    - "$X million in training investment"
+    - "X% completed upskilling"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      philosophy: ["Invest in our people", "Lifetime employment mindset"]
+      programs: ["Leadership Edge", "Career development"]
+      metrics: "250,000+ employees globally"
+      
+    Bank_of_America:
+      focus: ["Being a great place to work", "Teammate development"]
+      initiatives: ["Academy", "Pathways program"]
+      terminology: "Teammates not employees"
+      
+    Wells_Fargo:
+      priorities: ["Culture transformation", "Employee engagement"]
+      focus: "Rebuilding culture and trust"
+      
+    Citigroup:
+      approach: ["Talent strategy", "Performance culture"]
+      focus: "Simplified organization structure"
+      
+    Goldman_Sachs:
+      culture: ["Excellence and teamwork", "One Goldman Sachs"]
+      focus: "Attracting top talent"
+      
+    Morgan_Stanley:
+      values: ["First-class business", "Talent development"]
+      focus: "Culture of excellence"
+    
+    # Canadian Banks
+    Royal_Bank_RY:
+      approach: ["Purpose-driven culture", "Speak Up culture"]
+      programs: ["Future of Work", "Leadership development"]
+      size: "90,000+ employees"
+      
+    TD_Bank:
+      culture: ["The TD Way", "Inclusive culture"]
+      focus: "Employee experience and engagement"
+      differentiator: "People-first approach"
+      
+    Bank_of_Montreal_BMO:
+      purpose: ["Purpose-driven", "Bold leadership"]
+      programs: ["Learn from Difference", "Zero Barriers"]
+      
+    Scotiabank_BNS:
+      focus: ["Winning team", "High-performance culture"]
+      global: "90,000+ employees across footprint"
+      
+    CIBC_CM:
+      values: ["Team CIBC", "Client-focused culture"]
+      priorities: "Talent and culture transformation"
+      
+    National_Bank_NA:
+      approach: ["Entrepreneurial culture", "Agile organization"]
+      size: "Smaller, more nimble team"
+  
+  canadian_specific_patterns:
+    cultural_emphasis:
+      - Purpose-driven culture
+      - Speak-up environment
+      - Client-first mindset
+      - Community connection
+      
+    programs:
+      - Indigenous talent initiatives
+      - Bilingual requirements
+      - Provincial employment focus
+      - Canadian talent development
+      
+    terminology:
+      - "Team members" common
+      - "Colleagues" frequently used
+      - "Purpose" heavily emphasized
+      - "Values-based" culture
+  
+  culture_dimensions:
+    values:
+      - "integrity"
+      - "respect"
+      - "excellence"
+      - "teamwork"
+      - "accountability"
+      - "innovation"
+      - "customer focus"
+      
+    behaviors:
+      - "collaboration"
+      - "speaking up"
+      - "risk awareness"
+      - "continuous learning"
+      - "ownership mindset"
+      - "inclusive actions"
+      
+    culture_types:
+      - "performance culture"
+      - "risk culture"
+      - "innovation culture"
+      - "customer-centric culture"
+      - "inclusive culture"
+      - "ethical culture"
+  
+  talent_lifecycle:
+    attraction:
+      - "employer branding"
+      - "recruitment marketing"
+      - "campus relations"
+      - "referral programs"
+      - "talent sourcing"
+      
+    development:
+      - "onboarding programs"
+      - "continuous learning"
+      - "stretch assignments"
+      - "job rotations"
+      - "external education"
+      
+    retention:
+      - "career pathing"
+      - "recognition programs"
+      - "competitive rewards"
+      - "work environment"
+      - "growth opportunities"
+  
+  future_of_work:
+    hybrid_models:
+      - "office-first"
+      - "remote-first"
+      - "hybrid-flexible"
+      - "hub and spoke"
+      - "activity-based working"
+      
+    workplace_evolution:
+      - "collaboration spaces"
+      - "hot-desking"
+      - "digital workplace"
+      - "virtual collaboration"
+      - "asynchronous work"
+      
+    skills_focus:
+      - "digital fluency"
+      - "data literacy"
+      - "agile mindset"
+      - "continuous learning"
+      - "adaptability"
+  
+  wellbeing_initiatives:
+    dimensions:
+      - "physical health"
+      - "mental health"
+      - "financial wellness"
+      - "social connection"
+      - "purpose and meaning"
+      
+    programs:
+      - "employee assistance"
+      - "mental health support"
+      - "fitness programs"
+      - "financial planning"
+      - "volunteer time"
+      - "sabbaticals"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "Employee engagement scores reached all-time high"
+        reason: "Employee engagement metric"
+        
+      - text: "Hired 10,000 people in technology and operations"
+        reason: "Talent acquisition"
+        
+      - text: "Invested $100 million in employee training programs"
+        reason: "Skills development investment"
+        
+      - text: "Retention rates improved to 95% for key talent"
+        reason: "Talent retention metric"
+        
+      - text: "Launched comprehensive reskilling initiative"
+        reason: "Workforce development program"
+        
+      - text: "Hybrid work model proving successful"
+        reason: "Workplace flexibility initiative"
+        
+      - text: "Culture transformation showing positive results"
+        reason: "Organizational culture change"
+    
+    should_not_classify:
+      - text: "Customer service representatives improved performance"
+        reason: "Customer Experience category focus"
+        
+      - text: "Board diversity increased"
+        reason: "Governance category (unless workforce diversity)"
+        
+      - text: "Technology team delivered project"
+        reason: "Technology category focus"
+        
+      - text: "Compensation expense increased"
+        reason: "Expenses category (unless talent context)"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "ESG" # Diversity and inclusion
+      - "Strategic Initiatives" # Culture transformation
+      - "Expenses" # Compensation costs
+      
+    sometimes_with:
+      - "Technology" # Digital skills
+      - "Customer Experience" # Employee-customer link
+      - "Risk Management" # Risk culture
+      
+    rarely_with:
+      - "Credit Quality" # Different domain
+      - "Capital Management" # Different focus
+  
+  organizational_capability:
+    assessment:
+      - "skills inventory"
+      - "capability gaps"
+      - "bench strength"
+      - "succession readiness"
+      - "talent density"
+      
+    building:
+      - "capability development"
+      - "cross-training"
+      - "knowledge transfer"
+      - "centers of excellence"
+      - "communities of practice"
+  
+  red_flags_for_misclassification:
+    - "Customer service is Customer Experience category"
+    - "Executive compensation details are Governance"
+    - "Board composition is Governance not Workforce"
+    - "Expense numbers alone are Expenses category"
+    - "Technology skills may be Technology category"
+    - "Diversity at board level is Governance/ESG"
+    - "Productivity without employee context is Efficiency"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Workforce & Talent:
+    
+    CORE IDENTIFICATION:
+    1. Look for EMPLOYEE and TALENT discussions
+    2. Key themes: Hiring, retention, engagement, culture, development
+    3. Human capital management
+    4. Organizational capabilities
+    5. Workplace initiatives
+    
+    KEY COMPONENTS:
+    6. Metrics: Headcount, turnover, engagement scores
+    7. Talent: Acquisition, retention, development
+    8. Culture: Values, behaviors, engagement
+    9. Development: Training, skills, leadership
+    10. Workplace: Hybrid work, flexibility, wellbeing
+    
+    WORKFORCE METRICS:
+    - Headcount/FTE numbers
+    - Hiring/recruitment volumes
+    - Turnover/retention rates
+    - Engagement scores
+    - Productivity metrics
+    - Internal mobility rates
+    
+    TALENT MANAGEMENT:
+    - Talent acquisition strategies
+    - Retention programs
+    - Succession planning
+    - Performance management
+    - Career development
+    - Leadership pipelines
+    
+    CULTURE ELEMENTS:
+    - Values and behaviors
+    - Employee engagement
+    - Organizational culture
+    - Purpose-driven culture
+    - Speak-up culture
+    - Risk culture
+    
+    LEARNING & DEVELOPMENT:
+    - Training programs
+    - Reskilling/upskilling
+    - Digital skills
+    - Leadership development
+    - Mentoring/coaching
+    - Continuous learning
+    
+    COMPENSATION & BENEFITS:
+    - Total rewards
+    - Incentive programs
+    - Benefits offerings
+    - Wellbeing initiatives
+    - Work-life balance
+    - Employee stock programs
+    
+    WORKPLACE EVOLUTION:
+    - Hybrid work models
+    - Remote work policies
+    - Office strategies
+    - Collaboration tools
+    - Flexible arrangements
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - "Employees" terminology
+    - Performance culture focus
+    - Competitive compensation
+    - Skills-based hiring
+    
+    CANADIAN BANKS:
+    - "Team members/colleagues"
+    - Purpose-driven culture
+    - Values emphasis
+    - Community connection
+    
+    WELLBEING FOCUS:
+    - Mental health support
+    - Physical wellness
+    - Financial wellness
+    - Social connection
+    - Work-life integration
+    
+    EXCLUSIONS:
+    - Customer service focus
+    - Executive comp details
+    - Board composition
+    - Pure expense numbers
+    - Customer-facing roles (unless talent focus)
+    
+    REMEMBER:
+    - This is about PEOPLE as EMPLOYEES
+    - Culture and engagement central
+    - Development and growth focus
+    - Organizational capability
+    - Employee experience matters

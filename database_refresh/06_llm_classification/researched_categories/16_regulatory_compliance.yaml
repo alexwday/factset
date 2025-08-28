@@ -1,0 +1,526 @@
+# Regulatory & Compliance Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Constantly evolving landscape with significant impact on operations
+
+- name: "Regulatory & Compliance"
+  
+  description: |
+    Discussion of regulatory requirements, compliance programs, regulatory changes, examinations,
+    enforcement actions, and regulatory relationships. Includes Basel III/IV implementation,
+    stress testing requirements, consumer protection regulations, and regulatory capital rules.
+    Critical for understanding constraints and requirements affecting bank operations.
+  
+  detailed_scope:
+    includes:
+      # Regulatory Requirements
+      - Capital regulations (Basel III/IV)
+      - Liquidity regulations
+      - Stress testing (CCAR/DFAST)
+      - Resolution planning
+      - Living wills
+      - Volcker Rule
+      - Dodd-Frank requirements
+      
+      # Compliance Programs
+      - Compliance infrastructure
+      - Compliance costs/investments
+      - Regulatory reporting
+      - Internal audit
+      - Compliance testing
+      - Policy and procedures
+      - Training programs
+      
+      # Regulatory Relationships
+      - Regulatory examinations
+      - Supervisory feedback
+      - Regulatory ratings
+      - MRAs/MRIAs (Matters Requiring Attention)
+      - Consent orders
+      - Enforcement actions
+      - Regulatory approvals
+      
+      # Consumer Protection
+      - Fair lending
+      - UDAAP/UDAP (Unfair, Deceptive practices)
+      - Consumer complaints
+      - CFPB matters
+      - Reg E/Z compliance
+      - TCPA compliance
+      
+      # Specific Regulations
+      - Bank Secrecy Act (BSA)
+      - Anti-money laundering (AML)
+      - OFAC sanctions
+      - GDPR/privacy regulations
+      - Fair Credit Reporting Act
+      - Community Reinvestment Act (CRA)
+      
+      # Regulatory Changes
+      - Proposed rules
+      - Final rules implementation
+      - Regulatory reform
+      - Comment letters
+      - Industry advocacy
+      
+    excludes:
+      - Risk management details
+      - Specific capital ratios (unless regulatory context)
+      - Business strategy
+      - Operational details
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "regulatory"
+      - "regulation"
+      - "compliance"
+      - "regulator"
+      - "regulatory requirements"
+      - "consent order"
+      - "enforcement"
+      - "examination"
+      - "supervisory"
+      - "Basel"
+      - "Basel III"
+      - "Basel IV"
+      - "CCAR"
+      - "DFAST"
+      - "stress test" # (regulatory context)
+      - "Dodd-Frank"
+      - "Volcker"
+      - "CFPB"
+      - "OCC"
+      - "Fed" # (regulatory context)
+      - "Federal Reserve" # (regulatory context)
+      - "FDIC"
+      - "OSFI" # Canadian
+      - "MRA"
+      - "MRIA"
+      
+    # Secondary indicators
+    secondary:
+      - "regulatory approval"
+      - "regulatory capital" # (rules context)
+      - "regulatory ratios"
+      - "living will"
+      - "resolution planning"
+      - "TLAC" # Total Loss-Absorbing Capacity
+      - "GSIB" # (regulatory context)
+      - "DSIB" # (regulatory context)
+      - "systemic"
+      - "systemically important"
+      - "prudential"
+      - "supervisory stress test"
+      - "CLAR" # Comprehensive Liquidity Assessment Review
+      - "horizontal review"
+      - "targeted exam"
+      - "cease and desist"
+      - "written agreement"
+      - "memorandum of understanding"
+      - "MOU"
+      - "civil money penalty"
+      - "CMP"
+      - "fair lending"
+      - "UDAAP"
+      - "UDAP" # Canadian version
+      - "redlining"
+      - "CRA" # Community Reinvestment Act
+      - "CRA rating"
+      - "HMDA" # Home Mortgage Disclosure Act
+      - "Reg E"
+      - "Reg Z"
+      - "Reg CC"
+      - "TILA" # Truth in Lending Act
+      - "RESPA" # Real Estate Settlement Procedures Act
+      - "FCRA" # Fair Credit Reporting Act
+      - "TCPA" # Telephone Consumer Protection Act
+      - "SCRA" # Servicemembers Civil Relief Act
+      - "regulatory reporting"
+      - "call report"
+      - "FR Y-9C"
+      - "regulatory filing"
+      - "comment period"
+      - "proposed rule"
+      - "final rule"
+      - "regulatory reform"
+      - "deregulation"
+      - "regulatory relief"
+      - "compliance costs"
+      - "compliance investments"
+      - "regulatory technology"
+      - "RegTech"
+      - "compliance management system"
+      - "CMS"
+      
+    # Contextual indicators
+    contextual:
+      - "requirement" # (regulatory requirement)
+      - "mandate"
+      - "obligation"
+      - "standard"
+      - "guideline"
+      - "expectation" # (regulatory expectation)
+      - "review" # (regulatory review)
+      - "approval" # (regulatory approval)
+      - "restriction"
+      - "limitation"
+      - "prohibition"
+      - "remediation" # (regulatory remediation)
+      - "enhancement" # (compliance enhancement)
+  
+  common_phrases:
+    positive_signals:
+      # Compliance Strength
+      - "strong compliance culture"
+      - "regulatory requirements met"
+      - "satisfactory examination results"
+      - "no material findings"
+      - "regulatory approval received"
+      - "consent order lifted"
+      - "improved regulatory ratings"
+      
+      # Progress
+      - "compliance enhancements completed"
+      - "MRAs addressed"
+      - "remediation on track"
+      - "regulatory milestones achieved"
+      - "passed stress tests"
+      
+    negative_signals:
+      - "consent order issued"
+      - "regulatory findings"
+      - "enforcement action"
+      - "compliance deficiencies"
+      - "MRAs increased"
+      - "regulatory restrictions"
+      - "failed stress test"
+      - "civil money penalty"
+      - "cease and desist order"
+      - "regulatory setback"
+  
+  quantitative_patterns:
+    # Compliance metrics
+    - "$X million in compliance costs"
+    - "X MRAs outstanding"
+    - "X% of MRAs remediated"
+    - "X regulatory exams"
+    
+    # Penalties/investments
+    - "$X million regulatory fine"
+    - "$X billion compliance investment"
+    - "X compliance FTEs added"
+    
+    # Regulatory metrics
+    - "X basis points buffer above minimum"
+    - "stress test results of X%"
+    - "CRA rating of X"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      regulators: ["Fed", "OCC", "FDIC", "CFPB"]
+      focus: ["GSIB requirements", "CCAR stress testing"]
+      special: "Resolution planning leadership"
+      
+    Bank_of_America:
+      programs: ["Enterprise compliance", "Regulatory relations"]
+      focus: "Consumer compliance focus"
+      history: "Post-crisis remediation complete"
+      
+    Wells_Fargo:
+      status: ["Asset cap", "Consent orders"]
+      focus: ["Regulatory remediation priority"]
+      timeline: "Multi-year compliance rebuild"
+      
+    Citigroup:
+      orders: ["Consent order (risk/compliance)"]
+      programs: ["Transformation program"]
+      focus: "Data and controls remediation"
+      
+    Goldman_Sachs:
+      regulators: ["Fed", "FINRA", "SEC"]
+      focus: "Bank holding company requirements"
+      
+    Morgan_Stanley:
+      framework: ["Comprehensive compliance"]
+      focus: "Wealth management regulations"
+    
+    # Canadian Banks
+    Royal_Bank_RY:
+      regulator: ["OSFI", "FCAC", "Provincial"]
+      requirements: ["DSIB", "Basel III", "TLAC"]
+      focus: "Prudential compliance"
+      
+    TD_Bank:
+      regulators: ["OSFI (Canada)", "OCC/Fed (US)"]
+      programs: ["Global compliance framework"]
+      recent: "US AML enhancements"
+      
+    Bank_of_Montreal_BMO:
+      framework: ["Enterprise compliance"]
+      cross_border: "US regulatory requirements"
+      
+    Scotiabank_BNS:
+      international: ["Multi-jurisdiction compliance"]
+      focus: "LatAm regulatory complexity"
+      
+    CIBC_CM:
+      regulators: ["OSFI", "FCAC"]
+      focus: "Canadian-focused compliance"
+      
+    National_Bank_NA:
+      approach: ["Proportional regulation benefit"]
+      focus: "Quebec and federal requirements"
+  
+  canadian_specific_patterns:
+    regulators:
+      - OSFI (primary prudential)
+      - FCAC (consumer protection)
+      - Provincial securities commissions
+      - FINTRAC (AML)
+      - Privacy Commissioner
+      
+    requirements:
+      - DSIB designation
+      - Domestic Stability Buffer
+      - TLAC requirements
+      - Bail-in regime
+      - Capital floor
+      
+    terminology:
+      - "OSFI expectations"
+      - "Guideline B-20" # Mortgage underwriting
+      - "FCAC requirements"
+      - "Fair treatment of customers"
+      - "Conduct risk"
+      
+    differences:
+      - Less fragmented than US
+      - Principles-based approach
+      - Single prudential regulator
+      - No CRA equivalent
+  
+  regulatory_programs:
+    stress_testing:
+      US:
+        - "CCAR (Comprehensive Capital Analysis and Review)"
+        - "DFAST (Dodd-Frank Act Stress Test)"
+        - "Company-run stress testing"
+        - "Severely adverse scenario"
+        
+      Canada:
+        - "OSFI stress testing"
+        - "Scenario analysis"
+        - "Mortgage stress test"
+        
+    resolution_planning:
+      - "Living wills"
+      - "Recovery planning"
+      - "Resolution planning"
+      - "Separability"
+      - "Critical operations"
+      
+    consumer_protection:
+      US:
+        - "CFPB oversight"
+        - "Fair lending reviews"
+        - "UDAAP compliance"
+        
+      Canada:
+        - "FCAC oversight"
+        - "Fair treatment"
+        - "Market conduct"
+  
+  enforcement_action_language:
+    types:
+      - "consent order"
+      - "cease and desist"
+      - "written agreement"
+      - "memorandum of understanding"
+      - "civil money penalty"
+      - "prompt corrective action"
+      
+    requirements:
+      - "board oversight"
+      - "independent review"
+      - "action plan"
+      - "quarterly reporting"
+      - "validation"
+      
+    progress:
+      - "milestones achieved"
+      - "on track"
+      - "substantial compliance"
+      - "sustainability phase"
+      - "termination eligible"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "We received regulatory approval for the acquisition"
+        reason: "Regulatory approval process"
+        
+      - text: "Consent order remediation remains our top priority"
+        reason: "Enforcement action discussion"
+        
+      - text: "Passed CCAR stress test with strong results"
+        reason: "Regulatory stress testing"
+        
+      - text: "Compliance costs increased due to new regulations"
+        reason: "Compliance program costs"
+        
+      - text: "OSFI increased the Domestic Stability Buffer"
+        reason: "Canadian regulatory requirement"
+        
+      - text: "Addressing remaining MRAs from last examination"
+        reason: "Regulatory findings remediation"
+        
+      - text: "Basel III implementation on schedule"
+        reason: "Regulatory framework implementation"
+    
+    should_not_classify:
+      - text: "Risk management framework strengthened"
+        reason: "Risk Management category"
+        
+      - text: "Capital ratios well above requirements"
+        reason: "Capital Management category"
+        
+      - text: "AML controls enhanced"
+        reason: "Risk Management category for controls"
+        
+      - text: "Credit losses remain low"
+        reason: "Credit Quality category"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Risk Management" # Compliance and risk linked
+      - "Capital Management" # Regulatory capital rules
+      - "Expenses" # Compliance costs
+      
+    sometimes_with:
+      - "Strategic Initiatives" # Regulatory constraints
+      - "Geographic" # Multi-jurisdiction
+      
+    rarely_with:
+      - "Trading" # Different focus
+      - "Net Interest Income" # Different domain
+  
+  reform_and_change_language:
+    proposed_changes:
+      - "Basel III endgame"
+      - "capital reform"
+      - "regulatory modernization"
+      - "tailoring rules"
+      - "burden reduction"
+      
+    implementation:
+      - "phase-in period"
+      - "transition arrangements"
+      - "grandfathering"
+      - "parallel run"
+      
+    advocacy:
+      - "comment letter submitted"
+      - "industry position"
+      - "unintended consequences"
+      - "level playing field"
+  
+  red_flags_for_misclassification:
+    - "Risk management PRACTICES go to Risk Management"
+    - "Capital LEVELS go to Capital Management"
+    - "Credit QUALITY goes to Credit category"
+    - "Compliance CONTROLS may be Risk Management"
+    - "Regulatory TECHNOLOGY may be Technology category"
+    - "Consumer PRODUCTS go to business lines"
+    - "Regulatory capital RATIOS need context"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Regulatory & Compliance:
+    
+    CORE IDENTIFICATION:
+    1. Look for REGULATORY and COMPLIANCE discussions
+    2. Key themes: Requirements, examinations, enforcement
+    3. Regulatory relationships and interactions
+    4. Compliance programs and costs
+    5. Regulatory changes and reforms
+    
+    KEY COMPONENTS:
+    6. Requirements: Basel, stress tests, liquidity rules
+    7. Compliance: Programs, costs, infrastructure
+    8. Examinations: Findings, MRAs, ratings
+    9. Enforcement: Consent orders, penalties
+    10. Changes: New rules, reforms, proposals
+    
+    REGULATORY BODIES:
+    US:
+    - Fed (Federal Reserve)
+    - OCC (Office of the Comptroller)
+    - FDIC
+    - CFPB (Consumer protection)
+    - State regulators
+    - SEC/FINRA (securities)
+    
+    CANADA:
+    - OSFI (primary prudential)
+    - FCAC (consumer protection)
+    - Provincial regulators
+    - FINTRAC (AML)
+    
+    KEY REGULATIONS:
+    - Basel III/IV framework
+    - Stress testing (CCAR/DFAST)
+    - Dodd-Frank/Volcker Rule
+    - Resolution planning
+    - Consumer protection (UDAAP)
+    - CRA (US only)
+    - AML/BSA requirements
+    
+    COMPLIANCE FOCUS:
+    - Program infrastructure
+    - Compliance costs/investments
+    - Regulatory reporting
+    - Policy and procedures
+    - Training and testing
+    - Internal audit
+    
+    ENFORCEMENT ACTIONS:
+    - Consent orders
+    - Written agreements
+    - MRAs/MRIAs
+    - Civil money penalties
+    - Cease and desist
+    - Restrictions/caps
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - Multiple regulators
+    - Rules-based approach
+    - CCAR/DFAST stress testing
+    - CRA requirements
+    
+    CANADIAN BANKS:
+    - OSFI primary regulator
+    - Principles-based
+    - DSIB framework
+    - No CRA equivalent
+    
+    REGULATORY CHANGES:
+    - Proposed rules
+    - Comment periods
+    - Implementation timelines
+    - Industry advocacy
+    - Reform initiatives
+    
+    EXCLUSIONS:
+    - Risk management practices
+    - Capital levels/ratios (without regulatory context)
+    - Credit quality metrics
+    - Business operations
+    - Technology systems
+    
+    REMEMBER:
+    - This is about RULES and COMPLIANCE
+    - Regulatory relationships matter
+    - Compliance is both cost and necessity
+    - Enforcement actions are material
+    - Constant evolution of requirements

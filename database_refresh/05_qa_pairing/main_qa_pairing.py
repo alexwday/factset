@@ -335,6 +335,23 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
         stage_config = yaml.safe_load(config_data.decode("utf-8"))
         log_execution("Configuration loaded successfully", {"sections": list(stage_config.keys())})
 
+        # Load monitored institutions from separate file
+        config_path = os.getenv("CONFIG_PATH")
+        config_dir = os.path.dirname(config_path) if config_path else ""
+        institutions_path = os.path.join(config_dir, "monitored_institutions.yaml")
+        log_execution("Loading monitored institutions from separate file", {"institutions_path": institutions_path})
+        
+        institutions_data = nas_download_file(nas_conn, institutions_path)
+        if institutions_data:
+            try:
+                stage_config["monitored_institutions"] = yaml.safe_load(institutions_data.decode("utf-8"))
+                log_execution("Loaded monitored institutions successfully", {"count": len(stage_config["monitored_institutions"])})
+            except yaml.YAMLError as e:
+                log_error("Failed to load monitored_institutions.yaml, falling back to config.yaml", "config_parse", {"yaml_error": str(e)})
+                # Keep monitored_institutions from main config if separate file fails
+        else:
+            log_execution("monitored_institutions.yaml not found, using main config file")
+
         # Validate configuration
         validate_config_structure(stage_config)
         return stage_config

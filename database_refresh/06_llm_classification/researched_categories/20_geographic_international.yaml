@@ -1,0 +1,550 @@
+# Geographic & International Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Regional performance and international operations
+
+- name: "Geographic & International"
+  
+  description: |
+    Discussion of geographic segments, regional performance, international operations, country-specific
+    exposures, and cross-border activities. Includes emerging markets, developed markets segmentation,
+    regional economic conditions, and geographic expansion or contraction strategies. Critical for
+    understanding geographic diversification and regional dependencies.
+  
+  detailed_scope:
+    includes:
+      # Geographic Segments
+      - Regional performance (US regions, Canadian provinces)
+      - Country-specific results
+      - International operations
+      - Cross-border banking
+      - Geographic revenue/profit splits
+      - Regional market share
+      
+      # International Banking
+      - Emerging markets exposure
+      - Developed markets operations
+      - Foreign subsidiaries
+      - International branches
+      - Representative offices
+      - Cross-border lending
+      
+      # Regional Economics
+      - Regional economic conditions
+      - Local market dynamics
+      - Regional regulatory differences
+      - Currency impacts
+      - Country risk
+      - Political risk by region
+      
+      # Geographic Strategy
+      - Market entry strategies
+      - Geographic expansion
+      - Market exits/withdrawals
+      - Regional investment priorities
+      - Local partnerships
+      - Regional competitive positioning
+      
+      # Specific Regions/Countries
+      - North America operations
+      - Latin America/Caribbean
+      - Europe/UK operations
+      - Asia-Pacific presence
+      - Middle East/Africa
+      - Specific country discussions
+      
+    excludes:
+      - Global/enterprise-wide metrics
+      - Product-specific discussions
+      - General economic conditions
+      - Company-wide strategy
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "geographic"
+      - "geographical"
+      - "regional"
+      - "international"
+      - "global"
+      - "cross-border"
+      - "country"
+      - "United States"
+      - "Canada"
+      - "Canadian"
+      - "US" # (in geographic context)
+      - "North America"
+      - "Latin America"
+      - "Europe"
+      - "Asia"
+      - "Asia Pacific"
+      - "APAC"
+      - "emerging markets"
+      - "developed markets"
+      - "foreign"
+      
+    # Secondary indicators - specific countries/regions
+    secondary:
+      # Americas
+      - "Mexico"
+      - "Brazil"
+      - "Chile"
+      - "Peru"
+      - "Colombia"
+      - "Argentina"
+      - "Caribbean"
+      - "Central America"
+      - "Quebec" # Canadian
+      - "Ontario" # Canadian
+      - "Alberta" # Canadian
+      - "British Columbia" # Canadian
+      - "California"
+      - "New York"
+      - "Texas"
+      - "Florida"
+      
+      # Europe
+      - "UK"
+      - "United Kingdom"
+      - "London"
+      - "Germany"
+      - "France"
+      - "Switzerland"
+      - "EU"
+      - "European Union"
+      - "Eurozone"
+      - "Brexit"
+      
+      # Asia-Pacific
+      - "China"
+      - "Hong Kong"
+      - "Singapore"
+      - "Japan"
+      - "India"
+      - "Australia"
+      - "Korea"
+      - "Southeast Asia"
+      - "ASEAN"
+      
+      # Other regions
+      - "Middle East"
+      - "Africa"
+      - "Israel"
+      - "UAE"
+      - "Saudi Arabia"
+      
+      # Geographic terms
+      - "offshore"
+      - "onshore"
+      - "domestic" # (vs international)
+      - "home market"
+      - "foreign exchange" # (geographic context)
+      - "FX translation"
+      - "constant currency"
+      - "local currency"
+      - "country risk"
+      - "sovereign risk"
+      - "political risk"
+      - "regional bank" # US context
+      - "community bank" # (geographic focus)
+      - "nationwide"
+      - "coast-to-coast"
+      - "footprint"
+      - "presence"
+      - "operations in"
+      - "exposure to"
+      
+    # Contextual indicators
+    contextual:
+      - "market" # (geographic market)
+      - "region" # (needs context)
+      - "local" # (local market)
+      - "domestic" # (home country)
+      - "abroad"
+      - "overseas"
+      - "expansion" # (geographic expansion)
+      - "presence" # (market presence)
+      - "footprint" # (geographic footprint)
+      - "coverage" # (geographic coverage)
+      - "reach" # (geographic reach)
+      - "scale" # (regional scale)
+  
+  common_phrases:
+    positive_signals:
+      # Regional Performance
+      - "strong performance in [region]"
+      - "[country] operations grew X%"
+      - "market share gains in [region]"
+      - "successful expansion into [market]"
+      - "regional diversification benefits"
+      
+      # International Growth
+      - "international revenues increased"
+      - "emerging markets contribution growing"
+      - "cross-border flows improved"
+      - "foreign exchange gains"
+      
+      # Strategic Success
+      - "geographic expansion on track"
+      - "regional integration successful"
+      - "local partnerships performing"
+      
+    negative_signals:
+      - "weakness in [region]"
+      - "[country] operations challenged"
+      - "exiting [market]"
+      - "regional headwinds"
+      - "FX translation negative"
+      - "country risk elevated"
+      - "political instability in [region]"
+      - "regional economic slowdown"
+  
+  quantitative_patterns:
+    # Regional metrics
+    - "X% of revenue from [region]"
+    - "[region] contributed $X billion"
+    - "X% growth in [country]"
+    - "X branches in [region]"
+    
+    # International metrics
+    - "X% international revenue"
+    - "operations in X countries"
+    - "X% FX impact"
+    - "constant currency growth of X%"
+    
+    # Market position
+    - "#X market position in [country]"
+    - "X% market share in [region]"
+    - "top X bank in [market]"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      presence: ["Global footprint", "100+ countries"]
+      focus: ["Leading positions globally", "International corporate banking"]
+      regions: ["EMEA", "APAC", "LatAm operations"]
+      
+    Bank_of_America:
+      approach: ["US-focused with global corporate", "International wealth management"]
+      presence: "35+ countries for corporate"
+      
+    Wells_Fargo:
+      focus: ["Primarily US domestic", "Limited international"]
+      strategy: "US regional strength"
+      
+    Citigroup:
+      differentiation: ["Most global US bank", "95+ countries"]
+      segments: ["North America", "EMEA", "APAC", "LatAm"]
+      focus: "Institutional Clients Group global"
+      
+    Goldman_Sachs:
+      presence: ["Global investment banking", "International markets"]
+      focus: "Key financial centers globally"
+      
+    Morgan_Stanley:
+      approach: ["Global capital markets", "International wealth management"]
+    
+    # Canadian Banks
+    Royal_Bank_RY:
+      segments: ["Canada", "US (City National)", "Caribbean"]
+      focus: ["Canadian leader", "US expansion", "Caribbean presence"]
+      
+    TD_Bank:
+      presence: ["Canada", "US Eastern seaboard"]
+      position: ["Top 10 US bank", "Canada's #2"]
+      focus: "North American retail bank"
+      
+    Bank_of_Montreal_BMO:
+      footprint: ["Canada", "US Midwest", "Bank of the West integration"]
+      strategy: "North American platform"
+      
+    Scotiabank_BNS:
+      differentiation: ["Most international Canadian bank"]
+      regions: ["Canada", "Pacific Alliance", "Caribbean"]
+      countries: ["Mexico", "Peru", "Chile", "Colombia"]
+      
+    CIBC_CM:
+      focus: ["Primarily Canadian", "Select US presence"]
+      strategy: "Canada first with US private banking"
+      
+    National_Bank_NA:
+      concentration: ["Quebec-focused", "Canadian operations"]
+      niche: "Cambodia operations (ABA Bank)"
+  
+  canadian_specific_patterns:
+    provincial_focus:
+      - Quebec concentration (National Bank)
+      - Ontario dominance (most banks)
+      - Western Canada growth
+      - Atlantic Canada presence
+      
+    international_strategy:
+      - US expansion priority
+      - Latin America presence (Scotia)
+      - Caribbean operations (RBC, Scotia)
+      - Asia-Pacific limited
+      
+    terminology:
+      - "P&C" (Personal & Commercial) by region
+      - "Canadian Banking" segment
+      - "International Banking" segment
+      - "US P&C" or "US Retail"
+      
+    cross_border:
+      - Canada-US corridor
+      - Snowbird banking
+      - North American integration
+      - USMCA benefits
+  
+  regional_characteristics:
+    north_america:
+      - US state-level discussion
+      - Canadian provincial focus
+      - Cross-border integration
+      - NAFTA/USMCA impacts
+      
+    latin_america:
+      - Pacific Alliance (Mexico, Peru, Chile, Colombia)
+      - Political risk considerations
+      - Currency volatility
+      - Growth market potential
+      
+    europe:
+      - London financial center
+      - EU regulatory environment
+      - Brexit impacts
+      - Negative rates environment
+      
+    asia_pacific:
+      - China exposure
+      - Singapore hub
+      - Hong Kong operations
+      - Growth opportunities
+  
+  country_risk_language:
+    political:
+      - "political instability"
+      - "election uncertainty"
+      - "regime change"
+      - "sanctions risk"
+      - "sovereign risk"
+      
+    economic:
+      - "currency devaluation"
+      - "hyperinflation"
+      - "economic crisis"
+      - "capital controls"
+      - "default risk"
+      
+    regulatory:
+      - "regulatory changes"
+      - "nationalization risk"
+      - "capital repatriation"
+      - "tax changes"
+  
+  expansion_strategies:
+    organic:
+      - "branch expansion"
+      - "local hiring"
+      - "product localization"
+      - "partnership development"
+      
+    inorganic:
+      - "local acquisitions"
+      - "joint ventures"
+      - "strategic stakes"
+      - "branch purchases"
+      
+    digital:
+      - "digital entry"
+      - "cross-border digital"
+      - "remote delivery"
+      - "fintech partnerships"
+  
+  fx_and_translation:
+    impacts:
+      - "FX translation impact"
+      - "constant currency basis"
+      - "currency headwinds/tailwinds"
+      - "hedge effectiveness"
+      
+    exposures:
+      - "USD exposure" # For Canadian banks
+      - "emerging market currencies"
+      - "developed market currencies"
+      - "currency matching"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "Our US operations contributed 40% of earnings"
+        reason: "Geographic segment performance"
+        
+      - text: "Expanding our presence in Latin America"
+        reason: "Geographic expansion strategy"
+        
+      - text: "Canadian banking segment grew 8%"
+        reason: "Regional segment results"
+        
+      - text: "Exiting consumer banking in 13 Asian markets"
+        reason: "Geographic restructuring"
+        
+      - text: "Mexico operations facing regulatory challenges"
+        reason: "Country-specific discussion"
+        
+      - text: "Cross-border revenues increased 15%"
+        reason: "International banking flows"
+        
+      - text: "FX translation reduced earnings by $100 million"
+        reason: "Geographic currency impact"
+    
+    should_not_classify:
+      - text: "Global economic conditions improving"
+        reason: "Macro environment, not geographic specific"
+        
+      - text: "Our strategy focuses on growth"
+        reason: "Company strategy, not geographic"
+        
+      - text: "Digital banking growing worldwide"
+        reason: "Technology trend, not geographic focus"
+        
+      - text: "Regulatory requirements increasing"
+        reason: "Regulatory category unless region-specific"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Strategic Initiatives" # Geographic expansion/exit
+      - "Macro Environment" # Regional economics
+      - "Business Lines" # Regional segment performance
+      
+    sometimes_with:
+      - "Regulatory" # Country regulations
+      - "Risk Management" # Country risk
+      - "FX/Currency" # Translation impacts
+      
+    rarely_with:
+      - "Technology" # Unless regional digital
+      - "ESG" # Different focus
+  
+  market_entry_exit:
+    entry:
+      - "entering [market]"
+      - "launching operations in"
+      - "establishing presence"
+      - "opening branches in"
+      - "expanding into"
+      
+    exit:
+      - "withdrawing from"
+      - "exiting [market]"
+      - "closing operations in"
+      - "divesting [country] business"
+      - "reducing presence in"
+  
+  red_flags_for_misclassification:
+    - "Global/worldwide without specific regions is often other categories"
+    - "Economic conditions alone are Macro Environment"
+    - "Company-wide metrics are not geographic"
+    - "Product performance needs geographic context"
+    - "Digital/online may not be geographic"
+    - "Currency trading is Markets not Geographic"
+    - "International standards/regulations may be Regulatory"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Geographic & International:
+    
+    CORE IDENTIFICATION:
+    1. Look for REGIONAL and COUNTRY-SPECIFIC discussions
+    2. Key themes: Geographic segments, international operations
+    3. Regional performance and strategies
+    4. Country exposures and risks
+    5. Cross-border activities
+    
+    KEY COMPONENTS:
+    6. Segments: Regional revenue/profit splits
+    7. International: Foreign operations, emerging markets
+    8. Cross-border: International flows, corridors
+    9. Country-specific: Individual country discussion
+    10. Geographic strategy: Expansion, exits, focus
+    
+    GEOGRAPHIC SEGMENTS:
+    - US regions (Northeast, Southeast, etc.)
+    - Canadian provinces
+    - Country operations
+    - Regional performance
+    - Market share by region
+    
+    INTERNATIONAL OPERATIONS:
+    - Foreign subsidiaries
+    - International branches
+    - Cross-border lending
+    - Correspondent banking
+    - Trade finance corridors
+    
+    KEY REGIONS:
+    North America:
+    - US state discussions
+    - Canadian provinces
+    - Mexico operations
+    
+    Latin America:
+    - Pacific Alliance countries
+    - Caribbean operations
+    - Central/South America
+    
+    Other:
+    - Europe/UK
+    - Asia-Pacific
+    - Middle East/Africa
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - Domestic vs international split
+    - Global corporate presence
+    - Limited retail international
+    
+    CANADIAN BANKS:
+    - Canada/US/International segments
+    - US expansion focus
+    - LatAm presence (Scotia)
+    - Provincial concentrations
+    
+    COUNTRY DISCUSSIONS:
+    - Economic conditions
+    - Political risk
+    - Regulatory environment
+    - Currency impacts
+    - Market dynamics
+    
+    CROSS-BORDER:
+    - Trade corridors
+    - Immigration banking
+    - Remittances
+    - FX flows
+    - International wealth
+    
+    FX TRANSLATION:
+    - Currency impacts on results
+    - Constant currency growth
+    - Translation adjustments
+    - Hedge impacts
+    
+    EXPANSION/CONTRACTION:
+    - Market entry strategies
+    - Geographic expansion
+    - Market exits
+    - Footprint optimization
+    - Regional investments
+    
+    EXCLUSIONS:
+    - Global trends without regional focus
+    - Company-wide strategies
+    - Product discussions without geography
+    - General economic conditions
+    - Currency trading (Markets category)
+    
+    REMEMBER:
+    - This is about WHERE not WHAT
+    - Regional specificity required
+    - Country/region performance focus
+    - Geographic diversification matters
+    - Cross-border is geographic

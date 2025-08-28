@@ -380,6 +380,22 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
             error_msg = f"Invalid YAML in configuration file: {e}"
             logger.error(error_msg)
             raise ValueError(error_msg)
+        
+        # Load monitored institutions from separate file
+        config_dir = os.path.dirname(config_path) if config_path else ""
+        institutions_path = os.path.join(config_dir, "monitored_institutions.yaml")
+        logger.info(f"Loading monitored institutions from: {sanitize_url_for_logging(institutions_path)}")
+        
+        institutions_data = nas_download_file(nas_conn, institutions_path)
+        if institutions_data:
+            try:
+                config["monitored_institutions"] = yaml.safe_load(institutions_data.decode("utf-8"))
+                logger.info(f"Loaded {len(config['monitored_institutions'])} monitored institutions")
+            except yaml.YAMLError as e:
+                logger.warning(f"Failed to load monitored_institutions.yaml: {e}, falling back to config.yaml")
+                # Keep monitored_institutions from main config if separate file fails
+        else:
+            logger.warning("monitored_institutions.yaml not found, using main config file")
 
         # Validate configuration structure
         validate_config_structure(config)

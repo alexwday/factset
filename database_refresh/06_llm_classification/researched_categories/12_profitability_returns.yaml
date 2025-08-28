@@ -1,0 +1,466 @@
+# Profitability & Returns Category
+# Based on research of actual earnings call language from US and Canadian banks
+# Key performance metrics for investor assessment
+
+- name: "Profitability & Returns"
+  
+  description: |
+    Discussion of profitability metrics, return ratios, and earnings performance. Includes ROE,
+    ROA, ROTCE, earnings per share, and profit margins. Covers both absolute profit levels and
+    return on invested capital metrics. Critical for assessing bank performance and management
+    effectiveness.
+  
+  detailed_scope:
+    includes:
+      # Profitability Metrics
+      - Net income/earnings
+      - Pre-tax income
+      - Pre-provision net revenue (PPNR)
+      - Operating earnings
+      - Adjusted earnings
+      - Core earnings
+      
+      # Return Ratios
+      - Return on equity (ROE)
+      - Return on assets (ROA)
+      - Return on tangible common equity (ROTCE)
+      - Return on invested capital (ROIC)
+      - Return on risk-weighted assets (RORWA)
+      
+      # Per Share Metrics
+      - Earnings per share (EPS)
+      - Diluted EPS
+      - Adjusted EPS
+      - Book value per share
+      - Tangible book value per share
+      
+      # Margin Metrics
+      - Net profit margin
+      - Pre-tax margin
+      - Operating margin
+      - Efficiency ratio (inverse of margin)
+      
+      # Performance Drivers
+      - Operating leverage
+      - Earnings growth
+      - Profitability improvement
+      - Performance targets
+      
+    excludes:
+      - Revenue details (separate category)
+      - Expense details (separate category)
+      - Specific NII/NIM discussion
+      - Credit provisions detail
+  
+  key_indicators:
+    # Primary indicators - strongest signals
+    primary:
+      - "ROE"
+      - "return on equity"
+      - "ROA"
+      - "return on assets"
+      - "ROTCE"
+      - "return on tangible"
+      - "earnings"
+      - "net income"
+      - "profit"
+      - "profitability"
+      - "EPS"
+      - "earnings per share"
+      - "returns"
+      - "margin"
+      - "margins"
+      - "PPNR"
+      - "pre-provision"
+      
+    # Secondary indicators
+    secondary:
+      - "ROIC"
+      - "RORWA"
+      - "diluted earnings"
+      - "adjusted earnings"
+      - "core earnings"
+      - "operating earnings"
+      - "underlying earnings"
+      - "book value"
+      - "tangible book"
+      - "TBV"
+      - "TBVPS"
+      - "earnings growth"
+      - "profit growth"
+      - "earnings power"
+      - "profitability drivers"
+      - "performance"
+      - "results"
+      - "bottom line"
+      - "net profit"
+      - "after-tax"
+      - "pre-tax"
+      - "tax rate"
+      - "effective tax rate"
+      - "operating leverage"
+      - "earnings quality"
+      - "earnings volatility"
+      - "earnings stability"
+      - "through-the-cycle"
+      - "normalized earnings"
+      - "run-rate earnings"
+      - "earnings capacity"
+      - "profit margin"
+      - "operating margin"
+      - "net margin"
+      
+    # Contextual indicators
+    contextual:
+      - "performance" # (financial performance)
+      - "results"
+      - "delivered"
+      - "achieved"
+      - "generated"
+      - "produced"
+      - "improvement"
+      - "growth" # (earnings growth)
+      - "expansion" # (margin expansion)
+      - "accretive"
+      - "dilutive"
+      - "target" # (ROE target)
+      - "goal"
+      - "aspiration"
+  
+  common_phrases:
+    positive_signals:
+      # Return Metrics
+      - "ROE of X%"
+      - "strong returns"
+      - "improved ROE"
+      - "ROTCE exceeded target"
+      - "industry-leading returns"
+      - "ROA expansion"
+      
+      # Earnings Performance
+      - "record earnings"
+      - "earnings growth of X%"
+      - "EPS increased"
+      - "strong profitability"
+      - "improved margins"
+      - "earnings beat"
+      
+      # Quality
+      - "high-quality earnings"
+      - "sustainable profitability"
+      - "consistent returns"
+      - "resilient earnings"
+      
+    negative_signals:
+      - "ROE compression"
+      - "lower returns"
+      - "earnings decline"
+      - "margin pressure"
+      - "profitability challenges"
+      - "below target returns"
+      - "EPS dilution"
+      - "earnings miss"
+      - "profit headwinds"
+  
+  quantitative_patterns:
+    # Return metrics
+    - "ROE of X.X%"
+    - "ROA of X.XX%"
+    - "ROTCE of X.X%"
+    - "ROIC of X%"
+    
+    # Earnings metrics
+    - "net income of $X billion"
+    - "earnings of $X.XX per share"
+    - "adjusted EPS of $X.XX"
+    - "PPNR of $X billion"
+    
+    # Growth metrics
+    - "earnings grew X%"
+    - "EPS up X% year-over-year"
+    - "ROE improved X basis points"
+    
+    # Per share metrics
+    - "book value per share of $X"
+    - "tangible book value of $X"
+    - "TBVPS grew X%"
+  
+  bank_specific_terminology:
+    # US Banks
+    JPMorgan:
+      metrics: ["ROE", "ROTCE", "Overhead ratio"]
+      targets: "17% ROTCE target"
+      special: ["Earnings power", "Through-the-cycle returns"]
+      
+    Bank_of_America:
+      metrics: ["ROE", "ROTCE", "Efficiency ratio"]
+      focus: "Responsible growth drives returns"
+      targets: "1% ROA, 15% ROTCE"
+      
+    Wells_Fargo:
+      metrics: ["ROE", "ROTCE", "ROA"]
+      focus: "Improving returns focus"
+      special: "Efficiency improvements drive ROE"
+      
+    Citigroup:
+      metrics: ["ROE", "ROTCE", "RoTCE ex-DTA"]
+      targets: "11-12% ROTCE medium-term"
+      special: "Simplification to improve returns"
+      
+    Goldman_Sachs:
+      metrics: ["ROE", "ROTE", "Book value per share"]
+      targets: "15% ROE target"
+      focus: "Durable sources of returns"
+      
+    Morgan_Stanley:
+      metrics: ["ROE", "ROTCE", "Pre-tax margin"]
+      targets: "20% ROTCE in Wealth"
+      focus: "Capital-light returns"
+    
+    # Canadian Banks - UNIQUE ASPECTS
+    Royal_Bank_RY:
+      metrics: ["ROE", "Diluted EPS", "Adjusted earnings"]
+      targets: "16%+ ROE medium-term"
+      special: ["Premium ROE", "Adjusted results"]
+      
+    TD_Bank:
+      metrics: ["ROE", "Adjusted EPS", "Earnings growth"]
+      reporting: "Adjusted and reported earnings"
+      focus: "Consistent earnings growth"
+      
+    Bank_of_Montreal_BMO:
+      metrics: ["ROE", "Adjusted ROE", "EPS growth"]
+      targets: "ROE objectives"
+      special: "Operating leverage focus"
+      
+    Scotiabank_BNS:
+      metrics: ["ROE", "Diluted EPS", "Productivity ratio"]
+      focus: "ROE improvement initiatives"
+      geographic: "ROE by region"
+      
+    CIBC_CM:
+      metrics: ["ROE", "Adjusted net income"]
+      focus: "ROE above 16% target"
+      
+    National_Bank_NA:
+      metrics: ["ROE", "Diluted EPS"]
+      focus: "Industry-leading ROE"
+      scale: "Higher ROE despite size"
+  
+  canadian_specific_patterns:
+    terminology:
+      - "Adjusted earnings" more common
+      - "Diluted EPS" always specified
+      - "Operating leverage" tied to profitability
+      - "Adjusted ROE" for one-time items
+      
+    reporting:
+      - Adjusted vs reported earnings
+      - Items of note excluded
+      - Constant currency impacts
+      - Provision for credit losses impact
+      
+    targets:
+      - ROE targets 15-18%
+      - Medium-term objectives
+      - Through-the-cycle targets
+      - Relative performance focus
+  
+  profitability_driver_language:
+    revenue_drivers:
+      - "top-line growth"
+      - "revenue expansion"
+      - "fee income growth"
+      - "NII contribution"
+      
+    efficiency_drivers:
+      - "positive operating leverage"
+      - "expense discipline"
+      - "productivity improvements"
+      - "scale benefits"
+      
+    credit_drivers:
+      - "lower provisions"
+      - "credit normalization"
+      - "reserve releases"
+      - "benign credit"
+      
+    capital_drivers:
+      - "capital efficiency"
+      - "RWA optimization"
+      - "balance sheet efficiency"
+  
+  quality_of_earnings_language:
+    positive_quality:
+      - "sustainable earnings"
+      - "recurring profitability"
+      - "diversified earnings"
+      - "balanced contribution"
+      - "low volatility"
+      - "predictable returns"
+      
+    concerns:
+      - "one-time benefits"
+      - "unsustainable gains"
+      - "trading volatility"
+      - "concentrated earnings"
+      - "cyclical headwinds"
+  
+  target_setting_language:
+    # How banks discuss targets
+    - "targeting ROE of X%"
+    - "medium-term ROTCE target"
+    - "aspiring to X% returns"
+    - "through-the-cycle ROE"
+    - "normalized returns"
+    - "steady-state profitability"
+    - "long-term targets"
+  
+  classification_examples:
+    
+    should_classify:
+      - text: "ROE improved to 15.5% this quarter"
+        reason: "Direct ROE metric"
+        
+      - text: "Net income was $8 billion, up 12%"
+        reason: "Earnings performance"
+        
+      - text: "EPS grew 10% to $2.50"
+        reason: "Earnings per share metric"
+        
+      - text: "ROTCE of 17% exceeded our target"
+        reason: "Return on tangible common equity"
+        
+      - text: "Strong profitability with margins expanding"
+        reason: "Profitability discussion"
+        
+      - text: "Book value per share increased to $85"
+        reason: "Per share value metric"
+        
+      - text: "PPNR of $10 billion demonstrates earnings power"
+        reason: "Pre-provision profitability metric"
+    
+    should_not_classify:
+      - text: "Revenue grew 10%"
+        reason: "Revenue not profitability"
+        
+      - text: "Expenses were well controlled"
+        reason: "Expenses not profits"
+        
+      - text: "CET1 ratio of 12%"
+        reason: "Capital not profitability"
+        
+      - text: "Credit losses normalized"
+        reason: "Credit not profitability"
+  
+  co_occurrence_patterns:
+    frequently_with:
+      - "Revenue & Growth" # Revenue drives profits
+      - "Expenses & Efficiency" # Efficiency drives returns
+      - "Capital Management" # ROE = Income/Equity
+      
+    sometimes_with:
+      - "Credit Quality" # Provisions affect earnings
+      - "Business Strategy" # Strategic targets
+      
+    rarely_with:
+      - "Payments" # Different focus
+      - "Digital Assets" # Different topic
+  
+  performance_attribution:
+    # How contributions are described
+    - "[Segment] contributed X% to earnings"
+    - "ROE improvement driven by [factor]"
+    - "EPS growth from [source]"
+    - "Margin expansion due to [reason]"
+    - "Partially offset by [headwind]"
+  
+  red_flags_for_misclassification:
+    - "Return ON equity not return OF equity (dividends)"
+    - "Profit sharing is employee comp, not profitability"
+    - "Non-profit doesn't mean unprofitable"
+    - "Gross profit vs net profit distinction"
+    - "Operating profit vs net income"
+    - "Adjusted vs reported earnings"
+    - "ROE is not ROA (different denominators)"
+
+  prompt_guidance_for_llm: |
+    When classifying content as Profitability & Returns:
+    
+    CORE IDENTIFICATION:
+    1. Look for EARNINGS and RETURN metrics
+    2. Key metrics: ROE, ROA, ROTCE, EPS, net income
+    3. Bottom-line performance measures
+    4. Return on invested capital discussions
+    5. Overall financial performance assessment
+    
+    KEY COMPONENTS:
+    6. Returns: ROE, ROA, ROTCE, ROIC
+    7. Earnings: Net income, adjusted earnings, PPNR
+    8. Per Share: EPS, BVPS, TBVPS
+    9. Margins: Net margin, operating margin
+    10. Growth: Earnings growth, EPS growth
+    
+    CRITICAL METRICS:
+    - ROE = Net Income / Equity
+    - ROA = Net Income / Assets
+    - ROTCE = Net Income / Tangible Common Equity
+    - EPS = Net Income / Shares
+    - PPNR = Revenue - Expenses (before provisions)
+    
+    RETURN TARGETS:
+    US Banks typical:
+    - ROE: 12-18%
+    - ROTCE: 15-20%
+    - ROA: 1.0-1.5%
+    
+    Canadian Banks typical:
+    - ROE: 15-18%
+    - Adjusted ROE focus
+    - Through-the-cycle targets
+    
+    QUALITY INDICATORS:
+    - Sustainable vs one-time
+    - Diversified vs concentrated
+    - Stable vs volatile
+    - Core vs non-core
+    - Adjusted vs reported
+    
+    DRIVERS OF RETURNS:
+    1. Revenue growth (positive)
+    2. Expense control (positive)
+    3. Credit costs (negative)
+    4. Capital efficiency (positive)
+    5. Tax rate (negative)
+    
+    GEOGRAPHIC DIFFERENCES:
+    US BANKS:
+    - ROTCE often preferred over ROE
+    - PPNR emphasized
+    - Stress test impacts
+    
+    CANADIAN BANKS:
+    - Adjusted earnings common
+    - Operating leverage linked
+    - Items of note excluded
+    - Constant currency adjustments
+    
+    PER SHARE METRICS:
+    - EPS = Earnings per share
+    - BVPS = Book value per share
+    - TBVPS = Tangible book value per share
+    - DPS = Dividends per share (different category)
+    
+    EXCLUSIONS:
+    - Revenue details alone
+    - Expense details alone
+    - Capital ratios (CET1, etc.)
+    - Credit provisions detail
+    - Dividend yield (capital return)
+    
+    REMEMBER:
+    - This is about BOTTOM LINE performance
+    - Returns measure efficiency of capital use
+    - Quality matters as much as quantity
+    - Targets and trends important
+    - Both absolute ($) and relative (%) metrics
