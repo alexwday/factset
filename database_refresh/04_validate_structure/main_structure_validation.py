@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
+from collections import defaultdict
 import io
 import re
 import requests
@@ -830,15 +831,97 @@ def main() -> None:
 
         # Step 8: Group records by transcript and validate
         log_console("Step 8: Grouping and validating transcript content...")
+        
+        # Track file consolidation details
         transcripts = {}
+        file_to_transcript_mapping = {}  # Maps each unique file to its transcript key
+        transcript_file_versions = defaultdict(set)  # Track all file versions per transcript
+        
         for record in content_records:
+            # Build transcript key for grouping
             transcript_key = f"{record.get('ticker', 'unknown')}_{record.get('fiscal_year', 'unknown')}_{record.get('fiscal_quarter', 'unknown')}"
+            
+            # Track unique file information
+            filename = record.get('filename', 'unknown')
+            event_id = record.get('event_id', 'unknown')
+            version_id = record.get('version_id', 'unknown')
+            transcript_type = record.get('transcript_type', 'unknown')
+            file_identifier = f"{filename} (event:{event_id}, version:{version_id}, type:{transcript_type})"
+            
+            # Map file to transcript
+            file_to_transcript_mapping[file_identifier] = transcript_key
+            transcript_file_versions[transcript_key].add(file_identifier)
+            
+            # Group records
             if transcript_key not in transcripts:
                 transcripts[transcript_key] = []
             transcripts[transcript_key].append(record)
         
-        log_console(f"Total transcripts to validate: {len(transcripts)}")
+        # Log consolidation details
+        log_console("=" * 60)
+        log_console("TRANSCRIPT CONSOLIDATION ANALYSIS")
+        log_console("=" * 60)
+        
+        # Count unique files
+        unique_files_count = len(set(r.get('filename', 'unknown') for r in content_records))
+        unique_transcripts_count = len(transcripts)
+        
+        log_console(f"📁 Unique files from Stage 3: {unique_files_count}")
+        log_console(f"📊 Unique transcripts (ticker_year_quarter): {unique_transcripts_count}")
+        log_console(f"📉 Consolidation ratio: {unique_files_count / unique_transcripts_count:.2f} files per transcript")
+        
+        # Analyze multi-version transcripts
+        multi_version_transcripts = {k: v for k, v in transcript_file_versions.items() if len(v) > 1}
+        if multi_version_transcripts:
+            log_console(f"\n🔄 Transcripts with multiple versions: {len(multi_version_transcripts)}")
+            log_console("Detailed breakdown:")
+            
+            # Show first 5 examples
+            for i, (transcript_key, file_versions) in enumerate(list(multi_version_transcripts.items())[:5], 1):
+                log_console(f"  {i}. {transcript_key}:")
+                for file_version in sorted(file_versions):
+                    log_console(f"     - {file_version}")
+            
+            if len(multi_version_transcripts) > 5:
+                log_console(f"  ... and {len(multi_version_transcripts) - 5} more transcripts with multiple versions")
+        
+        # Log version statistics
+        version_counts = defaultdict(int)
+        for transcript_key, file_versions in transcript_file_versions.items():
+            version_counts[len(file_versions)] += 1
+        
+        log_console("\n📈 Version distribution:")
+        for version_count in sorted(version_counts.keys()):
+            transcript_count = version_counts[version_count]
+            log_console(f"  {version_count} file(s) → {transcript_count} transcript(s)")
+        
+        # Log transcript type distribution
+        transcript_type_counts = defaultdict(int)
+        for record in content_records:
+            transcript_type = record.get('transcript_type', 'unknown')
+            transcript_type_counts[transcript_type] += 1
+        
+        if transcript_type_counts:
+            log_console("\n📝 Transcript type distribution:")
+            for trans_type, count in transcript_type_counts.items():
+                log_console(f"  {trans_type}: {count} records")
+        
+        log_console("=" * 60)
+        log_console(f"\n✅ Total transcripts to validate: {len(transcripts)}")
+        
+        # Update stage summary with consolidation details
         stage_summary["total_transcripts_processed"] = len(transcripts)
+        stage_summary["consolidation_details"] = {
+            "unique_files_from_stage3": unique_files_count,
+            "unique_transcripts": unique_transcripts_count,
+            "files_per_transcript_avg": unique_files_count / unique_transcripts_count if unique_transcripts_count > 0 else 0,
+            "multi_version_transcripts": len(multi_version_transcripts),
+            "version_distribution": dict(version_counts),
+            "transcript_type_distribution": dict(transcript_type_counts)
+        }
+        
+        # Log consolidation details to execution log
+        log_execution("Transcript consolidation completed", stage_summary["consolidation_details"])
         
         # Validate each transcript
         all_validation_results = []
@@ -884,6 +967,13 @@ def main() -> None:
         log_console(f"Total records processed: {stage_summary['total_records_processed']}")
         log_console(f"Total errors: {sum(stage_summary['errors'].values())}")
         log_console(f"Execution time: {execution_time}")
+        
+        # Add consolidation summary
+        if "consolidation_details" in stage_summary:
+            log_console("\n📊 CONSOLIDATION SUMMARY:")
+            log_console(f"  Stage 3 files → Stage 4 transcripts: {stage_summary['consolidation_details']['unique_files_from_stage3']} → {stage_summary['consolidation_details']['unique_transcripts']}")
+            log_console(f"  Average files per transcript: {stage_summary['consolidation_details']['files_per_transcript_avg']:.2f}")
+            log_console(f"  Transcripts with multiple versions: {stage_summary['consolidation_details']['multi_version_transcripts']}")
 
     except Exception as e:
         stage_summary["status"] = "failed"

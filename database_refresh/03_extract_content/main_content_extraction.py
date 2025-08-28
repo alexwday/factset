@@ -1050,6 +1050,15 @@ def main() -> None:
         
         all_paragraph_records = []
         
+        # Track file processing statistics
+        file_stats = {
+            "total_files": len(processing_queue),
+            "files_by_type": {},
+            "files_by_ticker": {},
+            "files_by_year": {},
+            "files_with_versions": {}
+        }
+        
         for i, record in enumerate(processing_queue):
             file_path = record.get("file_path", "")
             log_console(f"Processing file {i+1}/{len(processing_queue)}: {file_path}")
@@ -1062,6 +1071,35 @@ def main() -> None:
                 stage_summary["paragraphs_extracted"] += len(paragraph_records)
                 stage_summary["files_processed"] += 1
                 log_console(f"Extracted {len(paragraph_records)} paragraphs from {file_path}")
+                
+                # Track statistics from extracted records
+                if paragraph_records:
+                    first_record = paragraph_records[0]
+                    
+                    # Track by transcript type
+                    trans_type = first_record.get("transcript_type", "unknown")
+                    file_stats["files_by_type"][trans_type] = file_stats["files_by_type"].get(trans_type, 0) + 1
+                    
+                    # Track by ticker
+                    ticker = first_record.get("ticker", "unknown")
+                    file_stats["files_by_ticker"][ticker] = file_stats["files_by_ticker"].get(ticker, 0) + 1
+                    
+                    # Track by year
+                    year = first_record.get("fiscal_year", "unknown")
+                    file_stats["files_by_year"][year] = file_stats["files_by_year"].get(year, 0) + 1
+                    
+                    # Track version info
+                    version = first_record.get("version_id", "unknown")
+                    event_id = first_record.get("event_id", "unknown")
+                    version_key = f"{ticker}_{year}_{first_record.get('fiscal_quarter', 'unknown')}"
+                    if version_key not in file_stats["files_with_versions"]:
+                        file_stats["files_with_versions"][version_key] = []
+                    file_stats["files_with_versions"][version_key].append({
+                        "filename": first_record.get("filename", "unknown"),
+                        "version": version,
+                        "event_id": event_id,
+                        "type": trans_type
+                    })
             else:
                 log_console(f"No paragraphs extracted from {file_path}", "WARNING")
 
@@ -1093,6 +1131,43 @@ def main() -> None:
         log_console(f"Paragraphs extracted: {stage_summary['paragraphs_extracted']}")
         log_console(f"Total errors: {sum(stage_summary['errors'].values())}")
         log_console(f"Execution time: {execution_time}")
+        
+        # Add file processing statistics
+        if 'file_stats' in locals() and file_stats:
+            log_console("\n📊 FILE PROCESSING STATISTICS:")
+            log_console(f"  Total files in queue: {file_stats['total_files']}")
+            log_console(f"  Successfully processed: {stage_summary['files_processed']}")
+            
+            # Show files by type
+            if file_stats["files_by_type"]:
+                log_console("\n  Files by transcript type:")
+                for trans_type, count in sorted(file_stats["files_by_type"].items()):
+                    log_console(f"    {trans_type}: {count}")
+            
+            # Count unique transcripts (ticker_year_quarter combinations)
+            unique_transcripts = len(file_stats["files_with_versions"])
+            if unique_transcripts > 0:
+                avg_versions = file_stats["total_files"] / unique_transcripts
+                log_console(f"\n  📈 Unique transcripts (ticker_year_quarter): {unique_transcripts}")
+                log_console(f"  📈 Average versions per transcript: {avg_versions:.2f}")
+                
+                # Find transcripts with multiple versions
+                multi_version = {k: v for k, v in file_stats["files_with_versions"].items() if len(v) > 1}
+                if multi_version:
+                    log_console(f"  📈 Transcripts with multiple versions: {len(multi_version)}")
+            
+            # Show ticker distribution
+            if file_stats["files_by_ticker"]:
+                log_console(f"\n  Unique tickers processed: {len(file_stats['files_by_ticker'])}")
+            
+            # Add to stage summary
+            stage_summary["file_statistics"] = {
+                "total_files": file_stats["total_files"],
+                "unique_transcripts": unique_transcripts,
+                "files_by_type": file_stats["files_by_type"],
+                "unique_tickers": len(file_stats["files_by_ticker"]),
+                "multi_version_transcripts": len(multi_version) if 'multi_version' in locals() else 0
+            }
 
     except Exception as e:
         stage_summary["status"] = "failed"
