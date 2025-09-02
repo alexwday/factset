@@ -806,8 +806,17 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
     process_records = []
     earnings_calls_count = 0
     non_earnings_filtered = 0
+    seen_file_paths = set()  # Track duplicates
+    duplicate_count = 0
     
     for file_path in files_to_process:
+        # Check for duplicates
+        if file_path in seen_file_paths:
+            duplicate_count += 1
+            log_execution(f"⚠️ DUPLICATE file path in files_to_process: {file_path}")
+            continue  # Skip duplicates
+        seen_file_paths.add(file_path)
+        
         # Get the NAS record for this file to check if it's an earnings call
         nas_record = nas_inventory.get(file_path, {})
         
@@ -826,9 +835,14 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
     
     log_execution(f"Filtered processing queue for earnings calls only", {
         "total_files_to_process": len(files_to_process),
+        "duplicates_found_and_removed": duplicate_count,
+        "unique_files_checked": len(seen_file_paths),
         "earnings_calls_included": earnings_calls_count,
         "non_earnings_filtered_out": non_earnings_filtered
     })
+    
+    if duplicate_count > 0:
+        log_console(f"⚠️ WARNING: Found and removed {duplicate_count} duplicate file paths in processing queue", "WARNING")
 
     # Save files to process as simple JSON records
     process_path = nas_path_join(refresh_path, "stage_02_process_queue.json")

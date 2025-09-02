@@ -1048,22 +1048,47 @@ def main() -> None:
         log_console("Step 8: Processing transcript files...")
         log_console(f"Total files to process: {len(processing_queue)}")
         
+        # Check for duplicates in the processing queue
+        file_paths_in_queue = [r.get("file_path", "") for r in processing_queue]
+        unique_file_paths = set(file_paths_in_queue)
+        if len(file_paths_in_queue) != len(unique_file_paths):
+            duplicate_count = len(file_paths_in_queue) - len(unique_file_paths)
+            log_console(f"⚠️ WARNING: Processing queue contains {duplicate_count} duplicate file paths!", "WARNING")
+            
+            # Find and log the duplicates
+            from collections import Counter
+            path_counts = Counter(file_paths_in_queue)
+            duplicates = {path: count for path, count in path_counts.items() if count > 1}
+            for path, count in list(duplicates.items())[:5]:
+                log_console(f"  - {path}: appears {count} times", "WARNING")
+            if len(duplicates) > 5:
+                log_console(f"  ... and {len(duplicates) - 5} more duplicate paths", "WARNING")
+        
         all_paragraph_records = []
         
         # Track file processing statistics
         file_stats = {
             "total_files": len(processing_queue),
+            "unique_files": len(unique_file_paths),
             "files_by_type": {},
             "files_by_ticker": {},
             "files_by_year": {},
             "files_with_versions": {},
             "files_with_zero_paragraphs": [],  # Track files that produce no content
             "paragraph_distribution": {},  # Track how many paragraphs per file
-            "file_content_status": {}  # Track which files have content vs no content
+            "file_content_status": {},  # Track which files have content vs no content
+            "files_processed_tracker": set()  # Track which files we've actually processed
         }
         
         for i, record in enumerate(processing_queue):
             file_path = record.get("file_path", "")
+            
+            # Check if we've already processed this file (duplicate detection)
+            if file_path in file_stats["files_processed_tracker"]:
+                log_console(f"⚠️ DUPLICATE: Skipping already processed file {i+1}/{len(processing_queue)}: {file_path}", "WARNING")
+                continue
+            
+            file_stats["files_processed_tracker"].add(file_path)
             log_console(f"Processing file {i+1}/{len(processing_queue)}: {file_path}")
             
             # Process single transcript file
@@ -1154,9 +1179,13 @@ def main() -> None:
         # Add file processing statistics
         if 'file_stats' in locals() and file_stats:
             log_console("\n📊 FILE PROCESSING STATISTICS:")
-            log_console(f"  Total files in queue: {file_stats['total_files']}")
-            log_console(f"  Successfully processed: {stage_summary['files_processed']}")
-            log_console(f"  Files with NO paragraphs: {len(file_stats['files_with_zero_paragraphs'])}")
+            log_console(f"  Total records in queue: {file_stats['total_files']}")
+            log_console(f"  Unique files in queue: {file_stats['unique_files']}")
+            if file_stats['total_files'] != file_stats['unique_files']:
+                log_console(f"  ⚠️ Duplicates detected: {file_stats['total_files'] - file_stats['unique_files']} duplicate records")
+            log_console(f"  Files actually processed: {len(file_stats['files_processed_tracker'])}")
+            log_console(f"  Files with content (saved): {stage_summary['files_processed']}")
+            log_console(f"  Files with NO paragraphs (dropped): {len(file_stats['files_with_zero_paragraphs'])}")
             
             # Show paragraph distribution
             if file_stats["paragraph_distribution"]:
