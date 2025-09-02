@@ -1104,6 +1104,36 @@ def main() -> None:
             filename = file_path.split('/')[-1] if file_path else "unknown"
             file_stats["file_content_status"][filename] = paragraph_count > 0
             
+            # Always track version info for ALL files (both with and without content)
+            # Extract metadata from the record itself
+            ticker = record.get("ticker", "unknown")
+            
+            # Parse metadata from filename if available
+            if filename and filename != "unknown":
+                # Filename format: TICKER_QUARTER_YEAR_TYPE_EVENTID_VERSIONID.xml
+                parts = filename.replace('.xml', '').split('_')
+                if len(parts) >= 6:
+                    version_ticker = parts[0]
+                    version_quarter = parts[1]
+                    version_year = parts[2]
+                    version_type = parts[3]
+                    version_event_id = parts[4]
+                    version_version_id = parts[5]
+                    
+                    version_key = f"{version_ticker}_{version_year}_{version_quarter}"
+                    if version_key not in file_stats["files_with_versions"]:
+                        file_stats["files_with_versions"][version_key] = []
+                    
+                    file_stats["files_with_versions"][version_key].append({
+                        "filename": filename,
+                        "version": version_version_id,
+                        "event_id": version_event_id,
+                        "type": version_type,
+                        "paragraph_count": paragraph_count,
+                        "has_content": paragraph_count > 0,
+                        "status": "KEPT" if paragraph_count > 0 else "DROPPED"
+                    })
+            
             if paragraph_records:
                 all_paragraph_records.extend(paragraph_records)
                 stage_summary["paragraphs_extracted"] += len(paragraph_records)
@@ -1118,26 +1148,15 @@ def main() -> None:
                     trans_type = first_record.get("transcript_type", "unknown")
                     file_stats["files_by_type"][trans_type] = file_stats["files_by_type"].get(trans_type, 0) + 1
                     
-                    # Track by ticker
-                    ticker = first_record.get("ticker", "unknown")
-                    file_stats["files_by_ticker"][ticker] = file_stats["files_by_ticker"].get(ticker, 0) + 1
+                    # Track by ticker (already extracted above)
+                    if ticker != "unknown":
+                        file_stats["files_by_ticker"][ticker] = file_stats["files_by_ticker"].get(ticker, 0) + 1
                     
                     # Track by year
                     year = first_record.get("fiscal_year", "unknown")
                     file_stats["files_by_year"][year] = file_stats["files_by_year"].get(year, 0) + 1
                     
-                    # Track version info
-                    version = first_record.get("version_id", "unknown")
-                    event_id = first_record.get("event_id", "unknown")
-                    version_key = f"{ticker}_{year}_{first_record.get('fiscal_quarter', 'unknown')}"
-                    if version_key not in file_stats["files_with_versions"]:
-                        file_stats["files_with_versions"][version_key] = []
-                    file_stats["files_with_versions"][version_key].append({
-                        "filename": first_record.get("filename", "unknown"),
-                        "version": version,
-                        "event_id": event_id,
-                        "type": trans_type
-                    })
+                    # Note: Version info is now tracked above for ALL files (both with and without content)
             else:
                 log_console(f"⚠️ No paragraphs extracted from {file_path}", "WARNING")
                 # Track files with zero paragraphs
@@ -1232,34 +1251,48 @@ def main() -> None:
                             break
                         
                         # Check if this example has both kept and dropped files (more interesting)
-                        has_kept = any(file_stats["file_content_status"].get(v['filename'], False) for v in versions)
-                        has_dropped = any(not file_stats["file_content_status"].get(v['filename'], False) for v in versions)
+                        has_kept = any(v.get('has_content', False) for v in versions)
+                        has_dropped = any(not v.get('has_content', False) for v in versions)
                         
                         # Prioritize showing examples with mixed results
                         if has_kept and has_dropped:
                             examples_shown += 1
                             log_console(f"    {examples_shown}. {transcript_key}:")
-                            for version_info in sorted(versions, key=lambda x: (x['type'], x['version'])):
-                                file_had_content = file_stats["file_content_status"].get(version_info['filename'], False)
-                                status = "✅ KEPT" if file_had_content else "❌ DROPPED (no content)"
+                            for version_info in sorted(versions, key=lambda x: (x.get('type', ''), x.get('version', ''))):
+                                status = version_info.get('status', 'UNKNOWN')
+                                para_count = version_info.get('paragraph_count', 0)
+                                if status == "KEPT":
+                                    status_display = f"✅ KEPT ({para_count} paragraphs)"
+                                elif status == "DROPPED":
+                                    status_display = f"❌ DROPPED (0 paragraphs)"
+                                else:
+                                    status_display = "❓ UNKNOWN"
+                                
                                 log_console(f"       - {version_info['filename']}")
-                                log_console(f"         Type: {version_info['type']}, Event: {version_info['event_id']}, Version: {version_info['version']} → {status}")
+                                log_console(f"         Type: {version_info.get('type', 'unknown')}, Event: {version_info.get('event_id', 'unknown')}, Version: {version_info.get('version', 'unknown')} → {status_display}")
                     
                     # If we didn't find 3 mixed examples, show any remaining
                     if examples_shown < 3:
                         for transcript_key, versions in multi_version.items():
                             if examples_shown >= 3:
                                 break
-                            has_kept = any(file_stats["file_content_status"].get(v['filename'], False) for v in versions)
-                            has_dropped = any(not file_stats["file_content_status"].get(v['filename'], False) for v in versions)
+                            has_kept = any(v.get('has_content', False) for v in versions)
+                            has_dropped = any(not v.get('has_content', False) for v in versions)
                             if not (has_kept and has_dropped):  # Show the non-mixed ones
                                 examples_shown += 1
                                 log_console(f"    {examples_shown}. {transcript_key}:")
-                                for version_info in sorted(versions, key=lambda x: (x['type'], x['version'])):
-                                    file_had_content = file_stats["file_content_status"].get(version_info['filename'], False)
-                                    status = "✅ KEPT" if file_had_content else "❌ DROPPED (no content)"
+                                for version_info in sorted(versions, key=lambda x: (x.get('type', ''), x.get('version', ''))):
+                                    status = version_info.get('status', 'UNKNOWN')
+                                    para_count = version_info.get('paragraph_count', 0)
+                                    if status == "KEPT":
+                                        status_display = f"✅ KEPT ({para_count} paragraphs)"
+                                    elif status == "DROPPED":
+                                        status_display = f"❌ DROPPED (0 paragraphs)"
+                                    else:
+                                        status_display = "❓ UNKNOWN"
+                                    
                                     log_console(f"       - {version_info['filename']}")
-                                    log_console(f"         Type: {version_info['type']}, Event: {version_info['event_id']}, Version: {version_info['version']} → {status}")
+                                    log_console(f"         Type: {version_info.get('type', 'unknown')}, Event: {version_info.get('event_id', 'unknown')}, Version: {version_info.get('version', 'unknown')} → {status_display}")
                     if len(multi_version) > 3:
                         log_console(f"    ... and {len(multi_version) - 3} more transcripts with multiple versions")
             
