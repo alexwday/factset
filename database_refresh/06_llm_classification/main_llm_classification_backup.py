@@ -1,7 +1,9 @@
 """
-Stage 6: LLM-Based Financial Content Classification (Version 2)
-ID-based classification with two-pass system and sliding context windows.
-Processes entire speaker blocks with historical context for improved accuracy.
+Stage 6: LLM-Based Financial Content Classification
+Processes Stage 5 output to add detailed financial category classification.
+Self-contained standalone script that loads config from NAS at runtime.
+
+Architecture based on Stage 5 patterns with Stage 6 classification logic.
 """
 
 import os
@@ -20,7 +22,7 @@ import yaml
 from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 from openai import OpenAI
-from collections import defaultdict, deque
+from collections import defaultdict
 
 # Load environment variables
 load_dotenv()
@@ -28,16 +30,16 @@ load_dotenv()
 # Global variables
 config = {}
 logger = None
-execution_log = []
-error_log = []
+execution_log = []  # Detailed execution log entries
+error_log = []  # Error log entries (only if errors occur)
 
 # LLM-specific globals
 llm_client = None
 oauth_token = None
 ssl_cert_path = None
 
-# Category registry - maps ID to category info
-CATEGORY_REGISTRY = {}
+# Valid financial categories (loaded from config)
+VALID_CATEGORIES = set()
 
 
 def setup_logging() -> logging.Logger:
@@ -94,15 +96,13 @@ class EnhancedErrorLogger:
         self.processing_errors = []
         self.total_cost = 0.0
         self.total_tokens = 0
-        self.primary_pass_tokens = 0
-        self.secondary_pass_tokens = 0
 
-    def log_classification_error(self, transcript_id: str, pass_type: str, error: str):
+    def log_classification_error(self, transcript_id: str, section_type: str, error: str):
         """Log classification-specific errors."""
         self.classification_errors.append({
             "timestamp": datetime.now().isoformat(),
             "transcript_id": transcript_id,
-            "pass_type": pass_type,
+            "section_type": section_type,
             "error": error,
             "action_required": "Review transcript structure and classification logic"
         })
@@ -133,17 +133,13 @@ class EnhancedErrorLogger:
             "action_required": "Review transcript data and processing logic"
         })
 
-    def accumulate_costs(self, token_usage: dict = None, pass_type: str = "primary"):
+    def accumulate_costs(self, token_usage: dict = None):
         """Accumulate total cost and token usage for final summary."""
         if token_usage:
             if "cost" in token_usage:
                 self.total_cost += token_usage["cost"]["total_cost"]
             if "total_tokens" in token_usage:
                 self.total_tokens += token_usage["total_tokens"]
-                if pass_type == "primary":
-                    self.primary_pass_tokens += token_usage["total_tokens"]
-                else:
-                    self.secondary_pass_tokens += token_usage["total_tokens"]
 
     def save_error_logs(self, nas_conn: SMBConnection):
         """Save error logs to separate JSON files on NAS."""
@@ -160,7 +156,7 @@ class EnhancedErrorLogger:
         
         for error_type, errors in error_types.items():
             if errors:
-                filename = f"stage_06_llm_classification_v2_{error_type}_errors_{timestamp}.json"
+                filename = f"stage_06_llm_classification_{error_type}_errors_{timestamp}.json"
                 nas_path = nas_path_join(logs_path, "Errors", filename)
                 
                 try:
@@ -193,7 +189,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any], enh
 
     # Save main execution log
     main_log_content = {
-        "stage": "stage_06_llm_classification_v2",
+        "stage": "stage_06_llm_classification",
         "execution_start": (
             execution_log[0]["timestamp"]
             if execution_log
@@ -204,7 +200,7 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any], enh
         "execution_log": execution_log,
     }
 
-    main_log_filename = f"stage_06_llm_classification_v2_{timestamp}.json"
+    main_log_filename = f"stage_06_llm_classification_{timestamp}.json"
     main_log_path = nas_path_join(logs_path, main_log_filename)
     main_log_json = json.dumps(main_log_content, indent=2)
     main_log_obj = io.BytesIO(main_log_json.encode("utf-8"))
@@ -221,14 +217,14 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any], enh
         nas_create_directory_recursive(nas_conn, errors_path)
 
         error_log_content = {
-            "stage": "stage_06_llm_classification_v2",
+            "stage": "stage_06_llm_classification",
             "execution_time": datetime.now().isoformat(),
             "total_errors": len(error_log),
             "error_summary": stage_summary.get("errors", {}),
             "errors": error_log,
         }
 
-        error_log_filename = f"stage_06_llm_classification_v2_errors_{timestamp}.json"
+        error_log_filename = f"stage_06_llm_classification_errors_{timestamp}.json"
         error_log_path = nas_path_join(errors_path, error_log_filename)
         error_log_json = json.dumps(error_log_content, indent=2)
         error_log_obj = io.BytesIO(error_log_json.encode("utf-8"))
@@ -351,26 +347,28 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
                 log_execution("Loaded monitored institutions successfully", {"count": len(stage_config["monitored_institutions"])})
             except yaml.YAMLError as e:
                 log_error("Failed to load monitored_institutions.yaml, falling back to config.yaml", "config_parse", {"yaml_error": str(e)})
+                # Keep monitored_institutions from main config if separate file fails
         else:
             log_execution("monitored_institutions.yaml not found, using main config file")
 
-        # Load financial categories from project root
-        categories_path = "/Users/alexwday/Projects/factset/database_refresh/financial_categories.yaml"
-        log_execution("Loading financial categories from project root", {"categories_path": categories_path})
+        # Load financial categories from separate file
+        financial_categories_path = os.path.join(config_dir, "financial_categories.yaml")
+        log_execution("Loading financial categories from separate file", {"categories_path": financial_categories_path})
         
-        # Read local file instead of NAS
-        try:
-            with open(categories_path, 'r') as f:
-                categories_data = yaml.safe_load(f)
-                
-            # Update the financial_categories in stage_06_llm_classification section
-            if "stage_06_llm_classification" not in stage_config:
-                stage_config["stage_06_llm_classification"] = {}
-            stage_config["stage_06_llm_classification"]["financial_categories"] = categories_data
-            log_execution("Loaded financial categories successfully", {"count": len(categories_data)})
-        except Exception as e:
-            log_error(f"Failed to load financial_categories.yaml: {e}", "config_parse", {"error": str(e)})
-            raise
+        categories_data = nas_download_file(nas_conn, financial_categories_path)
+        if categories_data:
+            try:
+                categories_yaml = yaml.safe_load(categories_data.decode("utf-8"))
+                # Update the financial_categories in stage_06_llm_classification section
+                if "stage_06_llm_classification" not in stage_config:
+                    stage_config["stage_06_llm_classification"] = {}
+                stage_config["stage_06_llm_classification"]["financial_categories"] = categories_yaml
+                log_execution("Loaded financial categories successfully", {"count": len(categories_yaml)})
+            except yaml.YAMLError as e:
+                log_error("Failed to load financial_categories.yaml, falling back to config.yaml", "config_parse", {"yaml_error": str(e)})
+                # Keep financial_categories from main config if separate file fails
+        else:
+            log_execution("financial_categories.yaml not found, using main config file")
 
         # Validate configuration
         validate_config_structure(stage_config)
@@ -387,8 +385,8 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
 
 
 def validate_config_structure(config: Dict[str, Any]) -> None:
-    """Validate configuration structure and build category registry."""
-    global CATEGORY_REGISTRY
+    """Validate configuration structure and required parameters."""
+    global VALID_CATEGORIES
 
     required_sections = [
         "ssl_cert_path",
@@ -423,24 +421,31 @@ def validate_config_structure(config: Dict[str, Any]) -> None:
             log_error(error_msg, "config_validation", {"missing_parameter": f"stage_06_llm_classification.{param}"})
             raise ValueError(error_msg)
 
-    # Build category registry from financial_categories
+    # Validate LLM config structure
+    llm_config = stage_06_config["llm_config"]
+    required_llm_params = [
+        "base_url", "model", "temperature", "max_tokens",
+        "timeout", "max_retries", "token_endpoint",
+        "cost_per_1k_prompt_tokens", "cost_per_1k_completion_tokens"
+    ]
+
+    for param in required_llm_params:
+        if param not in llm_config:
+            error_msg = f"Missing required LLM config parameter: {param}"
+            log_error(error_msg, "config_validation", {"missing_parameter": f"llm_config.{param}"})
+            raise ValueError(error_msg)
+
+    # Load valid categories from config
     if "financial_categories" in stage_06_config:
-        categories = stage_06_config["financial_categories"]
-        for cat in categories:
-            cat_id = cat["id"]
-            CATEGORY_REGISTRY[cat_id] = {
-                "id": cat_id,
-                "name": cat["name"],
-                "description": cat["description"]
-            }
-        log_execution(f"Built category registry with {len(CATEGORY_REGISTRY)} categories")
+        VALID_CATEGORIES = {cat["name"] for cat in stage_06_config["financial_categories"]}
+        log_execution(f"Loaded {len(VALID_CATEGORIES)} financial categories from config")
     else:
         raise ValueError("No financial categories found in configuration")
 
     log_execution("Configuration validation successful", {
         "total_institutions": len(config["monitored_institutions"]),
-        "total_categories": len(CATEGORY_REGISTRY),
-        "llm_model": stage_06_config["llm_config"]["model"]
+        "llm_model": llm_config["model"],
+        "financial_categories": len(VALID_CATEGORIES)
     })
 
 
@@ -610,7 +615,7 @@ def calculate_token_cost(prompt_tokens: int, completion_tokens: int) -> Dict:
 
 
 def save_results_incrementally(results: List[Dict], output_path: str, is_first_batch: bool = False):
-    """Save results incrementally after each transcript."""
+    """Save results incrementally after each transcript (following Stage 5 array pattern)."""
     global logger
     
     try:
@@ -619,13 +624,13 @@ def save_results_incrementally(results: List[Dict], output_path: str, is_first_b
             raise RuntimeError("Failed to connect to NAS for incremental save")
         
         if is_first_batch:
-            # Initialize with opening bracket
+            # Initialize with opening bracket like Stage 5
             output_bytes = io.BytesIO(b"[\n")
             if not nas_upload_file(nas_conn, output_bytes, output_path):
                 raise RuntimeError("Failed to initialize output file")
             log_console(f"Initialized output file for incremental saving")
         
-        # Append records
+        # Append records using Stage 5's pattern
         if not append_records_to_json_array(nas_conn, results, output_path, is_first_batch):
             raise RuntimeError("Failed to append records to output file")
         
@@ -644,7 +649,7 @@ def save_results_incrementally(results: List[Dict], output_path: str, is_first_b
 
 
 def append_records_to_json_array(nas_conn: SMBConnection, records: List[Dict], file_path: str, is_first: bool = False) -> bool:
-    """Append records to a JSON array file."""
+    """Append records to a JSON array file (Stage 5 pattern)."""
     try:
         # Prepare JSON content
         if not is_first:
@@ -673,7 +678,7 @@ def append_records_to_json_array(nas_conn: SMBConnection, records: List[Dict], f
 
 
 def close_json_array(nas_conn: SMBConnection, file_path: str) -> bool:
-    """Close a JSON array file by appending the closing bracket."""
+    """Close a JSON array file by appending the closing bracket (Stage 5 pattern)."""
     try:
         # Download existing content
         existing_content = nas_download_file(nas_conn, file_path)
@@ -693,7 +698,7 @@ def close_json_array(nas_conn: SMBConnection, file_path: str) -> bool:
         return False
 
 
-# Security validation functions
+# Security validation functions (from Stage 5)
 def validate_file_path(path: str) -> bool:
     """Prevent directory traversal attacks."""
     try:
@@ -734,7 +739,7 @@ def sanitize_url_for_logging(url: str) -> str:
         return "URL_SANITIZATION_ERROR"
 
 
-# NAS utility functions
+# NAS utility functions (from Stage 5)
 def nas_path_join(*parts: str) -> str:
     """Join path parts for NAS paths using forward slashes."""
     clean_parts = []
@@ -801,371 +806,443 @@ def nas_create_directory_recursive(conn: SMBConnection, dir_path: str) -> bool:
     return True
 
 
-# ============================================================================
-# NEW V2 CLASSIFICATION FUNCTIONS
-# ============================================================================
-
-def index_speaker_block_paragraphs(speaker_block_records: List[Dict]) -> List[Dict]:
-    """Add paragraph index (starting at 1) within each speaker block."""
-    indexed_records = []
-    for idx, record in enumerate(sorted(speaker_block_records, key=lambda x: x["paragraph_id"]), start=1):
-        record_copy = record.copy()
-        record_copy["paragraph_index"] = idx
-        indexed_records.append(record_copy)
-    return indexed_records
-
-
-def build_numbered_category_list() -> str:
-    """Build formatted category list with IDs and descriptions."""
-    global CATEGORY_REGISTRY
+# Stage 6 specific functions
+def validate_categories(categories: List[str]) -> Tuple[bool, List[str], List[str]]:
+    """
+    Validate that all categories are in the expected set.
     
-    lines = []
-    for cat_id in sorted(CATEGORY_REGISTRY.keys()):
-        cat = CATEGORY_REGISTRY[cat_id]
-        lines.append(f"{cat_id}: {cat['name']} - {cat['description']}")
+    Returns:
+        (is_valid, valid_categories, invalid_categories)
+    """
+    if not categories:
+        return True, [], []
     
-    return "\n".join(lines)
+    valid_cats = []
+    invalid_cats = []
+    
+    for category in categories:
+        if category in VALID_CATEGORIES:
+            valid_cats.append(category)
+        else:
+            invalid_cats.append(category)
+    
+    is_valid = len(invalid_cats) == 0
+    return is_valid, valid_cats, invalid_cats
 
 
-def format_previous_speaker_blocks_with_classifications(
-    previous_blocks: List[Dict], 
-    max_blocks: int = 5
-) -> str:
-    """Format previous speaker blocks with their classifications for context."""
+def build_categories_description() -> str:
+    """Build category descriptions from config for prompts."""
+    global config
     
-    if not previous_blocks:
-        return "No previous speaker blocks available for context."
+    if "financial_categories" not in config["stage_06_llm_classification"]:
+        return "Categories not available in configuration"
     
-    # Take only the most recent blocks
-    recent_blocks = previous_blocks[-max_blocks:] if len(previous_blocks) > max_blocks else previous_blocks
+    categories = config["stage_06_llm_classification"]["financial_categories"]
+    category_lines = []
     
-    context_parts = []
-    for block_idx, block in enumerate(recent_blocks, start=1):
-        speaker_name = block["speaker_name"]
-        section_name = block["section_name"]
-        paragraphs = block["paragraphs"]
+    for i, cat in enumerate(categories, 1):
+        name = cat["name"]
+        description = cat["description"]
         
-        context_parts.append(f"\n[Previous Block #{block_idx} - {speaker_name} - {section_name} - {len(paragraphs)} paragraphs]")
+        # Start with basic info
+        line = f"{i}. **{name}**: {description}"
         
-        for para in paragraphs[:3]:  # Show first 3 paragraphs as preview
-            content_preview = para['content'][:150] + "..." if len(para['content']) > 150 else para['content']
-            primary_id = para.get('primary_classification', 0)
-            primary_name = CATEGORY_REGISTRY[primary_id]['name']
-            
-            context_parts.append(f"P{para['paragraph_index']}: \"{content_preview}\"")
-            context_parts.append(f"  → Primary: {primary_id} ({primary_name})")
-            
-            if para.get('secondary_classifications'):
-                secondary_names = [f"{sid} ({CATEGORY_REGISTRY[sid]['name']})" for sid in para['secondary_classifications']]
-                context_parts.append(f"  → Secondary: {', '.join(secondary_names)}")
+        # Add additional details if available
+        if "key_indicators" in cat:
+            line += f"\n   - **Key Indicators**: {cat['key_indicators']}"
         
-        if len(paragraphs) > 3:
-            context_parts.append(f"  ... and {len(paragraphs) - 3} more paragraphs")
-    
-    return "\n".join(context_parts)
-
-
-def format_current_speaker_block(speaker_block_records: List[Dict]) -> str:
-    """Format current speaker block for classification."""
-    
-    context_parts = []
-    context_parts.append("\n=== CURRENT SPEAKER BLOCK ===")
-    
-    for record in speaker_block_records:
-        para_idx = record["paragraph_index"]
-        content = record["paragraph_content"]
-        context_parts.append(f"\nP{para_idx}: {content}")
-    
-    return "\n".join(context_parts)
-
-
-def create_primary_classification_prompt(
-    bank_name: str,
-    fiscal_year: int,
-    fiscal_quarter: str,
-    section_type: str,
-    speaker_name: str,
-    speaker_role: str,
-    speaker_block_number: int,
-    total_speaker_blocks: int,
-    previous_blocks: List[Dict],
-    current_block_paragraphs: List[Dict]
-) -> str:
-    """Create comprehensive system prompt for primary classification."""
-    
-    categories_list = build_numbered_category_list()
-    previous_context = format_previous_speaker_blocks_with_classifications(previous_blocks)
-    current_block = format_current_speaker_block(current_block_paragraphs)
-    
-    return f"""You are a financial analyst specializing in earnings call transcript classification for major financial institutions.
-
-<document_context>
-You are analyzing an earnings call transcript with the following context:
-- Institution: {bank_name}
-- Document Type: Quarterly Earnings Call Transcript
-- Fiscal Period: {fiscal_quarter} {fiscal_year}
-- Section: {section_type}
-- Current Speaker: {speaker_name}, {speaker_role if speaker_role else 'Role Unknown'}
-- Speaker Block: #{speaker_block_number} of {total_speaker_blocks}
-</document_context>
-
-<task_description>
-You are performing PRIMARY classification. Assign exactly ONE category ID (0-22) to each paragraph that best captures its main financial topic.
-Every paragraph MUST receive a classification. Use ID 0 for non-relevant content (operator statements, pleasantries, acknowledgments).
-</task_description>
-
-<classification_guidelines>
-1. Choose the SINGLE MOST relevant category for each paragraph
-2. Focus on the financial substance, not speaker pleasantries
-3. Consider the context from previous speaker blocks when classifying
-4. For {bank_name}, be aware of their specific terminology and reporting structure
-5. Use category 0 for content with no financial substance
-6. Assign based on the primary topic, even if other topics are mentioned
-</classification_guidelines>
-
-<financial_categories>
-{categories_list}
-</financial_categories>
-
-<previous_context>
-{previous_context}
-</previous_context>
-
-<current_task>
-Classify each paragraph in the current speaker block with a PRIMARY category ID (0-22).
-{current_block}
-</current_task>
-
-<response_format>
-Use the classify_speaker_block_primary function to provide the primary category ID for each paragraph by its index number (P1, P2, P3, etc.).
-</response_format>"""
-
-
-def create_secondary_classification_prompt(
-    bank_name: str,
-    fiscal_year: int,
-    fiscal_quarter: str,
-    section_type: str,
-    speaker_name: str,
-    speaker_role: str,
-    speaker_block_number: int,
-    total_speaker_blocks: int,
-    previous_blocks: List[Dict],
-    current_block_paragraphs: List[Dict]
-) -> str:
-    """Create comprehensive system prompt for secondary classification."""
-    
-    categories_list = build_numbered_category_list()
-    
-    # Format current block with primary classifications
-    context_parts = []
-    context_parts.append("\n=== CURRENT SPEAKER BLOCK WITH PRIMARY CLASSIFICATIONS ===")
-    
-    for record in current_block_paragraphs:
-        para_idx = record["paragraph_index"]
-        content = record["paragraph_content"]
-        primary_id = record.get("primary_classification", 0)
-        primary_name = CATEGORY_REGISTRY[primary_id]["name"]
+        if "use_when" in cat:
+            line += f"\n   - **Use When**: {cat['use_when']}"
         
-        context_parts.append(f"\nP{para_idx}: {content}")
-        context_parts.append(f"  Primary Classification: {primary_id} ({primary_name})")
+        if "do_not_use_when" in cat:
+            line += f"\n   - **Do NOT Use When**: {cat['do_not_use_when']}"
+        
+        if "example_phrases" in cat:
+            line += f"\n   - **Example Phrases**: {cat['example_phrases']}"
+        
+        category_lines.append(line)
     
-    current_block_with_primary = "\n".join(context_parts)
-    previous_context = format_previous_speaker_blocks_with_classifications(previous_blocks)
-    
-    return f"""You are a financial analyst specializing in earnings call transcript classification for major financial institutions.
-
-<document_context>
-You are analyzing an earnings call transcript with the following context:
-- Institution: {bank_name}
-- Document Type: Quarterly Earnings Call Transcript
-- Fiscal Period: {fiscal_quarter} {fiscal_year}
-- Section: {section_type}
-- Current Speaker: {speaker_name}, {speaker_role if speaker_role else 'Role Unknown'}
-- Speaker Block: #{speaker_block_number} of {total_speaker_blocks}
-</document_context>
-
-<task_description>
-You are performing SECONDARY classification. For each paragraph that has already been assigned a primary category, identify ANY ADDITIONAL relevant category IDs beyond the primary.
-Return an empty list if no secondary categories apply. Do not repeat the primary category as a secondary.
-</task_description>
-
-<classification_guidelines>
-1. Include ALL relevant secondary categories that apply to the content
-2. Do NOT include the primary category in secondary classifications
-3. Return empty list [] if only the primary category applies
-4. Consider multiple aspects of the content that might relate to different categories
-5. Look for cross-cutting themes and related topics
-6. Secondary categories should add meaningful classification depth
-</classification_guidelines>
-
-<financial_categories>
-{categories_list}
-</financial_categories>
-
-<previous_context>
-{previous_context}
-</previous_context>
-
-<current_task>
-Identify SECONDARY category IDs for each paragraph (if any) beyond their primary classification.
-{current_block_with_primary}
-</current_task>
-
-<response_format>
-Use the classify_speaker_block_secondary function to provide secondary category IDs for each paragraph.
-Return empty list [] for paragraphs with no relevant secondary categories.
-</response_format>"""
+    return "\n\n".join(category_lines)
 
 
-def create_primary_classification_tools() -> List[Dict]:
-    """Function calling schema for primary classification."""
+def create_management_discussion_tools() -> List[Dict]:
+    """Function calling schema for Management Discussion classification."""
+    global VALID_CATEGORIES
     
     return [{
         "type": "function",
         "function": {
-            "name": "classify_speaker_block_primary",
-            "description": "Assign primary category ID to each paragraph in the speaker block",
+            "name": "classify_management_discussion_paragraphs",
+            "description": "Classify Management Discussion paragraphs with applicable financial categories",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "classifications": {
+                    "paragraph_classifications": {
                         "type": "array",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "paragraph_index": {
-                                    "type": "integer",
-                                    "description": "Paragraph index within speaker block (1, 2, 3, etc.)"
-                                },
-                                "primary_category_id": {
-                                    "type": "integer",
-                                    "minimum": 0,
-                                    "maximum": 22,
-                                    "description": "Primary category ID (0-22)"
-                                }
-                            },
-                            "required": ["paragraph_index", "primary_category_id"]
-                        },
-                        "description": "Classification for each paragraph"
-                    }
-                },
-                "required": ["classifications"]
-            }
-        }
-    }]
-
-
-def create_secondary_classification_tools() -> List[Dict]:
-    """Function calling schema for secondary classification."""
-    
-    return [{
-        "type": "function",
-        "function": {
-            "name": "classify_speaker_block_secondary",
-            "description": "Assign secondary category IDs to each paragraph in the speaker block",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "classifications": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "paragraph_index": {
-                                    "type": "integer",
-                                    "description": "Paragraph index within speaker block (1, 2, 3, etc.)"
-                                },
-                                "secondary_category_ids": {
+                                "paragraph_number": {"type": "integer", "description": "Paragraph number in window"},
+                                "categories": {
                                     "type": "array",
-                                    "items": {
-                                        "type": "integer",
-                                        "minimum": 0,
-                                        "maximum": 22
-                                    },
-                                    "description": "List of secondary category IDs (can be empty)"
-                                }
+                                    "items": {"type": "string", "enum": sorted(list(VALID_CATEGORIES))},
+                                    "description": "All applicable categories for this paragraph. Use 'Other' for non-contributory content."
+                                },
+                                "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
                             },
-                            "required": ["paragraph_index", "secondary_category_ids"]
-                        },
-                        "description": "Secondary classifications for each paragraph"
+                            "required": ["paragraph_number", "categories", "confidence"]
+                        }
                     }
                 },
-                "required": ["classifications"]
+                "required": ["paragraph_classifications"]
             }
         }
     }]
 
 
-def process_speaker_block_two_pass(
-    speaker_block_records: List[Dict],
-    transcript_info: Dict[str, Any],
-    speaker_block_number: int,
-    total_speaker_blocks: int,
-    previous_blocks: List[Dict],
-    enhanced_error_logger: EnhancedErrorLogger
-) -> List[Dict]:
-    """Process a speaker block with two-pass classification."""
-    global llm_client, config
+def create_qa_conversation_tools() -> List[Dict]:
+    """Function calling schema for Q&A conversation classification."""
+    global VALID_CATEGORIES
     
-    # Index paragraphs
-    indexed_records = index_speaker_block_paragraphs(speaker_block_records)
+    return [{
+        "type": "function",
+        "function": {
+            "name": "classify_qa_conversation",
+            "description": "Classify complete Q&A conversation with applicable financial categories",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "conversation_classification": {
+                        "type": "object",
+                        "properties": {
+                            "categories": {
+                                "type": "array",
+                                "items": {"type": "string", "enum": sorted(list(VALID_CATEGORIES))},
+                                "description": "All applicable categories for this conversation. Use 'Other' for non-contributory content."
+                            },
+                            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+                        },
+                        "required": ["categories", "confidence"]
+                    }
+                },
+                "required": ["conversation_classification"]
+            }
+        }
+    }]
+
+
+def create_management_discussion_costar_prompt(company_name: str, fiscal_info: str,
+                                             speaker: str, window_position: str,
+                                             total_paragraphs: int) -> str:
+    """CO-STAR prompt with full category descriptions for Management Discussion."""
+    categories_description = build_categories_description()
     
-    # Extract speaker and section info
-    first_record = indexed_records[0]
-    speaker_name = first_record.get("speaker", "Unknown")
-    speaker_role = ""  # Could be extracted from speaker name if formatted
-    section_name = first_record.get("section_name", "Unknown")
+    return f"""
+<context>
+  <institution>{company_name}</institution>
+  <fiscal_period>{fiscal_info}</fiscal_period>
+  <speaker>{speaker}</speaker>
+  <classification_window>{window_position} of {total_paragraphs} total</classification_window>
+  <section_type>Management Discussion</section_type>
+</context>
+
+<objective>
+Classify each paragraph in the current window with ALL applicable financial content categories. 
+Each paragraph should receive whatever categories apply based on its content and context.
+
+IMPORTANT GUIDELINES:
+- Apply ALL relevant categories - there is no minimum or maximum number required
+- Use "Other" for non-contributory content like introductions, pleasantries, or transitions
+- Never leave categories empty - if no financial categories apply, use ["Other"]
+- Focus on actual financial substance, not speaker pleasantries
+</objective>
+
+<style>
+Analyze content against category descriptions. Apply all relevant categories - there is no 
+minimum or maximum number required. Base decisions on actual content themes and business context.
+</style>
+
+<tone>
+Professional financial analysis focused on content categorization.
+</tone>
+
+<audience>
+Financial analysts requiring detailed content categorization for earnings analysis.
+</audience>
+
+<categories>
+{categories_description}
+</categories>
+
+<response_format>
+Use the classify_management_discussion_paragraphs function to classify each paragraph 
+with applicable categories and confidence scores.
+</response_format>
+"""
+
+
+def create_qa_conversation_costar_prompt(company_name: str, fiscal_info: str,
+                                       conversation_length: int) -> str:
+    """CO-STAR prompt with category descriptions for Q&A conversations."""
+    categories_description = build_categories_description()
     
-    log_console(f"Processing speaker block #{speaker_block_number} - {speaker_name} ({len(indexed_records)} paragraphs)")
+    return f"""
+<context>
+  <institution>{company_name}</institution>
+  <fiscal_period>{fiscal_info}</fiscal_period>
+  <conversation_paragraphs>{conversation_length}</conversation_paragraphs>
+  <section_type>Q&A Conversation</section_type>
+</context>
+
+<objective>
+Analyze this complete Q&A conversation to identify all applicable financial content categories
+based on the topics discussed between analysts and management.
+
+IMPORTANT GUIDELINES:
+- Apply ALL relevant categories based on conversation content
+- Use "Other" for conversations that are purely procedural or non-financial
+- Never leave categories empty - if no financial categories apply, use ["Other"]
+- Focus on the financial topics discussed, not pleasantries
+</objective>
+
+<style>
+Focus on financial topics and business themes discussed in both analyst questions and
+management responses. Apply all relevant categories based on conversation content.
+</style>
+
+<tone>
+Analytical and comprehensive. Consider both question topics and response content.
+</tone>
+
+<audience>
+Financial analysts studying earnings call topic coverage and conversation themes.
+</audience>
+
+<categories>
+{categories_description}
+</categories>
+
+<response_format>
+Use the classify_qa_conversation function to provide comprehensive conversation analysis
+with all applicable categories and confidence score.
+</response_format>
+"""
+
+
+def format_management_discussion_context(speaker_block_records: List[Dict], 
+                                       paragraph_window: List[Dict]) -> str:
+    """Format MD speaker block context for classification."""
+    context_parts = []
     
-    # ========== PASS 1: PRIMARY CLASSIFICATION ==========
-    try:
-        system_prompt = create_primary_classification_prompt(
-            bank_name=transcript_info.get("company_name", "Unknown"),
-            fiscal_year=transcript_info.get("fiscal_year", 2024),
-            fiscal_quarter=transcript_info.get("fiscal_quarter", "Q1"),
-            section_type=section_name,
-            speaker_name=speaker_name,
-            speaker_role=speaker_role,
-            speaker_block_number=speaker_block_number,
-            total_speaker_blocks=total_speaker_blocks,
-            previous_blocks=previous_blocks,
-            current_block_paragraphs=indexed_records
-        )
+    context_parts.append(f"=== SPEAKER BLOCK ===")
+    context_parts.append(f"Speaker: {speaker_block_records[0]['speaker']}")
+    context_parts.append(f"Total Paragraphs: {len(speaker_block_records)}")
+    
+    # Show all paragraphs in speaker block
+    for i, record in enumerate(speaker_block_records):
+        para_id = record["paragraph_id"]
+        content = record["paragraph_content"]
         
+        if record in paragraph_window:
+            # Current window - to be classified
+            context_parts.append(f"\nP{i+1} (ID:{para_id}) [TO_CLASSIFY]:")
+            context_parts.append(content)
+        else:
+            # Context paragraphs
+            context_parts.append(f"\nP{i+1} (ID:{para_id}) [CONTEXT]:")
+            context_parts.append(content)
+    
+    # Highlight current classification window
+    window_start = speaker_block_records.index(paragraph_window[0]) + 1
+    window_end = speaker_block_records.index(paragraph_window[-1]) + 1
+    context_parts.append(f"\n=== CLASSIFY PARAGRAPHS P{window_start}-P{window_end} ===")
+    
+    return "\n".join(context_parts)
+
+
+def format_qa_group_context(qa_group_records: List[Dict]) -> str:
+    """Format complete Q&A conversation for single classification call."""
+    context_parts = []
+    context_parts.append("=== COMPLETE Q&A CONVERSATION ===")
+    context_parts.append(f"Q&A Group ID: {qa_group_records[0]['qa_group_id']}")
+    context_parts.append(f"Total Paragraphs: {len(qa_group_records)}")
+    
+    # Show all paragraphs in conversation order
+    for i, record in enumerate(sorted(qa_group_records, key=lambda x: x["paragraph_id"])):
+        speaker = record["speaker"]
+        content = record["paragraph_content"]
+        
+        # Add speaker role context
+        if "analyst" in speaker.lower():
+            role_indicator = "[ANALYST QUESTION]"
+        elif any(title in speaker.lower() for title in ["ceo", "cfo", "president", "chief"]):
+            role_indicator = "[MANAGEMENT RESPONSE]"
+        else:
+            role_indicator = "[OTHER]"
+        
+        context_parts.append(f"\nP{i+1}: {speaker} {role_indicator}")
+        context_parts.append(content)
+    
+    context_parts.append("\n=== CLASSIFY THIS COMPLETE CONVERSATION ===")
+    
+    return "\n".join(context_parts)
+
+
+def process_management_discussion_section(md_records: List[Dict], enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
+    """Process Management Discussion using speaker block windowing approach."""
+    global logger, llm_client, config
+    
+    # Group by speaker blocks
+    speaker_blocks = defaultdict(list)
+    for record in sorted(md_records, key=lambda x: x["paragraph_id"]):
+        speaker_blocks[record["speaker_block_id"]].append(record)
+    
+    classified_records = []
+    
+    for block_id, block_records in speaker_blocks.items():
+        log_console(f"Processing MD speaker block {block_id} ({len(block_records)} paragraphs)")
+        
+        # Process in configurable windows
+        window_size = config["stage_06_llm_classification"]["processing_config"]["md_paragraph_window_size"]
+        
+        for window_start in range(0, len(block_records), window_size):
+            window_end = min(window_start + window_size, len(block_records))
+            paragraph_window = block_records[window_start:window_end]
+            
+            # Format context
+            context = format_management_discussion_context(block_records, paragraph_window)
+            
+            # Create CO-STAR prompt
+            system_prompt = create_management_discussion_costar_prompt(
+                company_name=block_records[0].get("company_name", "Unknown"),
+                fiscal_info=f"{block_records[0].get('fiscal_year')} {block_records[0].get('fiscal_quarter')}",
+                speaker=block_records[0]["speaker"],
+                window_position=f"paragraphs {window_start+1}-{window_end}",
+                total_paragraphs=len(block_records)
+            )
+            
+            # Call LLM
+            try:
+                response = llm_client.chat.completions.create(
+                    model=config["stage_06_llm_classification"]["llm_config"]["model"],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": context}
+                    ],
+                    tools=create_management_discussion_tools(),
+                    tool_choice="required",
+                    temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
+                    max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
+                )
+                
+                # Parse and apply classifications
+                if response.choices[0].message.tool_calls:
+                    tool_call = response.choices[0].message.tool_calls[0]
+                    result = json.loads(tool_call.function.arguments)
+                    
+                    # Apply classifications to each paragraph
+                    for i, para_class in enumerate(result["paragraph_classifications"]):
+                        if i < len(paragraph_window):
+                            record = paragraph_window[i]
+                            categories = para_class["categories"]
+                            
+                            # Validate and fix categories
+                            is_valid, valid_cats, invalid_cats = validate_categories(categories)
+                            if not is_valid:
+                                log_console(f"Fixed invalid categories: {invalid_cats} → {valid_cats or ['Other']}", "WARNING")
+                                categories = valid_cats or ["Other"]
+                            
+                            # Handle empty categories
+                            if not categories:
+                                categories = ["Other"]
+                            
+                            record["category_type"] = categories
+                            record["category_type_confidence"] = para_class["confidence"]
+                            record["category_type_method"] = "speaker_block_windowing"
+                            
+                            classified_records.append(record)
+                
+                # Track costs
+                if hasattr(response, 'usage') and response.usage:
+                    cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
+                    enhanced_error_logger.accumulate_costs({
+                        "total_tokens": response.usage.total_tokens,
+                        "cost": cost_info
+                    })
+                
+            except Exception as e:
+                error_msg = f"MD classification failed for block {block_id}: {e}"
+                log_error(error_msg, "md_classification", {"block_id": block_id, "error": str(e)})
+                enhanced_error_logger.log_classification_error(
+                    block_records[0].get("ticker", "unknown"), 
+                    "Management Discussion", 
+                    error_msg
+                )
+                
+                # Fallback to "Other" for failed paragraphs
+                for record in paragraph_window:
+                    record["category_type"] = ["Other"]
+                    record["category_type_confidence"] = 0.0
+                    record["category_type_method"] = "error_fallback"
+                    classified_records.append(record)
+    
+    return classified_records
+
+
+def process_qa_group(qa_group_records: List[Dict], enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
+    """Process complete Q&A group as single conversation."""
+    global logger, llm_client, config
+    
+    qa_group_id = qa_group_records[0]["qa_group_id"]
+    log_console(f"Processing Q&A group {qa_group_id} ({len(qa_group_records)} paragraphs)")
+    
+    # Format complete conversation context
+    conversation_context = format_qa_group_context(qa_group_records)
+    
+    # Create CO-STAR prompt
+    system_prompt = create_qa_conversation_costar_prompt(
+        company_name=qa_group_records[0].get("company_name", "Unknown"),
+        fiscal_info=f"{qa_group_records[0].get('fiscal_year')} {qa_group_records[0].get('fiscal_quarter')}",
+        conversation_length=len(qa_group_records)
+    )
+    
+    try:
+        # Single LLM call for entire conversation
         response = llm_client.chat.completions.create(
             model=config["stage_06_llm_classification"]["llm_config"]["model"],
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Please classify each paragraph with its primary category."}
+                {"role": "user", "content": conversation_context}
             ],
-            tools=create_primary_classification_tools(),
+            tools=create_qa_conversation_tools(),
             tool_choice="required",
             temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
             max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
         )
         
-        # Parse primary classifications
+        # Parse and apply to ALL records in group
         if response.choices[0].message.tool_calls:
             tool_call = response.choices[0].message.tool_calls[0]
             result = json.loads(tool_call.function.arguments)
             
-            # Apply primary classifications
-            for classification in result["classifications"]:
-                para_idx = classification["paragraph_index"]
-                primary_id = classification["primary_category_id"]
-                
-                # Validate category ID
-                if primary_id not in CATEGORY_REGISTRY:
-                    log_console(f"Invalid category ID {primary_id}, defaulting to 0", "WARNING")
-                    primary_id = 0
-                
-                # Find and update the record
-                for record in indexed_records:
-                    if record["paragraph_index"] == para_idx:
-                        record["primary_classification"] = primary_id
-                        break
+            # Apply same classification to all paragraphs in conversation
+            categories = result["conversation_classification"]["categories"]
+            confidence = result["conversation_classification"]["confidence"]
+            
+            # Validate and fix categories
+            is_valid, valid_cats, invalid_cats = validate_categories(categories)
+            if not is_valid:
+                log_console(f"Fixed invalid categories: {invalid_cats} → {valid_cats or ['Other']}", "WARNING")
+                categories = valid_cats or ["Other"]
+            
+            # Handle empty categories
+            if not categories:
+                categories = ["Other"]
+            
+            for record in qa_group_records:
+                record["category_type"] = categories
+                record["category_type_confidence"] = confidence
+                record["category_type_method"] = "complete_conversation"
         
         # Track costs
         if hasattr(response, 'usage') and response.usage:
@@ -1173,120 +1250,34 @@ def process_speaker_block_two_pass(
             enhanced_error_logger.accumulate_costs({
                 "total_tokens": response.usage.total_tokens,
                 "cost": cost_info
-            }, pass_type="primary")
+            })
+        
+        return qa_group_records
         
     except Exception as e:
-        error_msg = f"Primary classification failed for speaker block: {e}"
-        log_error(error_msg, "primary_classification", {"speaker": speaker_name, "error": str(e)})
+        error_msg = f"Q&A classification failed for group {qa_group_id}: {e}"
+        log_error(error_msg, "qa_classification", {"qa_group_id": qa_group_id, "error": str(e)})
         enhanced_error_logger.log_classification_error(
-            transcript_info.get("ticker", "unknown"),
-            "primary",
+            qa_group_records[0].get("ticker", "unknown"),
+            "Investor Q&A",
             error_msg
         )
         
-        # Fallback to category 0 for all
-        for record in indexed_records:
-            record["primary_classification"] = 0
-    
-    # ========== PASS 2: SECONDARY CLASSIFICATION ==========
-    try:
-        system_prompt = create_secondary_classification_prompt(
-            bank_name=transcript_info.get("company_name", "Unknown"),
-            fiscal_year=transcript_info.get("fiscal_year", 2024),
-            fiscal_quarter=transcript_info.get("fiscal_quarter", "Q1"),
-            section_type=section_name,
-            speaker_name=speaker_name,
-            speaker_role=speaker_role,
-            speaker_block_number=speaker_block_number,
-            total_speaker_blocks=total_speaker_blocks,
-            previous_blocks=previous_blocks,
-            current_block_paragraphs=indexed_records
-        )
+        # Fallback to "Other" for failed Q&A group
+        for record in qa_group_records:
+            record["category_type"] = ["Other"]
+            record["category_type_confidence"] = 0.0
+            record["category_type_method"] = "error_fallback"
         
-        response = llm_client.chat.completions.create(
-            model=config["stage_06_llm_classification"]["llm_config"]["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Please identify any secondary categories for each paragraph."}
-            ],
-            tools=create_secondary_classification_tools(),
-            tool_choice="required",
-            temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
-            max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
-        )
-        
-        # Parse secondary classifications
-        if response.choices[0].message.tool_calls:
-            tool_call = response.choices[0].message.tool_calls[0]
-            result = json.loads(tool_call.function.arguments)
-            
-            # Apply secondary classifications
-            for classification in result["classifications"]:
-                para_idx = classification["paragraph_index"]
-                secondary_ids = classification["secondary_category_ids"]
-                
-                # Validate and filter secondary IDs
-                valid_secondary_ids = []
-                for sec_id in secondary_ids:
-                    if sec_id in CATEGORY_REGISTRY:
-                        valid_secondary_ids.append(sec_id)
-                    else:
-                        log_console(f"Invalid secondary category ID {sec_id}, skipping", "WARNING")
-                
-                # Find and update the record
-                for record in indexed_records:
-                    if record["paragraph_index"] == para_idx:
-                        # Don't include primary in secondary
-                        primary = record.get("primary_classification", 0)
-                        filtered_secondary = [sid for sid in valid_secondary_ids if sid != primary]
-                        record["secondary_classifications"] = filtered_secondary
-                        break
-        
-        # Track costs
-        if hasattr(response, 'usage') and response.usage:
-            cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
-            enhanced_error_logger.accumulate_costs({
-                "total_tokens": response.usage.total_tokens,
-                "cost": cost_info
-            }, pass_type="secondary")
-        
-    except Exception as e:
-        error_msg = f"Secondary classification failed for speaker block: {e}"
-        log_error(error_msg, "secondary_classification", {"speaker": speaker_name, "error": str(e)})
-        enhanced_error_logger.log_classification_error(
-            transcript_info.get("ticker", "unknown"),
-            "secondary",
-            error_msg
-        )
-        
-        # No secondary classifications on error
-        for record in indexed_records:
-            record["secondary_classifications"] = []
-    
-    # Map IDs to names for output
-    for record in indexed_records:
-        primary_id = record.get("primary_classification", 0)
-        record["primary_category_name"] = CATEGORY_REGISTRY[primary_id]["name"]
-        
-        secondary_ids = record.get("secondary_classifications", [])
-        record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
-        
-        # Add classification method
-        record["classification_method"] = "two_pass_with_context"
-    
-    return indexed_records
+        return qa_group_records
 
 
-def process_transcript_v2(
-    transcript_key: str,
-    transcript_data: Dict,
-    enhanced_error_logger: EnhancedErrorLogger
-) -> Tuple[List[Dict], bool]:
-    """Process a single transcript with two-pass classification and context."""
+def process_transcript(transcript_key: str, transcript_data: Dict, enhanced_error_logger: EnhancedErrorLogger) -> Tuple[List[Dict], bool]:
+    """Process a single transcript and return classified records."""
     global logger
     
     try:
-        # Extract transcript info
+        # Extract transcript info for OAuth refresh (handle Stage 5's transcript key format)
         if ".xml" in transcript_key:
             # Filename format - extract info from first record
             first_record = None
@@ -1298,89 +1289,37 @@ def process_transcript_v2(
             if first_record:
                 transcript_info = {
                     "ticker": first_record.get("ticker", "unknown"),
-                    "company_name": first_record.get("company_name", "Unknown"),
-                    "fiscal_year": first_record.get("fiscal_year", 2024),
-                    "fiscal_quarter": first_record.get("fiscal_quarter", "Q1")
+                    "fiscal_year": first_record.get("fiscal_year", "unknown"),
+                    "fiscal_quarter": first_record.get("fiscal_quarter", "unknown")
                 }
             else:
-                transcript_info = {
-                    "ticker": "unknown",
-                    "company_name": "Unknown",
-                    "fiscal_year": 2024,
-                    "fiscal_quarter": "Q1"
-                }
+                transcript_info = {"ticker": "unknown", "fiscal_year": "unknown", "fiscal_quarter": "unknown"}
         else:
-            # ticker_event_id format
+            # ticker_event_id format - extract ticker
             parts = transcript_key.split("_")
             transcript_info = {
                 "ticker": parts[0] if parts else "unknown",
-                "company_name": "Unknown",
-                "fiscal_year": 2024,
-                "fiscal_quarter": "Q1"
+                "fiscal_year": "unknown",
+                "fiscal_quarter": "unknown"
             }
         
         # Refresh OAuth token per transcript
         refresh_oauth_token_for_transcript(transcript_info)
         
         classified_records = []
-        previous_md_blocks = []
-        previous_qa_blocks = []
         
-        # Process Management Discussion speaker blocks
+        # Process Management Discussion sections
         if transcript_data["management_discussion"]:
-            # Group by speaker blocks
-            md_speaker_blocks = defaultdict(list)
-            for record in sorted(transcript_data["management_discussion"], key=lambda x: x["paragraph_id"]):
-                md_speaker_blocks[record["speaker_block_id"]].append(record)
-            
-            total_md_blocks = len(md_speaker_blocks)
-            
-            for block_num, (block_id, block_records) in enumerate(md_speaker_blocks.items(), start=1):
-                # Process with two-pass classification
-                classified_block = process_speaker_block_two_pass(
-                    block_records,
-                    transcript_info,
-                    block_num,
-                    total_md_blocks,
-                    previous_md_blocks[-5:],  # Last 5 blocks for context
-                    enhanced_error_logger
-                )
-                
-                classified_records.extend(classified_block)
-                
-                # Add to previous blocks for next iteration
-                previous_md_blocks.append({
-                    "speaker_name": block_records[0]["speaker"],
-                    "section_name": "MANAGEMENT DISCUSSION SECTION",
-                    "paragraphs": classified_block
-                })
+            md_classified = process_management_discussion_section(
+                transcript_data["management_discussion"],
+                enhanced_error_logger
+            )
+            classified_records.extend(md_classified)
         
         # Process Q&A groups
         for qa_group_id, qa_records in transcript_data["qa_groups"].items():
-            # Group by speaker blocks within Q&A
-            qa_speaker_blocks = defaultdict(list)
-            for record in sorted(qa_records, key=lambda x: x["paragraph_id"]):
-                qa_speaker_blocks[record["speaker_block_id"]].append(record)
-            
-            for block_records in qa_speaker_blocks.values():
-                # Use only 1 previous Q&A block for context
-                classified_block = process_speaker_block_two_pass(
-                    block_records,
-                    transcript_info,
-                    1,  # Q&A blocks numbered separately
-                    1,
-                    previous_qa_blocks[-1:] if previous_qa_blocks else [],
-                    enhanced_error_logger
-                )
-                
-                classified_records.extend(classified_block)
-                
-                # Add to previous blocks for next Q&A
-                previous_qa_blocks.append({
-                    "speaker_name": block_records[0]["speaker"],
-                    "section_name": "Q&A",
-                    "paragraphs": classified_block
-                })
+            qa_classified = process_qa_group(qa_records, enhanced_error_logger)
+            classified_records.extend(qa_classified)
         
         return classified_records, True
         
@@ -1398,8 +1337,7 @@ def main():
     # Initialize
     logger = setup_logging()
     log_console("=" * 60)
-    log_console("Stage 6: LLM-Based Financial Content Classification (V2)")
-    log_console("Two-pass classification with sliding context windows")
+    log_console("Stage 6: LLM-Based Financial Content Classification")
     log_console("=" * 60)
     
     # Stage tracking
@@ -1435,10 +1373,11 @@ def main():
             raise FileNotFoundError(f"Stage 5 output not found at {input_path}")
         
         stage5_data = json.loads(input_data.decode('utf-8'))
-        # Stage 5 outputs a JSON array directly
+        # Stage 5 outputs a JSON array directly, not an object with "records" key
         if isinstance(stage5_data, list):
             all_records = stage5_data
         else:
+            # Fallback for other possible formats
             all_records = stage5_data.get("records", [])
         log_console(f"Loaded {len(all_records)} records from Stage 5")
         
@@ -1447,7 +1386,7 @@ def main():
             max_transcripts = stage_config.get("dev_max_transcripts", 2)
             log_console(f"Development mode: limiting to {max_transcripts} transcripts")
             
-            # Group by transcript
+            # Group by transcript and take first N (using Stage 5's transcript key format)
             transcript_groups = defaultdict(list)
             for record in all_records:
                 transcript_key = record.get("filename", f"{record.get('ticker', 'unknown')}_{record.get('event_id', 'unknown')}")
@@ -1462,30 +1401,32 @@ def main():
             all_records = limited_records
             log_console(f"Limited to {len(all_records)} records from {min(max_transcripts, len(transcript_groups))} transcripts")
         
-        # Group records by transcript and section type
+        # Group records by transcript and section type (using Stage 5's field names)
         transcripts = defaultdict(lambda: {"management_discussion": [], "qa_groups": defaultdict(list)})
         
         for record in all_records:
+            # Use Stage 5's transcript key format: filename or ticker_event_id
             transcript_key = record.get("filename", f"{record.get('ticker', 'unknown')}_{record.get('event_id', 'unknown')}")
-            section_name = record.get("section_name")
             
+            # Use Stage 5's section_name field and exact section names
+            section_name = record.get("section_name")
             if section_name == "MANAGEMENT DISCUSSION SECTION":
                 transcripts[transcript_key]["management_discussion"].append(record)
             elif section_name == "Q&A" and record.get("qa_group_id"):
                 qa_group_id = record["qa_group_id"]
                 transcripts[transcript_key]["qa_groups"][qa_group_id].append(record)
         
-        log_console(f"Processing {len(transcripts)} transcripts with two-pass classification")
+        log_console(f"Processing {len(transcripts)} transcripts")
         
         # Process transcripts with incremental saving
-        output_path = nas_path_join(stage_config["output_data_path"], "stage_06_classified_content_v2.json")
+        output_path = nas_path_join(stage_config["output_data_path"], "stage_06_classified_content.json")
         is_first_batch = True
         
         for i, (transcript_key, transcript_data) in enumerate(transcripts.items(), 1):
             log_console(f"\nProcessing transcript {i}/{len(transcripts)}: {transcript_key}")
             
             # Process transcript
-            classified_records, success = process_transcript_v2(transcript_key, transcript_data, enhanced_error_logger)
+            classified_records, success = process_transcript(transcript_key, transcript_data, enhanced_error_logger)
             
             if success and classified_records:
                 # Save incrementally
@@ -1504,7 +1445,7 @@ def main():
             if i < len(transcripts):
                 time.sleep(1)
         
-        # Close the JSON array
+        # Close the JSON array if we processed any transcripts
         successful_transcripts = len(transcripts) - len(failed_transcripts)
         if successful_transcripts > 0:
             if not close_json_array(nas_conn, output_path):
@@ -1512,7 +1453,7 @@ def main():
         
         # Save failed transcripts if any
         if failed_transcripts:
-            failed_path = nas_path_join(stage_config["output_data_path"], "stage_06_failed_transcripts_v2.json")
+            failed_path = nas_path_join(stage_config["output_data_path"], "stage_06_failed_transcripts.json")
             failed_data = {
                 "timestamp": datetime.now().isoformat(),
                 "total_failed": len(failed_transcripts),
@@ -1530,8 +1471,6 @@ def main():
         
         stage_summary = {
             "status": "completed" if not failed_transcripts else "completed_with_errors",
-            "version": "2.0",
-            "classification_method": "two_pass_with_context",
             "start_time": start_time.isoformat(),
             "end_time": end_time.isoformat(),
             "processing_time_seconds": processing_time.total_seconds(),
@@ -1539,8 +1478,6 @@ def main():
             "transcripts_failed": len(failed_transcripts),
             "total_cost": enhanced_error_logger.total_cost,
             "total_tokens": enhanced_error_logger.total_tokens,
-            "primary_pass_tokens": enhanced_error_logger.primary_pass_tokens,
-            "secondary_pass_tokens": enhanced_error_logger.secondary_pass_tokens,
             "errors": {
                 "classification_errors": len(enhanced_error_logger.classification_errors),
                 "authentication_errors": len(enhanced_error_logger.authentication_errors),
@@ -1551,7 +1488,7 @@ def main():
         
         # Display summary
         log_console("\n" + "=" * 60)
-        log_console("STAGE 6 V2 EXECUTION SUMMARY")
+        log_console("STAGE 6 EXECUTION SUMMARY")
         log_console("=" * 60)
         log_console(f"Status: {stage_summary['status']}")
         log_console(f"Processing time: {processing_time}")
@@ -1559,8 +1496,6 @@ def main():
         log_console(f"Transcripts failed: {stage_summary['transcripts_failed']}")
         log_console(f"Total LLM cost: ${stage_summary['total_cost']:.4f}")
         log_console(f"Total tokens used: {stage_summary['total_tokens']:,}")
-        log_console(f"Primary pass tokens: {stage_summary['primary_pass_tokens']:,}")
-        log_console(f"Secondary pass tokens: {stage_summary['secondary_pass_tokens']:,}")
         
         # Save logs
         save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
@@ -1569,7 +1504,7 @@ def main():
         nas_conn.close()
         
     except Exception as e:
-        error_msg = f"Stage 6 V2 execution failed: {e}"
+        error_msg = f"Stage 6 execution failed: {e}"
         log_error(error_msg, "stage_execution", {"error": str(e)})
         log_console(error_msg, "ERROR")
         
@@ -1578,7 +1513,6 @@ def main():
             if 'nas_conn' in locals() and nas_conn:
                 stage_summary = {
                     "status": "failed",
-                    "version": "2.0",
                     "error": str(e),
                     "processing_time_seconds": (datetime.now() - start_time).total_seconds()
                 }
