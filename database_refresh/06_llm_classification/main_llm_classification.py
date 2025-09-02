@@ -849,7 +849,9 @@ def format_previous_speaker_blocks_with_classifications(
         context_parts.append(f"\n[Previous Block #{block_idx} - {speaker_name} - {section_name} - {len(paragraphs)} paragraphs]")
         
         for para in paragraphs[:3]:  # Show first 3 paragraphs as preview
-            content_preview = para['content'][:150] + "..." if len(para['content']) > 150 else para['content']
+            # Fix field name: Stage 3 uses 'paragraph_content', not 'content'
+            content = para.get('paragraph_content', para.get('content', ''))
+            content_preview = content[:150] + "..." if len(content) > 150 else content
             primary_id = para.get('primary_classification', 0)
             primary_name = CATEGORY_REGISTRY[primary_id]['name']
             
@@ -1114,7 +1116,8 @@ def process_speaker_block_two_pass(
     
     # Extract speaker and section info
     first_record = indexed_records[0]
-    speaker_name = first_record.get("speaker", "Unknown")
+    # Fix field name mismatch: Stage 3 uses 'speaker', not 'speaker_name'
+    speaker_name = first_record.get("speaker", first_record.get("speaker_name", "Unknown"))
     speaker_role = ""  # Could be extracted from speaker name if formatted
     section_name = first_record.get("section_name", "Unknown")
     
@@ -1123,7 +1126,8 @@ def process_speaker_block_two_pass(
     # ========== PASS 1: PRIMARY CLASSIFICATION ==========
     try:
         system_prompt = create_primary_classification_prompt(
-            bank_name=transcript_info.get("company_name", "Unknown"),
+            # Use ticker as fallback for company_name since Stage 3 doesn't provide it
+            bank_name=transcript_info.get("company_name", transcript_info.get("ticker", "Unknown")),
             fiscal_year=transcript_info.get("fiscal_year", 2024),
             fiscal_quarter=transcript_info.get("fiscal_quarter", "Q1"),
             section_type=section_name,
@@ -1186,13 +1190,15 @@ def process_speaker_block_two_pass(
         )
         
         # Fallback to category 0 for all
+        log_console(f"Applying fallback category 0 to {len(indexed_records)} records due to classification error", "WARNING")
         for record in indexed_records:
             record["primary_classification"] = 0
     
     # ========== PASS 2: SECONDARY CLASSIFICATION ==========
     try:
         system_prompt = create_secondary_classification_prompt(
-            bank_name=transcript_info.get("company_name", "Unknown"),
+            # Use ticker as fallback for company_name since Stage 3 doesn't provide it
+            bank_name=transcript_info.get("company_name", transcript_info.get("ticker", "Unknown")),
             fiscal_year=transcript_info.get("fiscal_year", 2024),
             fiscal_quarter=transcript_info.get("fiscal_quarter", "Q1"),
             section_type=section_name,
@@ -1350,8 +1356,9 @@ def process_transcript_v2(
                 classified_records.extend(classified_block)
                 
                 # Add to previous blocks for next iteration
+                # Fix field name: use 'speaker' field from Stage 3
                 previous_md_blocks.append({
-                    "speaker_name": block_records[0]["speaker"],
+                    "speaker_name": block_records[0].get("speaker", "Unknown"),
                     "section_name": "MANAGEMENT DISCUSSION SECTION",
                     "paragraphs": classified_block
                 })
@@ -1377,8 +1384,9 @@ def process_transcript_v2(
                 classified_records.extend(classified_block)
                 
                 # Add to previous blocks for next Q&A
+                # Fix field name: use 'speaker' field from Stage 3
                 previous_qa_blocks.append({
-                    "speaker_name": block_records[0]["speaker"],
+                    "speaker_name": block_records[0].get("speaker", "Unknown"),
                     "section_name": "Q&A",
                     "paragraphs": classified_block
                 })
@@ -1442,6 +1450,21 @@ def main():
         else:
             all_records = stage5_data.get("records", [])
         log_console(f"Loaded {len(all_records)} records from Stage 5")
+        
+        # Normalize field names from Stage 3/5 to what Stage 6 expects
+        log_console("Normalizing field names for compatibility...")
+        for record in all_records:
+            # Map 'speaker' to 'speaker_name' for consistency
+            if 'speaker' in record and 'speaker_name' not in record:
+                record['speaker_name'] = record['speaker']
+            
+            # Add company_name if missing (use ticker as fallback)
+            if 'company_name' not in record:
+                record['company_name'] = record.get('ticker', 'Unknown')
+            
+            # Ensure content field exists (map from paragraph_content if needed)
+            if 'paragraph_content' in record and 'content' not in record:
+                record['content'] = record['paragraph_content']
         
         # Apply development mode limits
         if stage_config.get("dev_mode", False):
