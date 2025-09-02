@@ -1100,6 +1100,268 @@ def create_secondary_classification_tools() -> List[Dict]:
     }]
 
 
+def process_qa_conversation_two_pass(
+    qa_conversation_records: List[Dict],
+    transcript_info: Dict[str, Any],
+    qa_group_id: int,
+    total_qa_groups: int,
+    previous_conversations: List[Dict],
+    enhanced_error_logger: EnhancedErrorLogger
+) -> List[Dict]:
+    """Process an entire Q&A conversation (question + answer) with two-pass classification."""
+    global llm_client, config
+    
+    # Index all paragraphs in the conversation
+    indexed_records = []
+    for idx, record in enumerate(qa_conversation_records, start=1):
+        record_copy = record.copy()
+        record_copy["paragraph_index"] = idx
+        indexed_records.append(record_copy)
+    
+    log_console(f"Processing Q&A conversation {qa_group_id} ({len(indexed_records)} paragraphs total)")
+    
+    # Create a single prompt for the entire conversation
+    conversation_text = []
+    speakers_in_conversation = set()
+    
+    for record in indexed_records:
+        speaker = record.get("speaker", record.get("speaker_name", "Unknown"))
+        speakers_in_conversation.add(speaker)
+        conversation_text.append(f"P{record['paragraph_index']} [{speaker}]: {record.get('paragraph_content', record.get('content', ''))}")
+    
+    full_conversation = "\n".join(conversation_text)
+    
+    # ========== PASS 1: PRIMARY CLASSIFICATION (Same for all paragraphs) ==========
+    try:
+        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification.
+
+<document_context>
+Institution: {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}
+Fiscal Period: {transcript_info.get("fiscal_quarter", "Q1")} {transcript_info.get("fiscal_year", 2024)}
+Section: Q&A Conversation
+Q&A Group: {qa_group_id} of {total_qa_groups}
+Speakers in conversation: {', '.join(speakers_in_conversation)}
+</document_context>
+
+<task_description>
+This is a complete Q&A conversation including analyst question(s) and management response(s).
+Classify the PRIMARY financial topic of this entire conversation.
+All paragraphs in this conversation should receive the SAME classification since they are part of the same Q&A exchange.
+</task_description>
+
+<financial_categories>
+{build_numbered_category_list()}
+</financial_categories>
+
+<conversation>
+{full_conversation}
+</conversation>
+
+Use the classify_qa_conversation_primary function to assign ONE primary category ID to ALL paragraphs in this conversation."""
+
+        response = llm_client.chat.completions.create(
+            model=config["stage_06_llm_classification"]["llm_config"]["model"],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Please classify this Q&A conversation with its primary category."}
+            ],
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "classify_qa_conversation_primary",
+                    "description": "Assign primary category to Q&A conversation",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "primary_category_id": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 22,
+                                "description": "Primary category ID for the entire conversation"
+                            },
+                            "confidence": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "Confidence score for classification"
+                            }
+                        },
+                        "required": ["primary_category_id", "confidence"]
+                    }
+                }
+            }],
+            tool_choice="required",
+            temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
+            max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
+        )
+        
+        # Parse primary classification
+        primary_id = 0  # Default
+        confidence = 0.0
+        
+        if response.choices[0].message.tool_calls:
+            tool_call = response.choices[0].message.tool_calls[0]
+            result = json.loads(tool_call.function.arguments)
+            primary_id = result.get("primary_category_id", 0)
+            confidence = result.get("confidence", 0.0)
+            
+            # Validate category ID
+            if primary_id not in CATEGORY_REGISTRY:
+                log_console(f"Invalid category ID {primary_id}, defaulting to 0", "WARNING")
+                primary_id = 0
+        
+        # Apply same primary classification to all paragraphs in conversation
+        for record in indexed_records:
+            record["primary_classification"] = primary_id
+            record["classification_confidence"] = confidence
+            record["classification_method"] = "qa_conversation"
+        
+        # Track costs
+        if hasattr(response, 'usage') and response.usage:
+            cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
+            enhanced_error_logger.accumulate_costs({
+                "total_tokens": response.usage.total_tokens,
+                "cost": cost_info
+            }, pass_type="qa_primary")
+        
+    except Exception as e:
+        error_msg = f"Q&A primary classification failed for group {qa_group_id}: {e}"
+        log_error(error_msg, "qa_classification", {"qa_group": qa_group_id, "error": str(e)})
+        enhanced_error_logger.log_classification_error(
+            transcript_info.get("ticker", "unknown"),
+            "qa_primary",
+            error_msg
+        )
+        
+        # Fallback to category 0
+        log_console(f"Applying fallback category 0 to Q&A group {qa_group_id}", "WARNING")
+        for record in indexed_records:
+            record["primary_classification"] = 0
+            record["classification_confidence"] = 0.0
+            record["classification_method"] = "qa_fallback"
+    
+    # ========== PASS 2: SECONDARY CLASSIFICATION (Optional additional categories) ==========
+    try:
+        # Secondary classification for Q&A conversations
+        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification.
+
+<document_context>
+Institution: {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}
+Fiscal Period: {transcript_info.get("fiscal_quarter", "Q1")} {transcript_info.get("fiscal_year", 2024)}
+Section: Q&A Conversation
+Primary Classification: {CATEGORY_REGISTRY[primary_id]['name']}
+</document_context>
+
+<task_description>
+This Q&A conversation has been classified with primary category: {primary_id} ({CATEGORY_REGISTRY[primary_id]['name']})
+Identify ANY ADDITIONAL relevant financial categories that apply to this conversation.
+</task_description>
+
+<financial_categories>
+{build_numbered_category_list()}
+</financial_categories>
+
+<conversation>
+{full_conversation}
+</conversation>
+
+Use the classify_qa_conversation_secondary function to identify additional relevant categories."""
+
+        response = llm_client.chat.completions.create(
+            model=config["stage_06_llm_classification"]["llm_config"]["model"],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Please identify any secondary categories for this Q&A conversation."}
+            ],
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "classify_qa_conversation_secondary",
+                    "description": "Assign secondary categories to Q&A conversation",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "secondary_category_ids": {
+                                "type": "array",
+                                "items": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 22
+                                },
+                                "description": "List of secondary category IDs (empty if none)"
+                            }
+                        },
+                        "required": ["secondary_category_ids"]
+                    }
+                }
+            }],
+            tool_choice="required",
+            temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
+            max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
+        )
+        
+        # Parse secondary classifications
+        secondary_ids = []
+        
+        if response.choices[0].message.tool_calls:
+            tool_call = response.choices[0].message.tool_calls[0]
+            result = json.loads(tool_call.function.arguments)
+            secondary_ids = result.get("secondary_category_ids", [])
+            
+            # Validate and filter secondary IDs
+            valid_secondary = []
+            for sid in secondary_ids:
+                if sid in CATEGORY_REGISTRY and sid != primary_id:
+                    valid_secondary.append(sid)
+                elif sid not in CATEGORY_REGISTRY:
+                    log_console(f"Invalid secondary category ID {sid}, skipping", "WARNING")
+            
+            secondary_ids = valid_secondary
+        
+        # Apply same secondary classifications to all paragraphs
+        for record in indexed_records:
+            record["secondary_classifications"] = secondary_ids
+        
+        # Track costs
+        if hasattr(response, 'usage') and response.usage:
+            cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
+            enhanced_error_logger.accumulate_costs({
+                "total_tokens": response.usage.total_tokens,
+                "cost": cost_info
+            }, pass_type="qa_secondary")
+        
+    except Exception as e:
+        error_msg = f"Q&A secondary classification failed for group {qa_group_id}: {e}"
+        log_error(error_msg, "qa_secondary_classification", {"qa_group": qa_group_id, "error": str(e)})
+        # Secondary classification failure is not critical - keep primary
+        for record in indexed_records:
+            record["secondary_classifications"] = []
+    
+    # Convert to final format matching Stage 5 structure
+    final_records = []
+    for record in indexed_records:
+        final_record = record.copy()
+        
+        # Build category arrays for compatibility
+        categories = [CATEGORY_REGISTRY[record["primary_classification"]]["name"]]
+        if record.get("secondary_classifications"):
+            for sid in record["secondary_classifications"]:
+                categories.append(CATEGORY_REGISTRY[sid]["name"])
+        
+        final_record["category_type"] = categories
+        final_record["category_type_confidence"] = record.get("classification_confidence", 0.0)
+        final_record["category_type_method"] = "qa_conversation_classification"
+        
+        # Clean up temporary fields
+        fields_to_remove = ["paragraph_index", "primary_classification", "secondary_classifications", "classification_confidence", "classification_method"]
+        for field in fields_to_remove:
+            final_record.pop(field, None)
+        
+        final_records.append(final_record)
+    
+    return final_records
+
+
 def process_speaker_block_two_pass(
     speaker_block_records: List[Dict],
     transcript_info: Dict[str, Any],
@@ -1363,33 +1625,54 @@ def process_transcript_v2(
                     "paragraphs": classified_block
                 })
         
-        # Process Q&A groups
+        # Process Q&A groups - each group is a complete conversation
         for qa_group_id, qa_records in transcript_data["qa_groups"].items():
-            # Group by speaker blocks within Q&A
-            qa_speaker_blocks = defaultdict(list)
-            for record in sorted(qa_records, key=lambda x: x["paragraph_id"]):
-                qa_speaker_blocks[record["speaker_block_id"]].append(record)
+            # Process entire Q&A conversation as one unit (not split by speaker blocks)
+            # This ensures question context is preserved for answer classification
+            log_console(f"Processing Q&A group {qa_group_id} ({len(qa_records)} paragraphs)")
             
-            for block_records in qa_speaker_blocks.values():
-                # Use only 1 previous Q&A block for context
+            # Sort records by paragraph_id to maintain order
+            sorted_qa_records = sorted(qa_records, key=lambda x: x["paragraph_id"])
+            
+            # Process the entire Q&A conversation together
+            classified_conversation = process_qa_conversation_two_pass(
+                sorted_qa_records,
+                transcript_info,
+                qa_group_id,
+                len(transcript_data["qa_groups"]),
+                previous_qa_blocks[-1:] if previous_qa_blocks else [],
+                enhanced_error_logger
+            )
+            
+            classified_records.extend(classified_conversation)
+            
+            # Add to previous blocks for context in next Q&A
+            previous_qa_blocks.append({
+                "qa_group_id": qa_group_id,
+                "section_name": "Q&A",
+                "paragraphs": classified_conversation
+            })
+        
+        # Process any unpaired Q&A records (shouldn't happen if Stage 5 worked correctly)
+        if transcript_data.get("unpaired_qa"):
+            log_console(f"WARNING: Processing {len(transcript_data['unpaired_qa'])} unpaired Q&A records as speaker blocks", "WARNING")
+            
+            # Group by speaker blocks
+            unpaired_speaker_blocks = defaultdict(list)
+            for record in sorted(transcript_data["unpaired_qa"], key=lambda x: x["paragraph_id"]):
+                unpaired_speaker_blocks[record["speaker_block_id"]].append(record)
+            
+            for block_records in unpaired_speaker_blocks.values():
+                # Process as speaker blocks (fallback)
                 classified_block = process_speaker_block_two_pass(
                     block_records,
                     transcript_info,
-                    1,  # Q&A blocks numbered separately
                     1,
-                    previous_qa_blocks[-1:] if previous_qa_blocks else [],
+                    1,
+                    [],
                     enhanced_error_logger
                 )
-                
                 classified_records.extend(classified_block)
-                
-                # Add to previous blocks for next Q&A
-                # Fix field name: use 'speaker' field from Stage 3
-                previous_qa_blocks.append({
-                    "speaker_name": block_records[0].get("speaker", "Unknown"),
-                    "section_name": "Q&A",
-                    "paragraphs": classified_block
-                })
         
         return classified_records, True
         
@@ -1487,7 +1770,12 @@ def main():
             log_console(f"Limited to {len(all_records)} records from {min(max_transcripts, len(transcript_groups))} transcripts")
         
         # Group records by transcript and section type
-        transcripts = defaultdict(lambda: {"management_discussion": [], "qa_groups": defaultdict(list)})
+        transcripts = defaultdict(lambda: {"management_discussion": [], "qa_groups": defaultdict(list), "unpaired_qa": []})
+        
+        # Track statistics
+        total_md_records = 0
+        total_qa_with_group = 0
+        total_qa_without_group = 0
         
         for record in all_records:
             transcript_key = record.get("filename", f"{record.get('ticker', 'unknown')}_{record.get('event_id', 'unknown')}")
@@ -1495,11 +1783,23 @@ def main():
             
             if section_name == "MANAGEMENT DISCUSSION SECTION":
                 transcripts[transcript_key]["management_discussion"].append(record)
-            elif section_name == "Q&A" and record.get("qa_group_id"):
-                qa_group_id = record["qa_group_id"]
-                transcripts[transcript_key]["qa_groups"][qa_group_id].append(record)
+                total_md_records += 1
+            elif section_name == "Q&A":
+                if record.get("qa_group_id"):
+                    qa_group_id = record["qa_group_id"]
+                    transcripts[transcript_key]["qa_groups"][qa_group_id].append(record)
+                    total_qa_with_group += 1
+                else:
+                    # Q&A records without group ID (shouldn't happen if Stage 5 worked correctly)
+                    transcripts[transcript_key]["unpaired_qa"].append(record)
+                    total_qa_without_group += 1
+                    log_console(f"WARNING: Q&A record without qa_group_id: {record.get('paragraph_id')}", "WARNING")
         
         log_console(f"Processing {len(transcripts)} transcripts with two-pass classification")
+        log_console(f"  - MD records: {total_md_records}")
+        log_console(f"  - Q&A records with group ID: {total_qa_with_group}")
+        if total_qa_without_group > 0:
+            log_console(f"  - Q&A records WITHOUT group ID: {total_qa_without_group} (will process as speaker blocks)", "WARNING")
         
         # Process transcripts with incremental saving
         output_path = nas_path_join(stage_config["output_data_path"], "stage_06_classified_content.json")
