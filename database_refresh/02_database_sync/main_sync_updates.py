@@ -790,6 +790,73 @@ def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory:
     return files_to_process, files_to_remove
 
 
+def select_best_version(versions: List[Tuple[str, Dict[str, Any]]]) -> Tuple[str, Dict[str, Any]]:
+    """Select the best version from multiple transcript versions.
+    
+    Selection rules (in priority order):
+    1. Highest version_id (newest version)
+    2. Transcript type priority: Corrected > Final > Script > Raw
+    3. Most recent modification date
+    
+    Args:
+        versions: List of (file_path, nas_record) tuples for the same base transcript
+        
+    Returns:
+        Tuple of (selected_file_path, selected_nas_record)
+    """
+    
+    # Define transcript type priority (higher number = higher priority)
+    type_priority = {
+        "Corrected": 4,
+        "Final": 3,
+        "Script": 2,
+        "Raw": 1
+    }
+    
+    def get_version_score(version_tuple):
+        file_path, nas_record = version_tuple
+        
+        # Extract version info from filename
+        # Format: TICKER_QUARTER_YEAR_TYPE_EVENTID_VERSIONID.xml
+        filename = file_path.split('/')[-1] if '/' in file_path else file_path
+        parts = filename.replace('.xml', '').split('_')
+        
+        # Default values if parsing fails
+        version_id = 0
+        transcript_type = "Raw"
+        
+        if len(parts) >= 6:
+            try:
+                transcript_type = parts[3]
+                version_id = int(parts[5]) if parts[5].isdigit() else 0
+            except (IndexError, ValueError):
+                pass
+        
+        # Calculate score: version_id * 10 + type_priority
+        # This ensures version_id is the primary factor
+        type_score = type_priority.get(transcript_type, 0)
+        score = (version_id * 10) + type_score
+        
+        # Use modification date as tiebreaker
+        mod_date = nas_record.get("date_last_modified", "")
+        
+        return (score, mod_date)
+    
+    # Sort versions by score (highest first)
+    sorted_versions = sorted(versions, key=get_version_score, reverse=True)
+    
+    # Log version selection details
+    if len(versions) > 1:
+        selected_path = sorted_versions[0][0]
+        log_execution(f"Selected best version from {len(versions)} options", {
+            "selected": selected_path,
+            "all_versions": [v[0].split('/')[-1] for v in versions],
+            "selection_reason": "Highest version_id and type priority"
+        })
+    
+    return sorted_versions[0]
+
+
 def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str], files_to_remove: List[str], nas_inventory: Dict[str, Dict[str, Any]], database_inventory: Dict[str, Dict[str, Any]]) -> bool:
     """Save processing queues to NAS refresh folder as simple JSON records.
     
@@ -802,47 +869,95 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
 
     success = True
 
-    # Convert files_to_process to JSON records, filtering for earnings calls only
-    process_records = []
-    earnings_calls_count = 0
-    non_earnings_filtered = 0
-    seen_file_paths = set()  # Track duplicates
-    duplicate_count = 0
+    # Group files by base transcript (ticker_quarter_year) for version selection
+    transcript_groups = {}
+    duplicate_count = 0  # For backwards compatibility, though we now handle this differently
     
     for file_path in files_to_process:
-        # Check for duplicates
-        if file_path in seen_file_paths:
-            duplicate_count += 1
-            log_execution(f"⚠️ DUPLICATE file path in files_to_process: {file_path}")
-            continue  # Skip duplicates
-        seen_file_paths.add(file_path)
-        
-        # Get the NAS record for this file to check if it's an earnings call
         nas_record = nas_inventory.get(file_path, {})
         
-        # Only include earnings calls in the processing queue
-        if nas_record.get("is_earnings_call", False):
-            record = {
-                "file_path": file_path,
-                "date_last_modified": nas_record.get("date_last_modified", datetime.now().isoformat()),
-                "institution_id": nas_record.get("institution_id"),
-                "ticker": nas_record.get("ticker")
-            }
-            process_records.append(record)
-            earnings_calls_count += 1
-        else:
-            non_earnings_filtered += 1
+        # Skip non-earnings calls early
+        if not nas_record.get("is_earnings_call", False):
+            continue
+            
+        # Extract base transcript key from filename
+        # Format: TICKER_QUARTER_YEAR_TYPE_EVENTID_VERSIONID.xml
+        filename = file_path.split('/')[-1] if '/' in file_path else file_path
+        parts = filename.replace('.xml', '').split('_')
+        
+        if len(parts) >= 6:
+            ticker = parts[0]
+            quarter = parts[1]
+            year = parts[2]
+            base_key = f"{ticker}_{quarter}_{year}"
+            
+            if base_key not in transcript_groups:
+                transcript_groups[base_key] = []
+            transcript_groups[base_key].append((file_path, nas_record))
     
-    log_execution(f"Filtered processing queue for earnings calls only", {
+    # Select best version for each transcript group
+    process_records = []
+    earnings_calls_count = 0
+    non_earnings_filtered = len(files_to_process) - sum(len(v) for v in transcript_groups.values())
+    version_selection_count = 0
+    versions_dropped_count = 0
+    
+    log_console(f"📊 Version selection: {len(transcript_groups)} unique transcripts from {len(files_to_process)} files")
+    
+    # Track examples for logging
+    version_selection_examples = []
+    
+    for base_key, versions in transcript_groups.items():
+        if len(versions) > 1:
+            # Multiple versions - select the best one
+            selected_path, selected_record = select_best_version(versions)
+            version_selection_count += 1
+            versions_dropped_count += len(versions) - 1
+            
+            # Store example for logging (limit to first 5)
+            if len(version_selection_examples) < 5:
+                version_selection_examples.append({
+                    "base_key": base_key,
+                    "kept": selected_path.split('/')[-1],
+                    "dropped": [path.split('/')[-1] for path, _ in versions if path != selected_path]
+                })
+        else:
+            # Single version - use it
+            selected_path, selected_record = versions[0]
+        
+        # Add selected version to processing queue
+        record = {
+            "file_path": selected_path,
+            "date_last_modified": selected_record.get("date_last_modified", datetime.now().isoformat()),
+            "institution_id": selected_record.get("institution_id"),
+            "ticker": selected_record.get("ticker")
+        }
+        process_records.append(record)
+        earnings_calls_count += 1
+    
+    log_execution(f"Version selection and filtering complete", {
         "total_files_to_process": len(files_to_process),
-        "duplicates_found_and_removed": duplicate_count,
-        "unique_files_checked": len(seen_file_paths),
+        "unique_transcripts": len(transcript_groups),
+        "version_selection_performed": version_selection_count,
+        "versions_dropped": versions_dropped_count,
         "earnings_calls_included": earnings_calls_count,
         "non_earnings_filtered_out": non_earnings_filtered
     })
     
-    if duplicate_count > 0:
-        log_console(f"⚠️ WARNING: Found and removed {duplicate_count} duplicate file paths in processing queue", "WARNING")
+    if version_selection_count > 0:
+        log_console(f"✅ Version selection: Selected best version for {version_selection_count} transcripts, dropped {versions_dropped_count} duplicate versions")
+        
+        # Show examples of version selection
+        if version_selection_examples:
+            log_console("\n📋 Examples of version selection:")
+            for i, example in enumerate(version_selection_examples, 1):
+                log_console(f"  {i}. {example['base_key']}:")
+                log_console(f"     ✅ Kept: {example['kept']}")
+                for dropped_file in example['dropped']:
+                    log_console(f"     ❌ Dropped: {dropped_file}")
+            
+            if version_selection_count > len(version_selection_examples):
+                log_console(f"  ... and {version_selection_count - len(version_selection_examples)} more transcripts with version selection")
 
     # Save files to process as simple JSON records
     process_path = nas_path_join(refresh_path, "stage_02_process_queue.json")
