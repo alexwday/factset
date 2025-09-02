@@ -1056,7 +1056,10 @@ def main() -> None:
             "files_by_type": {},
             "files_by_ticker": {},
             "files_by_year": {},
-            "files_with_versions": {}
+            "files_with_versions": {},
+            "files_with_zero_paragraphs": [],  # Track files that produce no content
+            "paragraph_distribution": {},  # Track how many paragraphs per file
+            "file_content_status": {}  # Track which files have content vs no content
         }
         
         for i, record in enumerate(processing_queue):
@@ -1065,6 +1068,16 @@ def main() -> None:
             
             # Process single transcript file
             paragraph_records = process_transcript_file(nas_conn, record)
+            
+            # Track paragraph count distribution
+            paragraph_count = len(paragraph_records) if paragraph_records else 0
+            if paragraph_count not in file_stats["paragraph_distribution"]:
+                file_stats["paragraph_distribution"][paragraph_count] = 0
+            file_stats["paragraph_distribution"][paragraph_count] += 1
+            
+            # Track content status for this file
+            filename = file_path.split('/')[-1] if file_path else "unknown"
+            file_stats["file_content_status"][filename] = paragraph_count > 0
             
             if paragraph_records:
                 all_paragraph_records.extend(paragraph_records)
@@ -1101,7 +1114,13 @@ def main() -> None:
                         "type": trans_type
                     })
             else:
-                log_console(f"No paragraphs extracted from {file_path}", "WARNING")
+                log_console(f"⚠️ No paragraphs extracted from {file_path}", "WARNING")
+                # Track files with zero paragraphs
+                file_stats["files_with_zero_paragraphs"].append({
+                    "file_path": file_path,
+                    "ticker": record.get("ticker", "unknown"),
+                    "institution_id": record.get("institution_id", "unknown")
+                })
 
         # Step 9: Save extracted content
         log_console("Step 9: Saving extracted content...")
@@ -1137,6 +1156,26 @@ def main() -> None:
             log_console("\n📊 FILE PROCESSING STATISTICS:")
             log_console(f"  Total files in queue: {file_stats['total_files']}")
             log_console(f"  Successfully processed: {stage_summary['files_processed']}")
+            log_console(f"  Files with NO paragraphs: {len(file_stats['files_with_zero_paragraphs'])}")
+            
+            # Show paragraph distribution
+            if file_stats["paragraph_distribution"]:
+                log_console("\n  📊 Paragraph distribution:")
+                for para_count in sorted(file_stats["paragraph_distribution"].keys()):
+                    file_count = file_stats["paragraph_distribution"][para_count]
+                    if para_count == 0:
+                        log_console(f"    ❌ {para_count} paragraphs: {file_count} files (DROPPED from output)")
+                    else:
+                        log_console(f"    ✅ {para_count} paragraphs: {file_count} files")
+            
+            # Show files with zero paragraphs
+            if file_stats["files_with_zero_paragraphs"]:
+                log_console(f"\n  ⚠️ FILES WITH ZERO PARAGRAPHS (not saved to output):")
+                for i, zero_file in enumerate(file_stats["files_with_zero_paragraphs"][:5], 1):
+                    log_console(f"    {i}. {zero_file['file_path']}")
+                    log_console(f"       Ticker: {zero_file['ticker']}")
+                if len(file_stats["files_with_zero_paragraphs"]) > 5:
+                    log_console(f"    ... and {len(file_stats['files_with_zero_paragraphs']) - 5} more files with zero paragraphs")
             
             # Show files by type
             if file_stats["files_by_type"]:
@@ -1155,18 +1194,67 @@ def main() -> None:
                 multi_version = {k: v for k, v in file_stats["files_with_versions"].items() if len(v) > 1}
                 if multi_version:
                     log_console(f"  📈 Transcripts with multiple versions: {len(multi_version)}")
+                    
+                    # Show examples of multi-version transcripts with status
+                    log_console("\n  📋 Examples of multi-version transcripts (showing which were kept/dropped):")
+                    examples_shown = 0
+                    for transcript_key, versions in multi_version.items():
+                        if examples_shown >= 3:
+                            break
+                        
+                        # Check if this example has both kept and dropped files (more interesting)
+                        has_kept = any(file_stats["file_content_status"].get(v['filename'], False) for v in versions)
+                        has_dropped = any(not file_stats["file_content_status"].get(v['filename'], False) for v in versions)
+                        
+                        # Prioritize showing examples with mixed results
+                        if has_kept and has_dropped:
+                            examples_shown += 1
+                            log_console(f"    {examples_shown}. {transcript_key}:")
+                            for version_info in sorted(versions, key=lambda x: (x['type'], x['version'])):
+                                file_had_content = file_stats["file_content_status"].get(version_info['filename'], False)
+                                status = "✅ KEPT" if file_had_content else "❌ DROPPED (no content)"
+                                log_console(f"       - {version_info['filename']}")
+                                log_console(f"         Type: {version_info['type']}, Event: {version_info['event_id']}, Version: {version_info['version']} → {status}")
+                    
+                    # If we didn't find 3 mixed examples, show any remaining
+                    if examples_shown < 3:
+                        for transcript_key, versions in multi_version.items():
+                            if examples_shown >= 3:
+                                break
+                            has_kept = any(file_stats["file_content_status"].get(v['filename'], False) for v in versions)
+                            has_dropped = any(not file_stats["file_content_status"].get(v['filename'], False) for v in versions)
+                            if not (has_kept and has_dropped):  # Show the non-mixed ones
+                                examples_shown += 1
+                                log_console(f"    {examples_shown}. {transcript_key}:")
+                                for version_info in sorted(versions, key=lambda x: (x['type'], x['version'])):
+                                    file_had_content = file_stats["file_content_status"].get(version_info['filename'], False)
+                                    status = "✅ KEPT" if file_had_content else "❌ DROPPED (no content)"
+                                    log_console(f"       - {version_info['filename']}")
+                                    log_console(f"         Type: {version_info['type']}, Event: {version_info['event_id']}, Version: {version_info['version']} → {status}")
+                    if len(multi_version) > 3:
+                        log_console(f"    ... and {len(multi_version) - 3} more transcripts with multiple versions")
             
             # Show ticker distribution
             if file_stats["files_by_ticker"]:
                 log_console(f"\n  Unique tickers processed: {len(file_stats['files_by_ticker'])}")
             
+            # Summary of output
+            log_console("\n  🎯 OUTPUT SUMMARY:")
+            log_console(f"    Total files in queue: {file_stats['total_files']}")
+            log_console(f"    Files producing paragraphs: {stage_summary['files_processed']}")
+            log_console(f"    Files with zero paragraphs (dropped): {len(file_stats['files_with_zero_paragraphs'])}")
+            log_console(f"    Total paragraph records saved: {stage_summary['paragraphs_extracted']}")
+            
             # Add to stage summary
             stage_summary["file_statistics"] = {
                 "total_files": file_stats["total_files"],
+                "files_with_content": stage_summary['files_processed'],
+                "files_with_zero_paragraphs": len(file_stats["files_with_zero_paragraphs"]),
                 "unique_transcripts": unique_transcripts,
                 "files_by_type": file_stats["files_by_type"],
                 "unique_tickers": len(file_stats["files_by_ticker"]),
-                "multi_version_transcripts": len(multi_version) if 'multi_version' in locals() else 0
+                "multi_version_transcripts": len(multi_version) if 'multi_version' in locals() else 0,
+                "paragraph_distribution": file_stats["paragraph_distribution"]
             }
 
     except Exception as e:

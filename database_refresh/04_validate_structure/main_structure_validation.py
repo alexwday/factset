@@ -832,10 +832,23 @@ def main() -> None:
         # Step 8: Group records by transcript and validate
         log_console("Step 8: Grouping and validating transcript content...")
         
+        # First, analyze the input records
+        log_console(f"📥 INPUT ANALYSIS:")
+        log_console(f"  Total paragraph records from Stage 3: {len(content_records)}")
+        
+        # Count unique files in the input
+        unique_files_in_input = set()
+        for record in content_records:
+            file_path = record.get('file_path', '')
+            if file_path:
+                unique_files_in_input.add(file_path)
+        log_console(f"  Unique files represented in records: {len(unique_files_in_input)}")
+        
         # Track file consolidation details
         transcripts = {}
         file_to_transcript_mapping = {}  # Maps each unique file to its transcript key
         transcript_file_versions = defaultdict(set)  # Track all file versions per transcript
+        records_per_file = defaultdict(int)  # Count records per file
         
         for record in content_records:
             # Build transcript key using ALL unique identifiers from filename
@@ -852,7 +865,11 @@ def main() -> None:
             
             # Track unique file information
             filename = record.get('filename', 'unknown')
+            file_path = record.get('file_path', 'unknown')
             file_identifier = f"{filename} (event:{event_id}, version:{version_id}, type:{transcript_type})"
+            
+            # Count records per file
+            records_per_file[file_path] += 1
             
             # Map file to transcript
             file_to_transcript_mapping[file_identifier] = transcript_key
@@ -869,13 +886,19 @@ def main() -> None:
         log_console("=" * 60)
         
         # Count unique files
-        unique_files_count = len(set(r.get('filename', 'unknown') for r in content_records))
+        unique_files_count = len(unique_files_in_input)
         unique_transcripts_count = len(transcripts)
         
-        log_console(f"📁 Unique files from Stage 3: {unique_files_count}")
-        log_console(f"📊 Unique transcript versions to validate: {unique_transcripts_count}")
-        log_console(f"📎 Using full filename key (ticker_quarter_year_type_eventid_versionid)")
-        log_console(f"✅ Each file version validated separately (no merging)")
+        log_console(f"📁 Unique files from Stage 3 output: {unique_files_count}")
+        log_console(f"📊 Unique transcript keys after grouping: {unique_transcripts_count}")
+        log_console(f"📎 Grouping key: ticker_quarter_year_type_eventid_versionid")
+        
+        # Check for discrepancy
+        if unique_files_count != unique_transcripts_count:
+            log_console(f"⚠️ DISCREPANCY: {unique_files_count} files resulted in {unique_transcripts_count} transcript groups")
+            log_console(f"   This means {unique_files_count - unique_transcripts_count} files are missing from Stage 3 output!")
+        else:
+            log_console(f"✅ Files and transcript groups match perfectly")
         
         # Group by base transcript (ticker_quarter_year) to find versions
         base_transcript_groups = defaultdict(list)
@@ -930,6 +953,20 @@ def main() -> None:
                 log_console(f"  {trans_type}: {count} records")
         
         log_console("=" * 60)
+        
+        # DIAGNOSTIC SUMMARY
+        log_console(f"\n🔍 DIAGNOSTIC SUMMARY:")
+        log_console(f"  Stage 2 → Stage 3: Expected {unique_files_count} files to produce content")
+        log_console(f"  Stage 3 → Stage 4: Received records from {unique_files_count} files")
+        log_console(f"  Stage 4 Grouping: Created {unique_transcripts_count} transcript groups")
+        
+        if unique_files_count != unique_transcripts_count:
+            missing_count = unique_files_count - unique_transcripts_count
+            log_console(f"\n  ❌ ISSUE IDENTIFIED:")
+            log_console(f"     {missing_count} files are missing from Stage 3's output")
+            log_console(f"     These files likely produced 0 paragraphs and were dropped")
+            log_console(f"     Check Stage 3 logs for 'Files with zero paragraphs' section")
+        
         log_console(f"\n✅ Total transcripts to validate: {len(transcripts)}")
         
         # Update stage summary with grouping details
