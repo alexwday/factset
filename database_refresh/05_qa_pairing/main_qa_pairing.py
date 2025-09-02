@@ -584,16 +584,35 @@ def setup_llm_client() -> Optional[OpenAI]:
 
 
 def refresh_oauth_token_for_transcript() -> bool:
-    """Refresh OAuth token for each new transcript."""
-    global oauth_token, llm_client
+    """Refresh OAuth token for each new transcript with retry logic."""
+    global oauth_token, llm_client, config
     
-    # Get fresh token for each transcript
-    new_token = get_oauth_token()
-    if new_token:
-        oauth_token = new_token
-        # Update client with new token
-        llm_client = setup_llm_client()
-        return llm_client is not None
+    max_retries = config.get("stage_05_qa_pairing", {}).get("oauth_retry_count", 3)
+    retry_delay = config.get("stage_05_qa_pairing", {}).get("oauth_retry_delay", 2.0)
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Get fresh token for each transcript
+            new_token = get_oauth_token()
+            if new_token:
+                oauth_token = new_token
+                # Update client with new token
+                llm_client = setup_llm_client()
+                if llm_client is not None:
+                    return True
+                elif attempt < max_retries:
+                    log_execution(f"Failed to setup LLM client (attempt {attempt}/{max_retries}), retrying in {retry_delay * attempt}s...")
+                    time.sleep(retry_delay * attempt)
+            elif attempt < max_retries:
+                log_execution(f"Failed to get OAuth token (attempt {attempt}/{max_retries}), retrying in {retry_delay * attempt}s...")
+                time.sleep(retry_delay * attempt)
+        except Exception as e:
+            if attempt < max_retries:
+                log_execution(f"OAuth refresh error (attempt {attempt}/{max_retries}): {e}, retrying...")
+                time.sleep(retry_delay * attempt)
+            else:
+                log_error(f"OAuth refresh failed after {max_retries} attempts: {e}", "authentication", {})
+    
     return False
 
 
@@ -1161,12 +1180,15 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
         # Create breakpoint detection prompt
         prompt = create_breakpoint_detection_prompt(indexed_blocks, company_name, transcript_title, current_qa_id)
         
-        # Retry logic for LLM calls
-        max_retries = 3
-        retry_delay = 1  # seconds
+        # Retry logic for LLM calls with configurable parameters
+        max_retries = config["stage_05_qa_pairing"].get("max_api_retries", 5)
+        initial_retry_delay = config["stage_05_qa_pairing"].get("api_retry_delay", 1.0)
         
         for attempt in range(1, max_retries + 1):
             try:
+                # Calculate exponential backoff delay for next retry
+                current_retry_delay = initial_retry_delay * (2 ** (attempt - 1))
+                
                 log_execution(f"Breakpoint detection attempt {attempt}/{max_retries} for QA ID {current_qa_id}")
                 
                 # Make LLM API call
@@ -1190,8 +1212,8 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                         enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
                         return None
                     else:
-                        log_execution(f"{error_msg}, retrying in {retry_delay}s...")
-                        time.sleep(retry_delay)
+                        log_execution(f"{error_msg}, retrying in {current_retry_delay}s...")
+                        time.sleep(current_retry_delay)
                         continue
                 
                 # Extract decision
@@ -1228,8 +1250,8 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                         enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
                         return None
                     else:
-                        log_execution(f"{error_msg}, retrying in {retry_delay}s...")
-                        time.sleep(retry_delay)
+                        log_execution(f"{error_msg}, retrying in {current_retry_delay}s...")
+                        time.sleep(current_retry_delay)
                         continue
                 
                 # Log token usage and cost
@@ -1263,7 +1285,7 @@ def detect_analyst_breakpoint(indexed_blocks: List[Dict],
                     enhanced_error_logger.log_boundary_error(transcript_id, current_qa_id, f"{error_msg} after {max_retries} attempts")
                     return None
                 else:
-                    log_execution(f"{error_msg}, retrying in {retry_delay}s...")
+                    log_execution(f"{error_msg}, retrying in {current_retry_delay}s...")
                     time.sleep(retry_delay)
         
         # Should never reach here, but safety fallback
@@ -1346,8 +1368,7 @@ def validate_analyst_assignment(proposed_qa_blocks: List[Dict],
                 attempt_info = f" (attempt {validation_attempt})" if validation_attempt > 1 else ""
                 
                 if validation == "accept":
-                    log_console(f"{qa_id} breakpoint validated")
-                    log_execution(f"Validation accepted{attempt_info} for QA ID {qa_id}")
+                    log_execution(f"QA ID {qa_id} breakpoint validated - Validation accepted{attempt_info}")
                     return True
                 else:
                     log_execution(f"Validation rejected{attempt_info} for QA ID {qa_id}")
@@ -1409,8 +1430,8 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 speaker_block_id_sequence.append(block_id)
                 seen_block_ids.add(block_id)
         
-        # Simple initial log
-        log_console(f"File: {transcript_id}, {len(speaker_block_id_sequence)} QA speaker blocks, speaker block range {min(speaker_block_id_sequence)} to {max(speaker_block_id_sequence)}")
+        # Log to execution log only (not console) for cleaner output
+        log_execution(f"File: {transcript_id}, {len(speaker_block_id_sequence)} QA speaker blocks, speaker block range {min(speaker_block_id_sequence)} to {max(speaker_block_id_sequence)}")
         log_execution(f"Processing {len(qa_speaker_blocks)} Q&A speaker blocks using sliding window approach")
         log_execution(f"Speaker block ID range: {min(speaker_block_id_sequence)} to {max(speaker_block_id_sequence)} ({len(speaker_block_id_sequence)} unique blocks)")
         
@@ -1487,11 +1508,11 @@ def process_qa_boundaries_sliding_window(speaker_blocks: List[Dict], transcript_
                 sliding_state["processing_complete"] = True
                 break
             
-            # Log batch info
+            # Log batch info to execution log only (not console)
             batch_start_id = accumulated_window_block_ids[0]
             batch_end_id = accumulated_window_block_ids[-1]
             batch_number = (iteration_count + window_size - 1) // window_size  # Approximate batch number
-            log_console(f"Batch {batch_number} range {batch_start_id} to {batch_end_id}")
+            log_execution(f"Batch {batch_number} range {batch_start_id} to {batch_end_id}")
             log_execution(f"Processing window for QA ID {sliding_state['current_qa_id']} (iteration {iteration_count})")
             
             # Track window advancement to detect infinite loops
@@ -1860,42 +1881,123 @@ def apply_qa_assignments_to_records(records: List[Dict], qa_groups: List[Dict]) 
     return enhanced_records
 
 
-def append_records_to_output(nas_conn: SMBConnection, file_path: str, records: List[Dict], is_first: bool) -> bool:
+def load_existing_output(nas_conn: SMBConnection, output_path: str) -> set:
+    """
+    Load existing output file and extract completed transcript IDs.
+    Returns a set of transcript IDs that have already been processed.
+    """
+    try:
+        output_filename = "stage_05_qa_paired_content.json"
+        output_file_path = nas_path_join(output_path, output_filename)
+        
+        # Check if file exists
+        if not nas_file_exists(nas_conn, output_file_path):
+            log_execution("No existing output file found, starting fresh")
+            return set()
+        
+        # Download existing file
+        log_console("Loading existing output file for resume...")
+        existing_content = nas_download_file(nas_conn, output_file_path)
+        if existing_content is None:
+            log_execution("Could not load existing output file, starting fresh")
+            return set()
+        
+        # Parse JSON content
+        try:
+            # Handle incomplete JSON arrays (missing closing bracket)
+            content_str = existing_content.decode('utf-8').strip()
+            if content_str and not content_str.endswith(']'):
+                content_str += ']'  # Add closing bracket for parsing
+            
+            if not content_str or content_str == '[\n]' or content_str == '[]':
+                log_execution("Existing output file is empty, starting fresh")
+                return set()
+                
+            records = json.loads(content_str)
+            
+            # Extract unique transcript IDs
+            completed_ids = set()
+            for record in records:
+                # Build transcript ID from record fields
+                ticker = record.get('ticker', 'unknown')
+                fiscal_quarter = record.get('fiscal_quarter', 'unknown')
+                fiscal_year = record.get('fiscal_year', 'unknown')
+                transcript_type = record.get('transcript_type', 'unknown')
+                event_id = record.get('event_id', 'unknown')
+                version_id = record.get('version_id', 'unknown')
+                
+                transcript_id = f"{ticker}_{fiscal_quarter}_{fiscal_year}_{transcript_type}_{event_id}_{version_id}"
+                completed_ids.add(transcript_id)
+            
+            # Get unique count
+            unique_completed = len(completed_ids)
+            log_console(f"Found {unique_completed} completed transcripts in existing output")
+            log_execution(f"Loaded existing output with {len(records)} records from {unique_completed} transcripts")
+            
+            return completed_ids
+            
+        except json.JSONDecodeError as e:
+            log_error(f"Failed to parse existing output file: {e}", "resume_load", {"error": str(e)})
+            log_console("WARNING: Could not parse existing output, starting fresh", "WARNING")
+            return set()
+            
+    except Exception as e:
+        log_error(f"Error loading existing output: {e}", "resume_load", {"error": str(e)})
+        return set()
+
+
+def append_records_to_output(nas_conn: SMBConnection, file_path: str, records: List[Dict], is_first: bool, max_retries: int = 3) -> bool:
     """
     Append records to an existing JSON array file on NAS.
     Handles comma placement for proper JSON array formatting.
+    Includes retry logic for transient failures.
     """
-    try:
-        # Prepare JSON content
-        if not is_first:
-            # Add comma before new records if not the first entry
-            records_json = ",\n" + json.dumps(records, indent=2)[1:-1]  # Remove [ and ]
-        else:
-            # First entry, no leading comma
-            records_json = json.dumps(records, indent=2)[1:-1]  # Remove [ and ]
-        
-        # Download existing file to append
-        existing_content = nas_download_file(nas_conn, file_path)
-        if existing_content is None:
-            log_error(f"Failed to download file for append: {file_path}", "output_save", {"path": file_path})
-            return False
-        
-        # Combine content
-        new_content = existing_content + records_json.encode('utf-8')
-        
-        # Upload back
-        content_bytes = io.BytesIO(new_content)
-        content_bytes.seek(0)
-        
-        if nas_upload_file(nas_conn, content_bytes, file_path):
-            return True
-        else:
-            log_error(f"Failed to upload appended content: {file_path}", "output_save", {"path": file_path})
-            return False
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Prepare JSON content
+            if not is_first:
+                # Add comma before new records if not the first entry
+                records_json = ",\n" + json.dumps(records, indent=2)[1:-1]  # Remove [ and ]
+            else:
+                # First entry, no leading comma
+                records_json = json.dumps(records, indent=2)[1:-1]  # Remove [ and ]
             
-    except Exception as e:
-        log_error(f"Failed to append records: {e}", "output_save", {"path": file_path, "error": str(e)})
-        return False
+            # Download existing file to append
+            existing_content = nas_download_file(nas_conn, file_path)
+            if existing_content is None:
+                if attempt < max_retries:
+                    log_execution(f"Failed to download file for append (attempt {attempt}/{max_retries}), retrying...")
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                log_error(f"Failed to download file for append after {max_retries} attempts: {file_path}", "output_save", {"path": file_path})
+                return False
+            
+            # Combine content
+            new_content = existing_content + records_json.encode('utf-8')
+            
+            # Upload back with retry
+            content_bytes = io.BytesIO(new_content)
+            content_bytes.seek(0)
+            
+            if nas_upload_file(nas_conn, content_bytes, file_path):
+                return True
+            else:
+                if attempt < max_retries:
+                    log_execution(f"Failed to upload appended content (attempt {attempt}/{max_retries}), retrying...")
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                log_error(f"Failed to upload appended content after {max_retries} attempts: {file_path}", "output_save", {"path": file_path})
+                return False
+                
+        except Exception as e:
+            if attempt < max_retries:
+                log_execution(f"Failed to append records (attempt {attempt}/{max_retries}): {e}, retrying...")
+                time.sleep(2 ** attempt)  # Exponential backoff
+                continue
+            log_error(f"Failed to append records after {max_retries} attempts: {e}", "output_save", {"path": file_path, "error": str(e)})
+            return False
+    
+    return False
 
 
 def close_json_array(nas_conn: SMBConnection, file_path: str) -> bool:
@@ -1920,10 +2022,23 @@ def close_json_array(nas_conn: SMBConnection, file_path: str) -> bool:
         return False
 
 
-def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> Tuple[List[Dict], int]:
+def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> Tuple[List[Dict], int, Dict[str, Any]]:
     """
     Process a single transcript for Q&A pairing using state-based approach with per-transcript OAuth refresh.
+    Returns: (enhanced_records, qa_groups_count, metrics_dict)
     """
+    
+    # Initialize transcript metrics
+    transcript_metrics = {
+        "qa_groups": 0,
+        "unassigned_blocks": 0,
+        "llm_cost": 0.0,
+        "tokens_used": 0,
+        "errors": [],
+        "processing_time": 0
+    }
+    
+    start_time = time.time()
     
     try:
         # Refresh OAuth token for each transcript
@@ -1938,9 +2053,14 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
                 "message": f"OAuth token refresh failed for transcript {transcript_id}",
                 "details": {"transcript_id": transcript_id}
             })
-            return transcript_records, 0  # Return original records without Q&A assignments
+            transcript_metrics["errors"].append("AUTH_FAIL")
+            return transcript_records, 0, transcript_metrics  # Return original records without Q&A assignments
         
         log_execution(f"Processing Q&A pairing for transcript: {transcript_id}")
+        
+        # Track initial cost/tokens
+        initial_cost = enhanced_error_logger.total_cost
+        initial_tokens = enhanced_error_logger.total_tokens
         
         # Extract transcript metadata for context
         transcript_metadata = extract_transcript_metadata(transcript_records)
@@ -1959,15 +2079,29 @@ def process_transcript_qa_pairing(transcript_records: List[Dict], transcript_id:
         # Apply Q&A assignments to records
         enhanced_records = apply_qa_assignments_to_records(transcript_records, qa_groups)
         
+        # Calculate metrics
+        transcript_metrics["qa_groups"] = len(qa_groups)
+        transcript_metrics["llm_cost"] = enhanced_error_logger.total_cost - initial_cost
+        transcript_metrics["tokens_used"] = enhanced_error_logger.total_tokens - initial_tokens
+        transcript_metrics["processing_time"] = time.time() - start_time
+        
+        # Count unassigned blocks (Q&A records without qa_group_id)
+        unassigned_count = sum(1 for record in enhanced_records 
+                              if record.get("section_name") == "Q&A" and 
+                              record.get("qa_group_id") is None)
+        transcript_metrics["unassigned_blocks"] = unassigned_count
+        
         log_execution(f"Completed Q&A pairing for transcript {transcript_id}: {len(qa_groups)} groups identified")
         
-        return enhanced_records, len(qa_groups)
+        return enhanced_records, len(qa_groups), transcript_metrics
         
     except Exception as e:
         error_msg = f"Transcript Q&A pairing failed: {e}"
         log_error(error_msg, "processing", {"transcript_id": transcript_id, "exception_type": type(e).__name__})
         enhanced_error_logger.log_processing_error(transcript_id, error_msg)
-        return transcript_records, 0  # Return original records on failure
+        transcript_metrics["errors"].append(f"PROCESSING_ERROR: {str(e)[:50]}")
+        transcript_metrics["processing_time"] = time.time() - start_time
+        return transcript_records, 0, transcript_metrics  # Return original records on failure
 
 
 def main() -> None:
@@ -2062,8 +2196,8 @@ def main() -> None:
 
         stage_summary["total_transcripts_processed"] = len(transcripts)
 
-        # Step 10: Set up output files
-        log_console("Step 10: Setting up output files...")
+        # Step 10: Check for existing output and enable resume
+        log_console("Step 10: Checking for existing output (resume capability)...")
         output_path = config["stage_05_qa_pairing"]["output_data_path"]
         output_filename = "stage_05_qa_paired_content.json"
         output_file_path = nas_path_join(output_path, output_filename)
@@ -2073,16 +2207,53 @@ def main() -> None:
         
         nas_create_directory_recursive(nas_conn, output_path)
         
-        # Initialize output files with empty arrays
-        try:
-            # Main output file
-            output_bytes = io.BytesIO(b"[\n")
-            if not nas_upload_file(nas_conn, output_bytes, output_file_path):
-                log_console("Failed to initialize output file", "ERROR")
-                stage_summary["status"] = "failed"
-                return
+        # Check if resume is enabled (default: True)
+        enable_resume = config["stage_05_qa_pairing"].get("enable_resume", True)
+        completed_transcript_ids = set()
+        
+        if enable_resume:
+            # Load existing output to identify completed transcripts
+            completed_transcript_ids = load_existing_output(nas_conn, output_path)
+            
+            if completed_transcript_ids:
+                # Filter out already-processed transcripts
+                original_count = len(transcripts)
+                transcripts = {tid: records for tid, records in transcripts.items() 
+                              if tid not in completed_transcript_ids}
+                resumed_count = original_count - len(transcripts)
                 
-            # Failed transcripts file
+                if resumed_count > 0:
+                    log_console(f"RESUME MODE: Skipping {resumed_count} already-processed transcripts")
+                    log_console(f"Remaining transcripts to process: {len(transcripts)}")
+                    stage_summary["resumed_from_existing"] = True
+                    stage_summary["skipped_completed_transcripts"] = resumed_count
+                
+                if len(transcripts) == 0:
+                    log_console("All transcripts already processed. Nothing to do.")
+                    stage_summary["status"] = "completed_all_processed"
+                    return
+        
+        # Initialize or prepare output files
+        first_successful = True
+        first_failed = True
+        
+        try:
+            if not completed_transcript_ids:
+                # No existing output, initialize new files
+                log_console("Initializing new output files...")
+                
+                # Main output file
+                output_bytes = io.BytesIO(b"[\n")
+                if not nas_upload_file(nas_conn, output_bytes, output_file_path):
+                    log_console("Failed to initialize output file", "ERROR")
+                    stage_summary["status"] = "failed"
+                    return
+            else:
+                # Existing output found, will append to it
+                log_console("Will append to existing output file...")
+                first_successful = False  # Not the first entry anymore
+                
+            # Always initialize failed transcripts file fresh
             failed_bytes = io.BytesIO(b"[\n")
             if not nas_upload_file(nas_conn, failed_bytes, failed_file_path):
                 log_console("Failed to initialize failed transcripts file", "ERROR")
@@ -2099,42 +2270,89 @@ def main() -> None:
         total_qa_groups_count = 0
         successful_transcripts = 0
         failed_transcripts = 0
-        first_successful = True
+        # first_successful already set above based on resume status
         first_failed = True
 
+        # Add header for transcript processing
+        log_console("")
+        log_console("TRANSCRIPT PROCESSING:")
+        log_console("-" * 120)
+        
         for i, (transcript_id, transcript_records) in enumerate(transcripts.items(), 1):
-            log_console(f"Processing transcript {i}/{len(transcripts)}: {transcript_id}")
+            # Extract company ticker for cleaner display
+            ticker = transcript_id.split('_')[0] if '_' in transcript_id else transcript_id[:10]
+            
+            # Process transcript
+            enhanced_records, qa_groups_count, metrics = process_transcript_qa_pairing(
+                transcript_records, transcript_id, enhanced_error_logger
+            )
+            
+            # Build status line components
+            status_symbol = "✓"
+            status_color = ""
+            save_success = False
             
             try:
-                enhanced_records, qa_groups_count = process_transcript_qa_pairing(
-                    transcript_records, transcript_id, enhanced_error_logger
-                )
-                
-                if qa_groups_count > 0 or len(enhanced_records) > 0:
-                    # Append to main output file
+                if metrics.get("errors"):
+                    status_symbol = "✗"
+                    status_color = "ERROR"
+                elif qa_groups_count > 0 or len(enhanced_records) > 0:
+                    # Try to append to main output file
                     if append_records_to_output(nas_conn, output_file_path, enhanced_records, first_successful):
                         successful_transcripts += 1
                         total_qa_groups_count += qa_groups_count
                         first_successful = False
-                        log_console(f"✓ Transcript {transcript_id} saved ({len(enhanced_records)} records, {qa_groups_count} Q&A groups)")
+                        save_success = True
                     else:
                         # If append fails, add to failed transcripts
+                        status_symbol = "⚠"
+                        status_color = "WARNING"
                         if append_records_to_output(nas_conn, failed_file_path, transcript_records, first_failed):
                             failed_transcripts += 1
                             first_failed = False
-                            log_console(f"✗ Transcript {transcript_id} moved to failed file (append error)", "WARNING")
                 else:
-                    log_console(f"⚠ Transcript {transcript_id} skipped (no records)", "WARNING")
+                    status_symbol = "○"
+                    status_color = "WARNING"
                     
             except Exception as e:
-                # Add failed transcript to failed file
-                log_console(f"✗ Transcript {transcript_id} failed: {e}", "ERROR")
-                log_error(f"Transcript processing failed: {e}", "processing", {"transcript_id": transcript_id})
+                status_symbol = "✗"
+                status_color = "ERROR"
+                metrics["errors"].append(f"SAVE_ERROR: {str(e)[:30]}")
+                log_error(f"Transcript save failed: {e}", "processing", {"transcript_id": transcript_id})
                 
+                # Try to save to failed file
                 if append_records_to_output(nas_conn, failed_file_path, transcript_records, first_failed):
                     failed_transcripts += 1
                     first_failed = False
+            
+            # Calculate progress percentage
+            progress_pct = (i / len(transcripts)) * 100
+            
+            # Format the single status line with all key metrics
+            status_line = (
+                f"{status_symbol} [{i:3d}/{len(transcripts):3d}] {progress_pct:3.0f}% | {ticker:8s} | "
+                f"QA: {qa_groups_count:3d} | "
+                f"Gaps: {metrics.get('unassigned_blocks', 0):4d} | "
+                f"${metrics.get('llm_cost', 0):.4f} | "
+                f"{metrics.get('processing_time', 0):5.1f}s"
+            )
+            
+            # Add error info if present
+            if metrics.get("errors"):
+                status_line += f" | Errors: {', '.join(metrics['errors'])}"
+            
+            # Log the single status line
+            if status_color:
+                log_console(status_line, status_color)
+            else:
+                log_console(status_line)
 
+        # Print summary line
+        log_console("-" * 120)
+        log_console(f"PROCESSING COMPLETE: {successful_transcripts} succeeded, {failed_transcripts} failed, "
+                   f"Total QA Groups: {total_qa_groups_count}, Total Cost: ${enhanced_error_logger.total_cost:.4f}")
+        log_console("")
+        
         # Step 12: Close JSON arrays in output files
         log_console("Step 12: Finalizing output files...")
         
@@ -2168,21 +2386,38 @@ def main() -> None:
                 stage_summary["errors"][error_type] += 1
 
         # Final summary
-        log_console("=== STAGE 5 Q&A PAIRING COMPLETE ===")
-        log_console(f"Total transcripts: {stage_summary['total_transcripts_processed']}")
-        log_console(f"Successful transcripts: {successful_transcripts}")
-        log_console(f"Failed transcripts: {failed_transcripts}")
-        log_console(f"Total records processed: {stage_summary['total_records_processed']}")
-        log_console(f"Q&A groups identified: {stage_summary['total_qa_groups_identified']}")
-        log_console(f"Total LLM cost: ${stage_summary['total_llm_cost']:.4f}")
-        log_console(f"Total tokens used: {stage_summary['total_tokens_used']:,}")
-        log_console(f"Total errors: {sum(stage_summary['errors'].values())}")
-        log_console(f"Execution time: {execution_time}")
-        log_console(f"Output files:")
+        log_console("")
+        log_console("=" * 120)
+        log_console("STAGE 5 Q&A PAIRING COMPLETE")
+        log_console("=" * 120)
+        log_console("")
+        log_console("SUMMARY:")
+        log_console(f"  • Transcripts Processed: {successful_transcripts}/{stage_summary['total_transcripts_processed']} succeeded")
+        if stage_summary.get("resumed_from_existing"):
+            log_console(f"  • Resume Mode: Skipped {stage_summary.get('skipped_completed_transcripts', 0)} already completed")
+        log_console(f"  • Q&A Groups Created: {stage_summary['total_qa_groups_identified']}")
+        log_console(f"  • Total Records: {stage_summary['total_records_processed']:,}")
+        log_console("")
+        log_console("COSTS:")
+        log_console(f"  • LLM Cost: ${stage_summary['total_llm_cost']:.4f}")
+        log_console(f"  • Tokens Used: {stage_summary['total_tokens_used']:,}")
+        log_console("")
+        log_console("PERFORMANCE:")
+        log_console(f"  • Execution Time: {execution_time}")
+        log_console(f"  • Avg Time/Transcript: {execution_time.total_seconds() / max(successful_transcripts, 1):.1f}s")
+        if sum(stage_summary['errors'].values()) > 0:
+            log_console("")
+            log_console("ERRORS:")
+            for error_type, count in stage_summary['errors'].items():
+                if count > 0:
+                    log_console(f"  • {error_type}: {count}")
+        log_console("")
+        log_console("OUTPUT FILES:")
         if successful_transcripts > 0:
-            log_console(f"  - Main output: {output_filename}")
+            log_console(f"  • Main: {output_filename}")
         if failed_transcripts > 0:
-            log_console(f"  - Failed transcripts: {failed_filename}")
+            log_console(f"  • Failed: {failed_filename}")
+        log_console("=" * 120)
 
     except Exception as e:
         stage_summary["status"] = "failed"
