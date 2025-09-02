@@ -667,7 +667,7 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
             valid_transcript_keys = {result["transcript_key"] for result in valid_transcripts}
             valid_records = [
                 record for record in original_records 
-                if f"{record.get('ticker', 'unknown')}_{record.get('fiscal_year', 'unknown')}_{record.get('fiscal_quarter', 'unknown')}" in valid_transcript_keys
+                if f"{record.get('ticker', 'unknown')}_{record.get('fiscal_quarter', 'unknown')}_{record.get('fiscal_year', 'unknown')}_{record.get('transcript_type', 'unknown')}_{record.get('event_id', 'unknown')}_{record.get('version_id', 'unknown')}" in valid_transcript_keys
             ]
             
             # Output valid records in Stage 3 format (direct list)
@@ -700,7 +700,7 @@ def save_validation_outputs(nas_conn: SMBConnection, valid_transcripts: List[Dic
             invalid_transcript_keys = {result["transcript_key"] for result in invalid_transcripts}
             invalid_records = [
                 record for record in original_records 
-                if f"{record.get('ticker', 'unknown')}_{record.get('fiscal_year', 'unknown')}_{record.get('fiscal_quarter', 'unknown')}" in invalid_transcript_keys
+                if f"{record.get('ticker', 'unknown')}_{record.get('fiscal_quarter', 'unknown')}_{record.get('fiscal_year', 'unknown')}_{record.get('transcript_type', 'unknown')}_{record.get('event_id', 'unknown')}_{record.get('version_id', 'unknown')}" in invalid_transcript_keys
             ]
             
             # Output invalid records in Stage 3 format (direct list)
