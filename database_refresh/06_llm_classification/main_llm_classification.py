@@ -1482,12 +1482,14 @@ Use the classify_qa_speaker_blocks_secondary function to identify ALL additional
             record["primary_classification"] = secondary_ids[0]
             record["secondary_classifications"] = secondary_ids[1:]
     
-    # Map IDs to names for output - SAME FORMAT AS MD SPEAKER BLOCKS
+    # Map IDs to names for output and keep IDs as well - SAME FORMAT AS MD SPEAKER BLOCKS
     for record in all_records_with_sb_index:
         primary_id = record.get("primary_classification", 0)
+        record["primary_category_id"] = primary_id
         record["primary_category_name"] = CATEGORY_REGISTRY[primary_id]["name"]
         
         secondary_ids = record.get("secondary_classifications", [])
+        record["secondary_category_ids"] = secondary_ids
         record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
         
         # Clean up temporary fields to match MD output
@@ -1684,16 +1686,18 @@ def process_speaker_block_two_pass(
             # Remove the promoted category from secondary list
             record["secondary_classifications"] = secondary_ids[1:]
     
-    # Map IDs to names for output
+    # Map IDs to names for output and keep IDs as well
     for record in indexed_records:
         primary_id = record.get("primary_classification", 0)
+        record["primary_category_id"] = primary_id
         record["primary_category_name"] = CATEGORY_REGISTRY[primary_id]["name"]
         
         secondary_ids = record.get("secondary_classifications", [])
+        record["secondary_category_ids"] = secondary_ids
         record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
         
         # DON'T clean up paragraph_index yet - needed for previous_blocks context
-        # Clean up only the classification IDs
+        # Clean up only the internal classification fields
         fields_to_remove = ["primary_classification", "secondary_classifications"]
         for field in fields_to_remove:
             record.pop(field, None)
