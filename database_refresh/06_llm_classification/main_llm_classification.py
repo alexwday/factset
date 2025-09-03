@@ -694,6 +694,93 @@ def close_json_array(nas_conn: SMBConnection, file_path: str) -> bool:
         return False
 
 
+def nas_file_exists(nas_conn: SMBConnection, file_path: str) -> bool:
+    """Check if a file exists on NAS."""
+    try:
+        # Parse path
+        path_parts = file_path.replace('\\', '/').split('/')
+        file_name = path_parts[-1]
+        dir_path = '/'.join(path_parts[:-1]) if len(path_parts) > 1 else '/'
+        
+        # List directory contents
+        files = nas_conn.listPath(os.environ.get('NAS_SHARE_NAME'), dir_path)
+        
+        # Check if file exists
+        for file_info in files:
+            if file_info.filename == file_name:
+                return True
+        return False
+        
+    except Exception as e:
+        log_error(f"Error checking file existence: {e}", "nas_operation", {"path": file_path, "error": str(e)})
+        return False
+
+
+def load_existing_output(nas_conn: SMBConnection, output_path: str) -> set:
+    """
+    Load existing output file and extract completed transcript IDs.
+    Returns a set of transcript IDs that have already been processed.
+    Adapted from Stage 5 for Stage 6 resume capability.
+    """
+    try:
+        output_filename = "stage_06_classified_content.json"
+        output_file_path = nas_path_join(output_path, output_filename)
+        
+        # Check if file exists
+        if not nas_file_exists(nas_conn, output_file_path):
+            log_execution("No existing output file found, starting fresh")
+            return set()
+        
+        # Download existing file
+        log_console("Loading existing output file for resume...")
+        existing_content = nas_download_file(nas_conn, output_file_path)
+        if existing_content is None:
+            log_execution("Could not load existing output file, starting fresh")
+            return set()
+        
+        # Parse JSON content
+        try:
+            # Handle incomplete JSON arrays (missing closing bracket)
+            content_str = existing_content.decode('utf-8').strip()
+            if content_str and not content_str.endswith(']'):
+                content_str += ']'  # Add closing bracket for parsing
+            
+            if not content_str or content_str == '[\n]' or content_str == '[]':
+                log_execution("Existing output file is empty, starting fresh")
+                return set()
+                
+            records = json.loads(content_str)
+            
+            # Extract unique transcript IDs
+            completed_ids = set()
+            for record in records:
+                # Build transcript ID from record fields
+                # Use filename if available, otherwise construct from components
+                if 'filename' in record:
+                    transcript_id = record['filename']
+                else:
+                    ticker = record.get('ticker', 'unknown')
+                    event_id = record.get('event_id', 'unknown')
+                    transcript_id = f"{ticker}_{event_id}"
+                completed_ids.add(transcript_id)
+            
+            # Get unique count
+            unique_completed = len(completed_ids)
+            log_console(f"Found {unique_completed} completed transcripts in existing output")
+            log_execution(f"Loaded existing output with {len(records)} records from {unique_completed} transcripts")
+            
+            return completed_ids
+            
+        except json.JSONDecodeError as e:
+            log_error(f"Failed to parse existing output file: {e}", "resume_load", {"error": str(e)})
+            log_console("WARNING: Could not parse existing output, starting fresh", "WARNING")
+            return set()
+            
+    except Exception as e:
+        log_error(f"Error loading existing output: {e}", "resume_load", {"error": str(e)})
+        return set()
+
+
 # Security validation functions
 def validate_file_path(path: str) -> bool:
     """Prevent directory traversal attacks."""
@@ -1958,15 +2045,51 @@ def main():
                     total_qa_without_group += 1
                     log_console(f"WARNING: Q&A record without qa_group_id: {record.get('paragraph_id')}", "WARNING")
         
-        log_console(f"Processing {len(transcripts)} transcripts with two-pass classification")
+        log_console(f"Found {len(transcripts)} transcripts to process with two-pass classification")
         log_console(f"  - MD records: {total_md_records}")
         log_console(f"  - Q&A records with group ID: {total_qa_with_group}")
         if total_qa_without_group > 0:
             log_console(f"  - Q&A records WITHOUT group ID: {total_qa_without_group} (will process as speaker blocks)", "WARNING")
         
+        # Check for existing output and enable resume
+        log_console("\nChecking for existing output (resume capability)...")
+        output_path_base = stage_config["output_data_path"]
+        output_path = nas_path_join(output_path_base, "stage_06_classified_content.json")
+        
+        # Check if resume is enabled (default: True)
+        enable_resume = stage_config.get("enable_resume", True)
+        completed_transcript_ids = set()
+        
+        if enable_resume:
+            # Load existing output to identify completed transcripts
+            completed_transcript_ids = load_existing_output(nas_conn, output_path_base)
+            
+            if completed_transcript_ids:
+                # Filter out already-processed transcripts
+                original_count = len(transcripts)
+                # Filter transcripts - need to match the transcript key format
+                transcripts_to_process = {}
+                for tid, tdata in transcripts.items():
+                    if tid not in completed_transcript_ids:
+                        transcripts_to_process[tid] = tdata
+                
+                resumed_count = original_count - len(transcripts_to_process)
+                transcripts = transcripts_to_process
+                
+                if resumed_count > 0:
+                    log_console(f"RESUME MODE: Skipping {resumed_count} already-processed transcripts")
+                    log_console(f"Remaining transcripts to process: {len(transcripts)}")
+                
+                if len(transcripts) == 0:
+                    log_console("All transcripts already processed. Nothing to do.")
+                    # Still need to close the JSON array if it's not closed
+                    if not close_json_array(nas_conn, output_path):
+                        log_console("Warning: Failed to properly close existing output file", "WARNING")
+                    nas_conn.close()
+                    return
+        
         # Process transcripts with incremental saving
-        output_path = nas_path_join(stage_config["output_data_path"], "stage_06_classified_content.json")
-        is_first_batch = True
+        is_first_batch = True if not completed_transcript_ids else False
         
         for i, (transcript_key, transcript_data) in enumerate(transcripts.items(), 1):
             log_console(f"\nProcessing transcript {i}/{len(transcripts)}: {transcript_key}")
@@ -1975,6 +2098,11 @@ def main():
             classified_records, success = process_transcript_v2(transcript_key, transcript_data, enhanced_error_logger)
             
             if success and classified_records:
+                # Add filename field to all records for transcript ID tracking
+                for record in classified_records:
+                    if 'filename' not in record:
+                        record['filename'] = transcript_key
+                
                 # Save incrementally
                 save_results_incrementally(classified_records, output_path, is_first_batch)
                 is_first_batch = False
