@@ -1287,7 +1287,6 @@ Use the classify_qa_speaker_blocks_primary function to assign ONE primary catego
                 for record in all_records_with_sb_index:
                     if record.get("speaker_block_index") == sb_idx:
                         record["primary_classification"] = primary_id
-                        record["classification_method"] = "qa_speaker_block"
         
         # Track costs
         if hasattr(response, 'usage') and response.usage:
@@ -1310,7 +1309,6 @@ Use the classify_qa_speaker_blocks_primary function to assign ONE primary catego
         log_console(f"Applying fallback category 0 to Q&A group {qa_group_id}", "WARNING")
         for record in all_records_with_sb_index:
             record["primary_classification"] = 0
-            record["classification_method"] = "qa_fallback"
     
     # ========== PASS 2: SECONDARY CLASSIFICATION (Comprehensive per speaker block) ==========
     try:
@@ -1491,9 +1489,6 @@ Use the classify_qa_speaker_blocks_secondary function to identify ALL additional
         
         secondary_ids = record.get("secondary_classifications", [])
         record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
-        
-        # Add classification method to indicate Q&A speaker block processing
-        record["classification_method"] = "qa_speaker_block_two_pass"
         
         # Clean up temporary fields to match MD output
         fields_to_remove = ["speaker_block_index", "primary_classification", "secondary_classifications"]
@@ -1696,9 +1691,6 @@ def process_speaker_block_two_pass(
         
         secondary_ids = record.get("secondary_classifications", [])
         record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
-        
-        # Add classification method
-        record["classification_method"] = "two_pass_with_context"
         
         # Clean up temporary fields
         fields_to_remove = ["paragraph_index", "primary_classification", "secondary_classifications"]
@@ -2017,7 +2009,6 @@ def main():
         stage_summary = {
             "status": "completed" if not failed_transcripts else "completed_with_errors",
             "version": "2.0",
-            "classification_method": "two_pass_with_context",
             "start_time": start_time.isoformat(),
             "end_time": end_time.isoformat(),
             "processing_time_seconds": processing_time.total_seconds(),
