@@ -1358,29 +1358,24 @@ Use the classify_qa_conversation_secondary function to identify additional relev
         # Update primary_id for the conversion below
         primary_id = secondary_ids[0]
     
-    # Convert to final format matching Stage 5 structure
-    final_records = []
+    # Map IDs to names for output - SAME FORMAT AS MD SPEAKER BLOCKS
     for record in indexed_records:
-        final_record = record.copy()
+        primary_id = record.get("primary_classification", 0)
+        record["primary_category_name"] = CATEGORY_REGISTRY[primary_id]["name"]
         
-        # Build category arrays for compatibility
-        categories = [CATEGORY_REGISTRY[record["primary_classification"]]["name"]]
-        if record.get("secondary_classifications"):
-            for sid in record["secondary_classifications"]:
-                categories.append(CATEGORY_REGISTRY[sid]["name"])
+        secondary_ids = record.get("secondary_classifications", [])
+        record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
         
-        final_record["category_type"] = categories
-        final_record["category_type_confidence"] = record.get("classification_confidence", 0.0)
-        final_record["category_type_method"] = "qa_conversation_classification"
+        # Add classification method (different from MD to indicate conversation-level classification)
+        record["classification_method"] = "qa_conversation_two_pass"
         
-        # Clean up temporary fields
-        fields_to_remove = ["paragraph_index", "primary_classification", "secondary_classifications", "classification_confidence", "classification_method"]
+        # Clean up temporary fields to match MD output
+        fields_to_remove = ["paragraph_index", "primary_classification", "secondary_classifications", 
+                          "classification_confidence", "classification_method_temp"]
         for field in fields_to_remove:
-            final_record.pop(field, None)
-        
-        final_records.append(final_record)
+            record.pop(field, None)
     
-    return final_records
+    return indexed_records
 
 
 def process_speaker_block_two_pass(
@@ -1579,6 +1574,11 @@ def process_speaker_block_two_pass(
         
         # Add classification method
         record["classification_method"] = "two_pass_with_context"
+        
+        # Clean up temporary fields
+        fields_to_remove = ["paragraph_index", "primary_classification", "secondary_classifications"]
+        for field in fields_to_remove:
+            record.pop(field, None)
     
     return indexed_records
 
