@@ -914,7 +914,7 @@ You are analyzing an earnings call transcript with the following context:
 
 <task_description>
 You are performing PRIMARY classification. Assign exactly ONE category ID (0-22) to each paragraph that best captures its main financial topic.
-Every paragraph MUST receive a classification. Use ID 0 for non-relevant content (operator statements, pleasantries, acknowledgments).
+Every paragraph MUST receive a classification. Category 0 (Non-Relevant) should ONLY be used for content with absolutely NO financial or business substance.
 </task_description>
 
 <classification_guidelines>
@@ -922,8 +922,10 @@ Every paragraph MUST receive a classification. Use ID 0 for non-relevant content
 2. Focus on the financial substance, not speaker pleasantries
 3. Consider the context from previous speaker blocks when classifying
 4. For {bank_name}, be aware of their specific terminology and reporting structure
-5. Use category 0 for content with no financial substance
-6. Assign based on the primary topic, even if other topics are mentioned
+5. IMPORTANT: Only use category 0 (Non-Relevant) for pure procedural content like "Thank you", "Next question", "Good morning" with NO financial information
+6. If content has ANY financial or business relevance (including ESG, community initiatives, donations, etc.), assign an appropriate non-zero category
+7. When in doubt between category 0 and another category, choose the other category
+8. Assign based on the primary topic, even if other topics are mentioned
 </classification_guidelines>
 
 <financial_categories>
@@ -1147,6 +1149,7 @@ Speakers in conversation: {', '.join(speakers_in_conversation)}
 This is a complete Q&A conversation including analyst question(s) and management response(s).
 Classify the PRIMARY financial topic of this entire conversation.
 All paragraphs in this conversation should receive the SAME classification since they are part of the same Q&A exchange.
+IMPORTANT: Q&A conversations almost always have financial substance - avoid category 0 (Non-Relevant) unless the entire conversation is purely procedural.
 </task_description>
 
 <financial_categories>
@@ -1336,6 +1339,24 @@ Use the classify_qa_conversation_secondary function to identify additional relev
         # Secondary classification failure is not critical - keep primary
         for record in indexed_records:
             record["secondary_classifications"] = []
+    
+    # ========== VALIDATION: Fix Non-Relevant primary with secondary categories ==========
+    # Check if all records have same primary (they should for Q&A conversations)
+    primary_id = indexed_records[0].get("primary_classification", 0) if indexed_records else 0
+    secondary_ids = indexed_records[0].get("secondary_classifications", []) if indexed_records else []
+    
+    if primary_id == 0 and secondary_ids:
+        # Log the issue
+        log_console(f"WARNING: Q&A group {qa_group_id} has Non-Relevant primary but {len(secondary_ids)} secondary categories", "WARNING")
+        log_console(f"  Promoting first secondary category to primary: {CATEGORY_REGISTRY[secondary_ids[0]]['name']}", "WARNING")
+        
+        # Promote first secondary to primary for ALL records in conversation
+        for record in indexed_records:
+            record["primary_classification"] = secondary_ids[0]
+            record["secondary_classifications"] = secondary_ids[1:]
+        
+        # Update primary_id for the conversion below
+        primary_id = secondary_ids[0]
     
     # Convert to final format matching Stage 5 structure
     final_records = []
@@ -1531,6 +1552,22 @@ def process_speaker_block_two_pass(
         # No secondary classifications on error
         for record in indexed_records:
             record["secondary_classifications"] = []
+    
+    # ========== VALIDATION: Fix Non-Relevant primary with secondary categories ==========
+    # If primary is 0 (Non-Relevant) but secondary categories exist, promote first secondary to primary
+    for record in indexed_records:
+        primary_id = record.get("primary_classification", 0)
+        secondary_ids = record.get("secondary_classifications", [])
+        
+        if primary_id == 0 and secondary_ids:
+            # Log the issue
+            log_console(f"WARNING: P{record['paragraph_index']} has Non-Relevant primary but {len(secondary_ids)} secondary categories", "WARNING")
+            log_console(f"  Promoting first secondary category to primary: {CATEGORY_REGISTRY[secondary_ids[0]]['name']}", "WARNING")
+            
+            # Promote first secondary to primary
+            record["primary_classification"] = secondary_ids[0]
+            # Remove the promoted category from secondary list
+            record["secondary_classifications"] = secondary_ids[1:]
     
     # Map IDs to names for output
     for record in indexed_records:

@@ -4,7 +4,7 @@
 
 - id: 0
   name: "Non-Relevant"
-  description: "Content with no financial or business substance. Includes operator statements, pure pleasantries, acknowledgments, transitions, technical announcements, and procedural comments. Use for 'Thank you', 'Good morning', 'Next question please', 'Can you hear me?', 'Operator, we'll take the next caller', and similar non-substantive content. This category ensures every paragraph has a classification even when no financial topic is discussed. Also use for brief acknowledgments like 'Yes', 'Sure', 'I understand' that add no financial information."
+  description: "ONLY for content with absolutely NO financial or business substance whatsoever. Limited to pure operator statements, greetings with no content ('Good morning'), transition phrases ('Next question please'), technical issues ('Can you hear me?'), and acknowledgments that add zero information ('Thank you', 'Sure', 'Yes'). DO NOT use this category if the content mentions ANY business activity, financial metric, company initiative, community involvement, ESG action, employee matter, or any other substantive topic. When in doubt, choose a relevant category instead of Non-Relevant. This is a last resort category only for truly empty procedural content."
 
 - id: 1
   name: "Capital Markets & Investment Banking"
