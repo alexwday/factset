@@ -913,19 +913,28 @@ You are analyzing an earnings call transcript with the following context:
 </document_context>
 
 <task_description>
-You are performing PRIMARY classification. Assign exactly ONE category ID (0-22) to each paragraph that best captures its main financial topic.
-Every paragraph MUST receive a classification. Category 0 (Non-Relevant) should ONLY be used for content with absolutely NO financial or business substance.
+You are performing PRIMARY classification for a retrieval system. The primary category will receive PRIORITY treatment when users search for content.
+Assign exactly ONE category ID (0-22) to each paragraph - this should be the MAIN financial topic that best represents the content.
+This primary classification determines which searches will surface this content with highest relevance.
 </task_description>
 
+<retrieval_context>
+This classification enables a search system where:
+- Users query for specific financial topics (e.g., "show me discussions about margins")
+- Content with matching PRIMARY categories appears first in results
+- Secondary categories (assigned in next pass) provide additional coverage
+- The goal is accurate, prioritized retrieval of financial insights
+</retrieval_context>
+
 <classification_guidelines>
-1. Choose the SINGLE MOST relevant category for each paragraph
-2. Focus on the financial substance, not speaker pleasantries
-3. Consider the context from previous speaker blocks when classifying
-4. For {bank_name}, be aware of their specific terminology and reporting structure
-5. IMPORTANT: Only use category 0 (Non-Relevant) for pure procedural content like "Thank you", "Next question", "Good morning" with NO financial information
-6. If content has ANY financial or business relevance (including ESG, community initiatives, donations, etc.), assign an appropriate non-zero category
-7. When in doubt between category 0 and another category, choose the other category
-8. Assign based on the primary topic, even if other topics are mentioned
+1. Choose the SINGLE MOST relevant category that best represents the paragraph's MAIN topic
+2. This should be the category a user would most likely search for to find this content
+3. Focus on the dominant financial theme, not minor mentions
+4. Consider the context from previous speaker blocks when classifying
+5. For {bank_name}, be aware of their specific terminology and reporting structure
+6. IMPORTANT: Only use category 0 (Non-Relevant) for pure procedural content with NO financial information
+7. If content has ANY financial or business relevance, assign the most appropriate non-zero category
+8. The primary category should capture what this paragraph is fundamentally ABOUT
 </classification_guidelines>
 
 <financial_categories>
@@ -991,17 +1000,29 @@ You are analyzing an earnings call transcript with the following context:
 </document_context>
 
 <task_description>
-You are performing SECONDARY classification. For each paragraph that has already been assigned a primary category, identify ANY ADDITIONAL relevant category IDs beyond the primary.
-Return an empty list if no secondary categories apply. Do not repeat the primary category as a secondary.
+You are performing SECONDARY classification for a retrieval system. Secondary categories ensure COMPREHENSIVE coverage so no relevant content is missed.
+For each paragraph, identify ALL OTHER categories that apply beyond the primary. Be EXHAUSTIVE - these act as a safety net for retrieval.
+When users search for any of these secondary topics, this content will still be found (though not prioritized like primary matches).
 </task_description>
 
+<retrieval_context>
+Secondary classifications serve as comprehensive coverage:
+- They catch content that MENTIONS a topic even if it's not the MAIN topic
+- Users searching for any secondary category will still find this content
+- This prevents relevant content from being missed in searches
+- Think: "What other topics might someone search for where this content would be relevant?"
+Example: A paragraph mainly about revenue (primary) that mentions margin pressure would have "Margins" as secondary
+</retrieval_context>
+
 <classification_guidelines>
-1. Include ALL relevant secondary categories that apply to the content
-2. Do NOT include the primary category in secondary classifications
-3. Return empty list [] if only the primary category applies
-4. Consider multiple aspects of the content that might relate to different categories
-5. Look for cross-cutting themes and related topics
-6. Secondary categories should add meaningful classification depth
+1. Be COMPREHENSIVE - include ALL categories that have ANY relevance to the content
+2. Include categories for topics that are mentioned, referenced, or implied
+3. Consider related topics that users might search for to find this content
+4. Include cross-cutting themes (e.g., ESG aspects of a revenue discussion)
+5. Do NOT include the primary category in secondary classifications
+6. Return empty list [] ONLY if absolutely no other categories apply
+7. When in doubt, include the category - better to over-include than miss relevant content
+8. Think broadly about what searches should surface this content
 </classification_guidelines>
 
 <financial_categories>
@@ -1135,7 +1156,7 @@ def process_qa_conversation_two_pass(
     
     # ========== PASS 1: PRIMARY CLASSIFICATION (Same for all paragraphs) ==========
     try:
-        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification.
+        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification for a retrieval system.
 
 <document_context>
 Institution: {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}
@@ -1146,11 +1167,19 @@ Speakers in conversation: {', '.join(speakers_in_conversation)}
 </document_context>
 
 <task_description>
-This is a complete Q&A conversation including analyst question(s) and management response(s).
-Classify the PRIMARY financial topic of this entire conversation.
-All paragraphs in this conversation should receive the SAME classification since they are part of the same Q&A exchange.
-IMPORTANT: Q&A conversations almost always have financial substance - avoid category 0 (Non-Relevant) unless the entire conversation is purely procedural.
+You are performing PRIMARY classification for a retrieval system. This is a complete Q&A conversation.
+Assign ONE primary category that best represents what this Q&A exchange is fundamentally ABOUT.
+This primary category will receive PRIORITY when users search for this topic.
+All paragraphs in this conversation receive the SAME classification since they are part of one coherent exchange.
 </task_description>
+
+<retrieval_context>
+The primary category determines which searches will surface this Q&A with highest relevance:
+- Users searching for this primary topic will find this conversation as a top result
+- The question provides context for the answer, making the full exchange relevant
+- Secondary categories (next pass) will provide additional retrieval coverage
+IMPORTANT: Q&A conversations almost always have financial substance - avoid category 0 unless purely procedural
+</retrieval_context>
 
 <financial_categories>
 {build_numbered_category_list()}
@@ -1246,7 +1275,7 @@ Use the classify_qa_conversation_primary function to assign ONE primary category
     # ========== PASS 2: SECONDARY CLASSIFICATION (Optional additional categories) ==========
     try:
         # Secondary classification for Q&A conversations
-        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification.
+        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification for a retrieval system.
 
 <document_context>
 Institution: {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}
@@ -1256,9 +1285,21 @@ Primary Classification: {CATEGORY_REGISTRY[primary_id]['name']}
 </document_context>
 
 <task_description>
-This Q&A conversation has been classified with primary category: {primary_id} ({CATEGORY_REGISTRY[primary_id]['name']})
-Identify ANY ADDITIONAL relevant financial categories that apply to this conversation.
+You are performing SECONDARY classification for comprehensive retrieval coverage.
+This Q&A has primary category: {primary_id} ({CATEGORY_REGISTRY[primary_id]['name']})
+Now identify ALL OTHER categories that apply to ANY part of this conversation.
+Be EXHAUSTIVE - these secondary categories ensure users can find this content through multiple search paths.
 </task_description>
+
+<retrieval_context>
+Secondary classifications provide comprehensive safety net for retrieval:
+- They catch ALL topics mentioned, referenced, or implied in the conversation
+- Users searching for ANY of these topics should find this Q&A
+- Include categories for topics in both the question AND answer
+- Think: "What other searches should surface this conversation?"
+Example: A Q&A primarily about guidance that mentions margin pressure, capital allocation, and macro concerns 
+         would have ALL those as secondary categories
+</retrieval_context>
 
 <financial_categories>
 {build_numbered_category_list()}
@@ -1268,7 +1309,8 @@ Identify ANY ADDITIONAL relevant financial categories that apply to this convers
 {full_conversation}
 </conversation>
 
-Use the classify_qa_conversation_secondary function to identify additional relevant categories."""
+Use the classify_qa_conversation_secondary function to identify ALL additional relevant categories.
+Be comprehensive - better to over-include than miss potential search relevance."""
 
         response = llm_client.chat.completions.create(
             model=config["stage_06_llm_classification"]["llm_config"]["model"],
