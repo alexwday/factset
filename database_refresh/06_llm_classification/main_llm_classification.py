@@ -1692,8 +1692,9 @@ def process_speaker_block_two_pass(
         secondary_ids = record.get("secondary_classifications", [])
         record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
         
-        # Clean up temporary fields
-        fields_to_remove = ["paragraph_index", "primary_classification", "secondary_classifications"]
+        # DON'T clean up paragraph_index yet - needed for previous_blocks context
+        # Clean up only the classification IDs
+        fields_to_remove = ["primary_classification", "secondary_classifications"]
         for field in fields_to_remove:
             record.pop(field, None)
     
@@ -1827,6 +1828,10 @@ def process_transcript_v2(
                     enhanced_error_logger
                 )
                 classified_records.extend(classified_block)
+        
+        # Final cleanup - remove paragraph_index from all records before returning
+        for record in classified_records:
+            record.pop("paragraph_index", None)
         
         return classified_records, True
         
