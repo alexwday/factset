@@ -218,6 +218,49 @@ def save_logs_to_nas(nas_conn: SMBConnection, stage_summary: Dict[str, Any], enh
     enhanced_error_logger.save_error_logs(nas_conn)
 
 
+def validate_environment_variables() -> None:
+    """Validate all required environment variables are present."""
+    
+    required_env_vars = [
+        "API_USERNAME",
+        "API_PASSWORD", 
+        "PROXY_USER",
+        "PROXY_PASSWORD",
+        "PROXY_URL",
+        "NAS_USERNAME",
+        "NAS_PASSWORD",
+        "NAS_SERVER_IP",
+        "NAS_SERVER_NAME",
+        "NAS_SHARE_NAME",
+        "NAS_BASE_PATH",
+        "NAS_PORT",
+        "CONFIG_PATH",
+        "CLIENT_MACHINE_NAME",
+        "LLM_CLIENT_ID",
+        "LLM_CLIENT_SECRET",
+    ]
+    
+    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    if missing_vars:
+        error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
+        log_error(
+            error_msg,
+            "environment_validation",
+            {
+                "missing_variables": missing_vars,
+                "total_required": len(required_env_vars),
+                "total_missing": len(missing_vars),
+            }
+        )
+        log_console(f"ERROR: {error_msg}", "ERROR")
+        raise ValueError(error_msg)
+    else:
+        log_execution(
+            "Environment variables validated successfully",
+            {"total_validated": len(required_env_vars)}
+        )
+
+
 def nas_path_join(*parts) -> str:
     """Join NAS path parts using forward slashes."""
     return "/".join(parts)
@@ -236,34 +279,33 @@ def validate_nas_path(path: str) -> bool:
     return True
 
 
-def get_nas_share_name() -> str:
-    """Get NAS share name from environment variable."""
-    share_name = os.getenv("NAS_SHARE_NAME")
-    if not share_name:
-        log_error("NAS_SHARE_NAME environment variable not set", "configuration")
-        raise ValueError("NAS_SHARE_NAME environment variable not set")
-    return share_name
 
 
 def get_nas_connection() -> Optional[SMBConnection]:
-    """Establish connection to NAS using environment variables."""
+    """Create and return an SMB connection to the NAS."""
     try:
-        nas_share = get_nas_share_name()
         conn = SMBConnection(
-            os.getenv("NAS_USER", ""),
-            os.getenv("NAS_PASSWORD", ""),
-            "script_client",
-            nas_share,
-            domain=os.getenv("NAS_DOMAIN", ""),
+            username=os.getenv("NAS_USERNAME"),
+            password=os.getenv("NAS_PASSWORD"),
+            my_name=os.getenv("CLIENT_MACHINE_NAME"),
+            remote_name=os.getenv("NAS_SERVER_NAME"),
             use_ntlm_v2=True,
-            is_direct_tcp=True
+            is_direct_tcp=True,
         )
         
-        if conn.connect(nas_share, 445):
-            log_execution("NAS connection established", {"share": nas_share})
+        nas_port = int(os.getenv("NAS_PORT", 445))
+        if conn.connect(os.getenv("NAS_SERVER_IP"), nas_port):
+            log_execution("NAS connection established successfully", {
+                "connection_type": "SMB/CIFS",
+                "server": os.getenv("NAS_SERVER_NAME"),
+                "port": nas_port,
+            })
             return conn
         else:
-            log_error("Failed to connect to NAS", "nas_connection", {"share": nas_share})
+            log_error("Failed to connect to NAS", "nas_connection", {
+                "server": os.getenv("NAS_SERVER_NAME"),
+                "port": nas_port
+            })
             return None
     
     except Exception as e:
@@ -274,7 +316,7 @@ def get_nas_connection() -> Optional[SMBConnection]:
 def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
     """Check if a file exists on NAS."""
     try:
-        conn.getAttributes(get_nas_share_name(), file_path)
+        conn.getAttributes(os.getenv("NAS_SHARE_NAME"), file_path)
         return True
     except:
         return False
@@ -288,7 +330,7 @@ def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes
     
     try:
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            conn.retrieveFile(get_nas_share_name(), nas_file_path, temp_file)
+            conn.retrieveFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, temp_file)
             temp_file.seek(0)
             content = temp_file.read()
             os.unlink(temp_file.name)
@@ -308,7 +350,7 @@ def nas_create_directory_recursive(conn: SMBConnection, dir_path: str) -> bool:
             if part:
                 current_path = nas_path_join(current_path, part) if current_path else part
                 try:
-                    conn.createDirectory(get_nas_share_name(), current_path)
+                    conn.createDirectory(os.getenv("NAS_SHARE_NAME"), current_path)
                 except:
                     pass
         
@@ -330,7 +372,7 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
             nas_create_directory_recursive(conn, dir_path)
         
         local_file_obj.seek(0)
-        conn.storeFile(get_nas_share_name(), nas_file_path, local_file_obj)
+        conn.storeFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, local_file_obj)
         return True
     except Exception as e:
         log_error(f"Failed to upload file to NAS: {nas_file_path}", "nas_upload", {"error": str(e)})
@@ -340,21 +382,22 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
 def load_stage_config(nas_conn: SMBConnection) -> Dict:
     """Load and validate Stage 8 configuration from NAS."""
     try:
-        config_path = "Finance Data and Analytics/DSA/Earnings Call Transcripts/Scripts/database_refresh/config.yaml"
-        config_data = nas_download_file(nas_conn, config_path)
+        log_execution("Loading shared configuration from NAS...")
+        config_data = nas_download_file(nas_conn, os.getenv("CONFIG_PATH"))
         
         if not config_data:
             raise ValueError("Failed to download config file from NAS")
         
-        config = yaml.safe_load(config_data.decode('utf-8'))
+        full_config = yaml.safe_load(config_data.decode('utf-8'))
+        log_execution("Successfully loaded shared configuration from NAS")
         
-        required_keys = ["stage_08_embeddings_generation"]
-        for key in required_keys:
-            if key not in config:
-                raise ValueError(f"Missing required config key: {key}")
+        if "stage_08_embeddings_generation" not in full_config:
+            raise ValueError("Missing stage_08_embeddings_generation in config")
         
-        log_execution("Configuration loaded successfully", {
-            "config_path": config_path
+        config = full_config
+        
+        log_execution("Stage 8 configuration loaded successfully", {
+            "config_path": os.getenv("CONFIG_PATH")
         })
         
         return config
@@ -907,6 +950,9 @@ def main():
     start_time = datetime.now()
     
     try:
+        # Validate environment variables
+        validate_environment_variables()
+        
         # Connect to NAS
         nas_conn = get_nas_connection()
         if not nas_conn:
