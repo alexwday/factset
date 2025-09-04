@@ -25,20 +25,21 @@ Architecture exactly matches Stage 7 with NAS operations, incremental saving, an
   - Standard character-based: ~4 chars/token (30% weight)
   - Word-based: ~1.3 tokens/word (20% weight)
   - Adds 10% safety buffer for chunking decisions
-- Aggregates `block_tokens` correctly at the block level:
-  - MD sections: Total tokens per speaker_id (all paragraphs from one speaker)
-  - Q&A sections: Total tokens per qa_id (entire Q&A conversation group)
+- Aggregates `block_tokens` at the speaker block level:
+  - Both MD and Q&A sections: Total tokens per speaker_id
+  - Maintains speaker context across all section types
 
 ### 2. Hierarchical Text Chunking
-- **Strategy**: Preserves semantic coherence by keeping related content together
-- **Block-Level First**: If entire speaker block or Q&A group ≤1000 tokens, keep as single chunk
-- **Smart Splitting**: When blocks exceed threshold:
+- **Strategy**: Preserves semantic coherence by keeping speaker context together
+- **Speaker-Block First**: Groups all paragraphs from same speaker (MD or Q&A)
+- **Block-Level Chunking**: If entire speaker block ≤1000 tokens, keep as single chunk
+- **Smart Splitting**: When speaker blocks exceed threshold:
   - Splits at paragraph boundaries when possible
   - Groups multiple paragraphs to reach ~500 tokens
   - Only splits within paragraphs when single paragraph >1000 tokens
 - **Target Size**: 500 tokens per chunk
 - **Minimum Final Chunk**: 300 tokens (merges with previous if smaller)
-- **Benefits**: Better context preservation, fewer but more meaningful embeddings
+- **Benefits**: Maintains speaker context, fewer but more meaningful embeddings
 
 ### 3. Embedding Generation
 - **Model**: text-embedding-3-large
