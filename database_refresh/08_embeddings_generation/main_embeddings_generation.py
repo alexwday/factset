@@ -424,7 +424,11 @@ def setup_ssl_certificate(nas_conn: SMBConnection) -> str:
             temp_cert.write(cert_data)
             temp_cert_path = temp_cert.name
         
-        log_execution("SSL certificate downloaded", {"temp_path": temp_cert_path})
+        # Set SSL environment variables for requests and OpenAI client
+        os.environ["REQUESTS_CA_BUNDLE"] = temp_cert_path
+        os.environ["SSL_CERT_FILE"] = temp_cert_path
+        
+        log_execution("SSL certificate setup complete", {"temp_cert_path": temp_cert_path})
         return temp_cert_path
     
     except Exception as e:
