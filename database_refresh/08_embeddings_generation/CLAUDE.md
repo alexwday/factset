@@ -1,9 +1,9 @@
 # Stage 08: Embeddings Generation
 
 ## Overview
-This stage generates vector embeddings from Stage 7's summarized content for semantic search and retrieval-augmented generation (RAG).
+This stage generates vector embeddings from the original paragraph text (with Stage 7's summaries preserved) for semantic search and retrieval-augmented generation (RAG). While Stage 7 adds summaries for display and reranking, Stage 8 creates embeddings from the full original content to capture complete semantic meaning.
 
-**Input**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json`
+**Input**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json` (contains both original text and summaries)
 **Output**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.json`
 
 Architecture exactly matches Stage 7 with NAS operations, incremental saving, and OAuth refresh.
@@ -49,16 +49,17 @@ Each record in the output contains all fields from Stage 7 plus:
 ```json
 {
   // All original Stage 7 fields preserved...
-  "block_summary": "...",        // Summary from Stage 7
+  "paragraph_text": "...",        // Original content (what gets embedded)
+  "block_summary": "...",        // Summary from Stage 7 (for display/reranking)
   
   // New Stage 8 fields:
   "paragraph_tokens": 850,        // Tokens in original paragraph
   "block_tokens": 2500,           // Total tokens in speaker/QA block
   "chunk_id": 1,                  // Chunk number (1, 2, 3...)
   "total_chunks": 2,              // Total chunks for this paragraph
-  "chunk_text": "...",            // Actual text of chunk
+  "chunk_text": "...",            // Actual text chunk being embedded
   "chunk_tokens": 425,            // Tokens in this chunk
-  "embedding": [0.123, -0.456, ...] // 3072-dimensional vector
+  "embedding": [0.123, -0.456, ...] // 3072-dimensional vector of chunk_text
 }
 ```
 
