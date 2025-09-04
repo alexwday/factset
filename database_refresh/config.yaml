@@ -157,6 +157,7 @@ stage_08_embeddings_generation:
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 10
+  use_csv_output: true  # Use CSV format for better handling of large datasets (set to false for JSON)
   
   # Embedding configuration
   embedding_config:
