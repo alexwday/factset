@@ -757,9 +757,12 @@ def chunk_text(text: str, max_tokens: int = 500, chunk_threshold: int = 1000, mi
     return chunks
 
 
-def generate_embedding(text: str, retry_count: int = 3) -> Optional[List[float]]:
-    """Generate embedding for text using OpenAI API."""
+def generate_embeddings_batch(texts: List[str], retry_count: int = 3) -> Optional[List[List[float]]]:
+    """Generate embeddings for multiple texts in a single API call."""
     global llm_client
+    
+    if not texts:
+        return []
     
     embed_config = config["stage_08_embeddings_generation"].get("embedding_config", {})
     model = embed_config.get("model", "text-embedding-3-large")
@@ -768,17 +771,25 @@ def generate_embedding(text: str, retry_count: int = 3) -> Optional[List[float]]
         try:
             response = llm_client.embeddings.create(
                 model=model,
-                input=text
+                input=texts  # Pass array of texts for batch processing
             )
-            return response.data[0].embedding
+            # Extract embeddings in same order as input texts
+            embeddings = [data.embedding for data in response.data]
+            return embeddings
         except Exception as e:
-            log_console(f"Embedding attempt {attempt + 1} failed: {e}", "WARNING")
+            log_console(f"Batch embedding attempt {attempt + 1} failed: {e}", "WARNING")
             if attempt < retry_count - 1:
                 time.sleep(2 ** attempt)  # Exponential backoff
             else:
                 return None
     
     return None
+
+
+def generate_embedding(text: str, retry_count: int = 3) -> Optional[List[float]]:
+    """Generate embedding for single text (kept for backward compatibility)."""
+    result = generate_embeddings_batch([text], retry_count)
+    return result[0] if result else None
 
 
 def load_stage7_data(nas_conn: SMBConnection) -> List[Dict]:
@@ -804,7 +815,7 @@ def load_stage7_data(nas_conn: SMBConnection) -> List[Dict]:
 
 
 def process_transcript(transcript_records: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
-    """Process all records for a single transcript to generate embeddings."""
+    """Process all records for a single transcript to generate embeddings in batches."""
     
     enhanced_records = []
     
@@ -813,6 +824,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     target_chunk_size = embed_config.get("target_chunk_size", 500)
     chunk_threshold = embed_config.get("chunk_threshold", 1000)
     min_final_chunk = embed_config.get("min_final_chunk", 300)
+    batch_size = embed_config.get("batch_size", 50)  # Default to 50 texts per batch
     
     # Group records for block token calculation
     event_blocks = defaultdict(lambda: defaultdict(list))
@@ -827,14 +839,16 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
         
         event_blocks[event_id][block_key].append(record)
     
-    # Process each record
+    # Collect all chunks first before batching
+    chunks_to_process = []
+    
+    # Process each record to create chunks
     for record in transcript_records:
         try:
             event_id = record.get('event_id', transcript_id)
             paragraph_id = record.get('paragraph_id', '')
             
-            # Use original paragraph_content for embeddings (full semantic content needed)
-            # The block_summary is for display/reranking, not for creating search vectors
+            # Use original paragraph_content for embeddings
             paragraph_text = record.get('paragraph_content', '')
             if not paragraph_text:
                 log_console(f"No paragraph_content found for paragraph {paragraph_id}", "WARNING")
@@ -850,7 +864,6 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 block_key = f"qa_{record.get('qa_id')}"
             
             block_records = event_blocks[event_id][block_key]
-            # Calculate tokens based on original text (what we're actually embedding)
             block_tokens = sum(
                 count_tokens(r.get('paragraph_content', ''))
                 for r in block_records
@@ -864,48 +877,76 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 min_final_chunk=min_final_chunk
             )
             
-            # Generate embedding for each chunk
+            # Collect chunk information for batch processing
             for chunk_idx, chunk_data in enumerate(chunks, 1):
-                try:
-                    # Unpack the chunk data tuple
-                    text_content, token_count = chunk_data
-                    
-                    embedding = generate_embedding(text_content)
-                    
-                    if embedding:
-                        # Create new record with all original fields plus new ones
-                        enhanced_record = {
-                            **record,  # Include all original fields
-                            'paragraph_tokens': paragraph_tokens,
-                            'block_tokens': block_tokens,
-                            'chunk_id': chunk_idx,
-                            'total_chunks': len(chunks),
-                            'chunk_text': text_content,
-                            'chunk_tokens': token_count,
-                            'embedding': embedding
-                        }
-                        enhanced_records.append(enhanced_record)
-                        enhanced_error_logger.total_embeddings += 1
-                        enhanced_error_logger.total_chunks += 1
-                    else:
-                        enhanced_error_logger.log_embedding_error(
-                            transcript_id,
-                            paragraph_id,
-                            f"Failed to generate embedding for chunk {chunk_idx}"
-                        )
-                        
-                except Exception as e:
-                    enhanced_error_logger.log_embedding_error(
-                        transcript_id,
-                        paragraph_id,
-                        f"Embedding generation error: {str(e)}"
-                    )
+                text_content, token_count = chunk_data
+                chunks_to_process.append({
+                    'record': record,
+                    'paragraph_id': paragraph_id,
+                    'paragraph_tokens': paragraph_tokens,
+                    'block_tokens': block_tokens,
+                    'chunk_id': chunk_idx,
+                    'total_chunks': len(chunks),
+                    'chunk_text': text_content,
+                    'chunk_tokens': token_count
+                })
             
         except Exception as e:
             enhanced_error_logger.log_processing_error(
                 transcript_id,
                 f"Error processing paragraph {record.get('paragraph_id')}: {str(e)}"
             )
+    
+    # Process chunks in batches
+    total_chunks = len(chunks_to_process)
+    log_console(f"Processing {total_chunks} chunks in batches of {batch_size}")
+    
+    for batch_start in range(0, total_chunks, batch_size):
+        batch_end = min(batch_start + batch_size, total_chunks)
+        batch_chunks = chunks_to_process[batch_start:batch_end]
+        
+        # Extract texts for this batch
+        batch_texts = [chunk['chunk_text'] for chunk in batch_chunks]
+        
+        try:
+            # Generate embeddings for the batch
+            log_console(f"Generating embeddings for batch {batch_start//batch_size + 1} ({len(batch_texts)} texts)")
+            embeddings = generate_embeddings_batch(batch_texts)
+            
+            if embeddings:
+                # Create enhanced records with embeddings
+                for i, chunk_info in enumerate(batch_chunks):
+                    enhanced_record = {
+                        **chunk_info['record'],  # Include all original fields
+                        'paragraph_tokens': chunk_info['paragraph_tokens'],
+                        'block_tokens': chunk_info['block_tokens'],
+                        'chunk_id': chunk_info['chunk_id'],
+                        'total_chunks': chunk_info['total_chunks'],
+                        'chunk_text': chunk_info['chunk_text'],
+                        'chunk_tokens': chunk_info['chunk_tokens'],
+                        'embedding': embeddings[i]
+                    }
+                    enhanced_records.append(enhanced_record)
+                    enhanced_error_logger.total_embeddings += 1
+                    enhanced_error_logger.total_chunks += 1
+            else:
+                # Log errors for failed batch
+                for chunk_info in batch_chunks:
+                    enhanced_error_logger.log_embedding_error(
+                        transcript_id,
+                        chunk_info['paragraph_id'],
+                        f"Failed to generate embedding in batch for chunk {chunk_info['chunk_id']}"
+                    )
+                    
+        except Exception as e:
+            # Log error for entire batch
+            log_console(f"Batch embedding failed: {str(e)}", "ERROR")
+            for chunk_info in batch_chunks:
+                enhanced_error_logger.log_embedding_error(
+                    transcript_id,
+                    chunk_info['paragraph_id'],
+                    f"Batch embedding error: {str(e)}"
+                )
     
     log_execution(f"Processed transcript {transcript_id}", {
         "records_in": len(transcript_records),

@@ -165,6 +165,7 @@ stage_08_embeddings_generation:
     chunk_threshold: 1000  # Tokens threshold for chunking
     target_chunk_size: 500  # Target size for chunks
     min_final_chunk: 300  # Minimum size for final chunk
+    batch_size: 50  # Number of texts to embed in a single API call
     rate_limit_pause: 100  # Pause after this many embeddings
     token_refresh_interval: 500  # Refresh OAuth token after this many embeddings
   

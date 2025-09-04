@@ -11,6 +11,7 @@ Architecture exactly matches Stage 7 with NAS operations, incremental saving, an
 ## Key Features
 - **Token Calculation**: Uses tiktoken to calculate tokens for paragraphs and speaker/QA blocks
 - **Intelligent Chunking**: Breaks large paragraphs (>1000 tokens) into ~500 token chunks
+- **Batch Processing**: Sends embeddings in batches of 50 texts for efficient API usage
 - **Embeddings Generation**: Creates full 3072-dimensional vectors using OpenAI's text-embedding-3-large
 - **JSON Input/Output**: Reads from Stage 7 JSON and outputs enhanced JSON with embeddings
 - **Full Semantic Representation**: Leverages all 3072 dimensions for maximum embedding quality
@@ -37,6 +38,7 @@ Architecture exactly matches Stage 7 with NAS operations, incremental saving, an
 ### 3. Embedding Generation
 - **Model**: text-embedding-3-large
 - **Dimensions**: 3072 (full model dimensions)
+- **Batch Processing**: 50 texts per API call (reduces latency by 50x)
 - **Storage Type**: vector (32-bit floats)
 - **Benefits**: Maximum semantic representation with full dimensions
 - **Rate Limiting**: Pauses every 100 embeddings
