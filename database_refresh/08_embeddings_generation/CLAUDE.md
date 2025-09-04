@@ -49,6 +49,7 @@ Each record in the output contains all fields from Stage 7 plus:
 ```json
 {
   // All original Stage 7 fields preserved...
+  "block_summary": "...",        // Summary from Stage 7
   
   // New Stage 8 fields:
   "paragraph_tokens": 850,        // Tokens in original paragraph
