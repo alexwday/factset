@@ -49,7 +49,7 @@ Each record in the output contains all fields from Stage 7 plus:
 ```json
 {
   // All original Stage 7 fields preserved...
-  "paragraph_text": "...",        // Original content (what gets embedded)
+  "paragraph_content": "...",     // Original content from Stage 3 (what gets embedded)
   "block_summary": "...",        // Summary from Stage 7 (for display/reranking)
   
   // New Stage 8 fields:

@@ -829,11 +829,11 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
             event_id = record.get('event_id', transcript_id)
             paragraph_id = record.get('paragraph_id', '')
             
-            # Use original paragraph_text for embeddings (full semantic content needed)
+            # Use original paragraph_content for embeddings (full semantic content needed)
             # The block_summary is for display/reranking, not for creating search vectors
-            paragraph_text = record.get('paragraph_text', '')
+            paragraph_text = record.get('paragraph_content', '')
             if not paragraph_text:
-                log_console(f"No paragraph_text found for paragraph {paragraph_id}", "WARNING")
+                log_console(f"No paragraph_content found for paragraph {paragraph_id}", "WARNING")
                 continue
             
             # Calculate paragraph tokens
@@ -848,7 +848,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
             block_records = event_blocks[event_id][block_key]
             # Calculate tokens based on original text (what we're actually embedding)
             block_tokens = sum(
-                count_tokens(r.get('paragraph_text', ''))
+                count_tokens(r.get('paragraph_content', ''))
                 for r in block_records
             )
             
