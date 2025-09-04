@@ -1011,6 +1011,15 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     
     enhanced_records = []
     
+    # Debug: Check what fields are present in the first record
+    if transcript_records:
+        first_record = transcript_records[0]
+        available_fields = list(first_record.keys())
+        log_execution(f"Available fields in Stage 7 data: {available_fields[:20]}")  # First 20 fields
+        if 'paragraph_content' not in available_fields:
+            log_console(f"WARNING: 'paragraph_content' not found in input data!", "WARNING")
+            log_console(f"Available fields: {', '.join(available_fields[:10])}...", "WARNING")
+    
     # Get embedding config
     embed_config = config["stage_08_embeddings_generation"].get("embedding_config", {})
     target_chunk_size = embed_config.get("target_chunk_size", 500)
@@ -1038,6 +1047,12 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
         )
         block_token_counts[block_key] = total_tokens
         log_execution(f"Block {block_key}: {total_tokens} tokens across {len(block_records)} paragraphs")
+        
+        # Debug: Check if any records have content
+        if total_tokens == 0:
+            log_console(f"WARNING: Block {block_key} has 0 tokens!", "WARNING")
+            sample_record = block_records[0] if block_records else {}
+            log_console(f"Sample record fields: {list(sample_record.keys())[:10]}", "WARNING")
     
     # Collect all chunks first before batching
     chunks_to_process = []
@@ -1090,6 +1105,9 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 
                 for record in block_records:
                     paragraph_text = record.get('paragraph_content', '')
+                    if not paragraph_text.strip():
+                        log_console(f"WARNING: Empty paragraph_content in block {block_key}, record {record.get('paragraph_id', 'unknown')}", "WARNING")
+                        continue
                     paragraph_tokens = count_tokens(paragraph_text)
                     
                     # Check if adding this paragraph would exceed target
