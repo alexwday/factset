@@ -1015,10 +1015,23 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     if transcript_records:
         first_record = transcript_records[0]
         available_fields = list(first_record.keys())
-        log_execution(f"Available fields in Stage 7 data: {available_fields[:20]}")  # First 20 fields
+        log_execution(f"Available fields in Stage 7 data: {available_fields}")  # All fields
+        
+        # Check for paragraph_content specifically
         if 'paragraph_content' not in available_fields:
-            log_console(f"WARNING: 'paragraph_content' not found in input data!", "WARNING")
-            log_console(f"Available fields: {', '.join(available_fields[:10])}...", "WARNING")
+            log_console(f"ERROR: 'paragraph_content' not found in input data!", "ERROR")
+            log_console(f"Available fields: {', '.join(available_fields)}", "ERROR")
+            # Check if there's a similar field
+            content_fields = [f for f in available_fields if 'content' in f.lower() or 'text' in f.lower()]
+            if content_fields:
+                log_console(f"Found similar fields: {content_fields}", "WARNING")
+        else:
+            # Check if paragraph_content is empty
+            sample_content = first_record.get('paragraph_content', '')
+            if not sample_content:
+                log_console(f"WARNING: 'paragraph_content' exists but is empty!", "WARNING")
+            else:
+                log_console(f"paragraph_content found with {len(sample_content)} characters", "INFO")
     
     # Get embedding config
     embed_config = config["stage_08_embeddings_generation"].get("embedding_config", {})
@@ -1031,13 +1044,21 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     blocks = defaultdict(list)
     block_token_counts = {}
     
+    log_console(f"Grouping {len(transcript_records)} records into speaker blocks")
+    
     for record in transcript_records:
         # Always group by speaker_block_id, regardless of section type
         speaker_block_id = record.get('speaker_block_id')
         section_name = record.get('section_name', 'UNK')
-        block_key = f"{section_name}_speaker_block_{speaker_block_id}"
         
+        if not speaker_block_id:
+            log_console(f"WARNING: Record missing speaker_block_id: {record.get('paragraph_id', 'unknown')}", "WARNING")
+            continue
+            
+        block_key = f"{section_name}_speaker_block_{speaker_block_id}"
         blocks[block_key].append(record)
+    
+    log_console(f"Created {len(blocks)} blocks from {len(transcript_records)} records")
     
     # Calculate token count for each block
     for block_key, block_records in blocks.items():
@@ -1057,11 +1078,18 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     # Collect all chunks first before batching
     chunks_to_process = []
     
+    log_console(f"Processing {len(blocks)} speaker blocks for transcript {transcript_id}")
+    
     # Process each block hierarchically
     for block_key, block_records in blocks.items():
         try:
             block_total_tokens = block_token_counts[block_key]
             
+            # Skip blocks with no tokens
+            if block_total_tokens == 0:
+                log_console(f"Skipping block {block_key} with 0 tokens", "WARNING")
+                continue
+                
             # Strategy 1: If entire block fits within chunk_threshold, keep it as one chunk
             if block_total_tokens <= chunk_threshold:
                 # Combine all paragraphs in the block into one chunk
@@ -1434,7 +1462,12 @@ def main():
             transcript_start = datetime.now()
             
             try:
-                log_console(f"Processing transcript {i}/{len(transcripts)}: {transcript_id}")
+                log_console(f"Processing transcript {i}/{len(transcripts)}: {transcript_id} with {len(transcript_records)} records")
+                
+                # Debug: Check if records are empty
+                if not transcript_records:
+                    log_console(f"ERROR: Transcript {transcript_id} has no records!", "ERROR")
+                    continue
                 
                 # Refresh OAuth token per transcript
                 sample_record = transcript_records[0] if transcript_records else {}
