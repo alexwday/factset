@@ -3,7 +3,7 @@
 ## 🎯 PROJECT CONTEXT
 - Type: Multi-Stage Financial Data Processing Pipeline
 - Stack: Python 3.11+, FactSet SDK, LLM Integration, SMB/NAS, XML Processing
-- Architecture: 8-stage sequential processing pipeline with LLM-enhanced analysis
+- Architecture: 9-stage sequential processing pipeline with LLM-enhanced analysis
 - Focus: Earnings transcript acquisition, processing, and AI-powered content enhancement
 
 ## 🚨 CRITICAL RULES
@@ -53,7 +53,7 @@ make lint  # If available
 ```
 Stage 0: Historical Download → Stage 1: Daily Sync → Stage 2: Database Sync →
 Stage 3: Content Extraction → Stage 4: Structure Validation → Stage 5: Q&A Pairing →
-Stage 6: LLM Classification → Stage 7: LLM Summarization → Stage 8: Speaker Relationships
+Stage 6: LLM Classification → Stage 7: LLM Summarization → Stage 8: Embeddings Generation
 ```
 
 ## 📁 PROJECT STRUCTURE
@@ -67,7 +67,7 @@ database_refresh/
 ├── 05_qa_pairing/             # Q&A boundary detection and conversation pairing
 ├── 06_llm_classification/     # LLM-based financial content classification
 ├── 07_llm_summarization/      # LLM-based content summarization
-├── 08_speaker_block_relationships/ # Speaker block relationship scoring
+├── 08_embeddings_generation/  # Vector embeddings for semantic search/RAG
 ├── config.yaml                # Shared configuration file (on NAS)
 └── CLAUDE.md                  # This file
 ```
@@ -91,7 +91,7 @@ python main_*.py
 ### Pipeline Operations
 ```bash
 # Run complete pipeline (sequential execution)
-for stage in 00_download_historical 01_download_daily 02_database_sync 03_extract_content 04_validate_structure 05_qa_pairing 06_llm_classification 07_llm_summarization; do
+for stage in 00_download_historical 01_download_daily 02_database_sync 03_extract_content 04_validate_structure 05_qa_pairing 06_llm_classification 07_llm_summarization 08_embeddings_generation; do
     echo "Running Stage: $stage"
     cd database_refresh/$stage
     python main_*.py
@@ -198,11 +198,11 @@ import json                      # Data serialization
 - **Output**: Enhanced records with paragraph_summary fields
 - **Critical Logic**: Sliding window context, reranking-optimized summaries
 
-### Stage 8: Speaker Block Relationships (08_speaker_block_relationships)
-- **Purpose**: Score speaker block relationships for context expansion
-- **Key Features**: Boolean context flags, enhanced prompting, relationship scoring
-- **Output**: Speaker blocks with context expansion flags
-- **Critical Logic**: Inclusive scoring, boolean flags for RAG retrieval context
+### Stage 8: Embeddings Generation (08_embeddings_generation)
+- **Purpose**: Generate vector embeddings for semantic search and RAG applications
+- **Key Features**: Intelligent chunking, tiktoken with fallback, 3072-dimensional vectors
+- **Output**: Enhanced records with embeddings, token counts, and chunk information
+- **Critical Logic**: Text chunking for >1000 tokens, OAuth refresh per transcript, incremental saving
 
 ## ⚠️ KNOWN ISSUES
 - **Authentication**: OAuth tokens may expire during long processing runs (mitigated by per-transcript refresh)
@@ -225,7 +225,7 @@ import json                      # Data serialization
 ### Pipeline Data Flow
 1. **Acquisition** (Stages 0-2): Download and synchronize transcript files
 2. **Extraction** (Stages 3-4): Parse content and validate structure
-3. **Enhancement** (Stages 5-8): AI-powered analysis and augmentation
+3. **Enhancement** (Stages 5-8): AI-powered analysis, classification, summarization, and embedding
 
 ### Configuration Management
 - **Shared Config**: config.yaml on NAS contains all stage-specific parameters
@@ -265,11 +265,12 @@ import json                      # Data serialization
 - **Access Control**: NAS permissions and authentication validation
 
 ## 💰 COST MANAGEMENT
-- **Token Tracking**: Detailed usage monitoring for all LLM stages (5-7)
+- **Token Tracking**: Detailed usage monitoring for all LLM stages (5-8)
 - **Cost Calculation**: Per-transcript cost breakdown with accumulation
 - **Development Limits**: dev_mode and file/transcript limits for testing
 - **Rate Limiting**: Prevent excessive API usage with configurable delays
 - **Optimization**: Sliding windows and context management to reduce token usage
+- **Embeddings**: Batch processing and incremental saving to minimize API calls
 
 ## 🚀 PERFORMANCE OPTIMIZATIONS
 - **Incremental Processing**: Stage-by-stage with intermediate outputs
@@ -286,8 +287,8 @@ import json                      # Data serialization
 - **Pipeline Health**: Stage completion rates and error frequency monitoring
 
 ## 🎯 CURRENT DEVELOPMENT FOCUS
-- **Stage 8**: Speaker block relationship scoring for improved RAG retrieval
-- **Context Expansion**: Boolean flags for inclusive relationship detection
+- **Stage 8 Complete**: Embeddings generation with tiktoken fallback mechanism
+- **Pipeline Ready**: All 9 stages fully operational for production use
 - **Performance**: Memory optimization and cost reduction across LLM stages
 - **Error Handling**: Enhanced logging and recovery mechanisms
-- **Security**: Continued hardening of credential management and data handling
+- **Next Steps**: Consider Stage 9 for RAG retrieval or search interface implementation
