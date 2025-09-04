@@ -25,15 +25,20 @@ Architecture exactly matches Stage 7 with NAS operations, incremental saving, an
   - Standard character-based: ~4 chars/token (30% weight)
   - Word-based: ~1.3 tokens/word (20% weight)
   - Adds 10% safety buffer for chunking decisions
-- Aggregates `block_tokens` for:
-  - MD sections: Total tokens per speaker block
-  - Q&A sections: Total tokens per qa_id
+- Aggregates `block_tokens` correctly at the block level:
+  - MD sections: Total tokens per speaker_id (all paragraphs from one speaker)
+  - Q&A sections: Total tokens per qa_id (entire Q&A conversation group)
 
-### 2. Text Chunking
-- **Threshold**: 1000 tokens triggers chunking
+### 2. Hierarchical Text Chunking
+- **Strategy**: Preserves semantic coherence by keeping related content together
+- **Block-Level First**: If entire speaker block or Q&A group ≤1000 tokens, keep as single chunk
+- **Smart Splitting**: When blocks exceed threshold:
+  - Splits at paragraph boundaries when possible
+  - Groups multiple paragraphs to reach ~500 tokens
+  - Only splits within paragraphs when single paragraph >1000 tokens
 - **Target Size**: 500 tokens per chunk
 - **Minimum Final Chunk**: 300 tokens (merges with previous if smaller)
-- **Breaking Strategy**: Finds sentence boundaries for natural breaks
+- **Benefits**: Better context preservation, fewer but more meaningful embeddings
 
 ### 3. Embedding Generation
 - **Model**: text-embedding-3-large
@@ -44,24 +49,36 @@ Architecture exactly matches Stage 7 with NAS operations, incremental saving, an
 - **Rate Limiting**: Pauses every 100 embeddings
 - **Retry Logic**: 3 attempts with exponential backoff
 
-## Output JSON Structure
+## Output Structure
 
-Each record in the output contains all fields from Stage 7 plus:
+### CSV Format (Default)
+CSV output with consistent field ordering for better data handling:
+- Core identifiers (filename, event_id, ticker, etc.)
+- Content fields (paragraph_content, summaries)
+- Token counts (paragraph_tokens, block_tokens)
+- Chunk metadata (chunk_id, chunk_text, etc.)
+- Embeddings (stored as JSON string in last column)
+
+### JSON Format (Optional)
+Each record contains all fields from Stage 7 plus:
 
 ```json
 {
   // All original Stage 7 fields preserved...
-  "paragraph_content": "...",     // Original content from Stage 3 (what gets embedded)
-  "block_summary": "...",        // Summary from Stage 7 (for display/reranking)
+  "paragraph_content": "...",     // Original content from Stage 3
+  "block_summary": "...",        // Summary from Stage 7
   
   // New Stage 8 fields:
-  "paragraph_tokens": 850,        // Tokens in original paragraph
-  "block_tokens": 2500,           // Total tokens in speaker/QA block
-  "chunk_id": 1,                  // Chunk number (1, 2, 3...)
-  "total_chunks": 2,              // Total chunks for this paragraph
-  "chunk_text": "...",            // Actual text chunk being embedded
+  "paragraph_tokens": 850,        // Tokens in content (or chunk if split)
+  "block_tokens": 2500,           // Total tokens in speaker_id/qa_id block
+  "chunk_id": 1,                  // Chunk number within block
+  "total_chunks": 2,              // Total chunks in this block
+  "chunk_text": "...",            // Text being embedded (may combine paragraphs)
   "chunk_tokens": 425,            // Tokens in this chunk
-  "embedding": [0.123, -0.456, ...] // 3072-dimensional vector of chunk_text
+  "block_level_chunk": true,      // True if entire block kept together
+  "paragraphs_in_chunk": 3,       // Number of paragraphs in this chunk
+  "chunk_paragraph_ids": ["..."], // IDs of paragraphs in this chunk
+  "embedding": [0.123, -0.456, ...] // 3072-dimensional vector
 }
 ```
 

@@ -568,16 +568,33 @@ def append_records_to_csv(nas_conn: SMBConnection, records: List[Dict], file_pat
         if not records:
             return True
         
-        # Define CSV columns - put embedding last since it's large
-        base_fields = []
+        # Define specific field order for consistency
+        # Core identifiers first
+        fieldnames = [
+            'filename', 'event_id', 'ticker', 'quarter', 'fiscal_year',
+            'section_type', 'section_name',
+            'speaker_id', 'speaker_name', 'qa_id',
+            'paragraph_index', 'paragraph_id',
+            # Content fields
+            'paragraph_content', 'paragraph_summary', 'block_summary',
+            # Token counts
+            'paragraph_tokens', 'block_tokens', 
+            # Chunk information
+            'chunk_id', 'total_chunks', 'chunk_text', 'chunk_tokens',
+            'block_level_chunk', 'paragraphs_in_block', 'paragraphs_in_chunk',
+            'block_paragraph_ids', 'chunk_paragraph_ids',
+            'paragraph_in_block', 'paragraph_in_chunk', 'paragraph_chunk',
+            # Categories from Stage 6
+            'categories', 'category_ids',
+            # Embedding last since it's large
+            'embedding'
+        ]
+        
+        # Add any additional fields not in our predefined list (maintain backward compatibility)
         for record in records:
             for key in record.keys():
-                if key not in base_fields and key != 'embedding':
-                    base_fields.append(key)
-        
-        # Ensure consistent column order
-        base_fields.sort()
-        fieldnames = base_fields + ['embedding']  # Add embedding at the end
+                if key not in fieldnames:
+                    fieldnames.insert(-1, key)  # Insert before embedding
         
         # Create CSV content
         output = io.StringIO()
@@ -587,12 +604,20 @@ def append_records_to_csv(nas_conn: SMBConnection, records: List[Dict], file_pat
         if is_first:
             writer.writeheader()
         
-        # Write records with embeddings as JSON strings
+        # Write records with embeddings and other lists as JSON strings
         for record in records:
             row = record.copy()
-            # Convert embedding list to JSON string for CSV storage
+            # Convert lists to JSON strings for CSV storage
             if 'embedding' in row and isinstance(row['embedding'], list):
                 row['embedding'] = json.dumps(row['embedding'])
+            if 'block_paragraph_ids' in row and isinstance(row['block_paragraph_ids'], list):
+                row['block_paragraph_ids'] = json.dumps(row['block_paragraph_ids'])
+            if 'chunk_paragraph_ids' in row and isinstance(row['chunk_paragraph_ids'], list):
+                row['chunk_paragraph_ids'] = json.dumps(row['chunk_paragraph_ids'])
+            if 'categories' in row and isinstance(row['categories'], list):
+                row['categories'] = json.dumps(row['categories'])
+            if 'category_ids' in row and isinstance(row['category_ids'], list):
+                row['category_ids'] = json.dumps(row['category_ids'])
             writer.writerow(row)
         
         # Get CSV content
@@ -901,7 +926,7 @@ def load_stage7_data(nas_conn: SMBConnection) -> List[Dict]:
 
 
 def process_transcript(transcript_records: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
-    """Process all records for a single transcript to generate embeddings in batches."""
+    """Process all records for a single transcript to generate embeddings with hierarchical chunking."""
     
     enhanced_records = []
     
@@ -912,75 +937,191 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     min_final_chunk = embed_config.get("min_final_chunk", 300)
     batch_size = embed_config.get("batch_size", 50)  # Default to 50 texts per batch
     
-    # Group records for block token calculation
-    event_blocks = defaultdict(lambda: defaultdict(list))
+    # First, group records by their natural blocks (speaker_id for MD, qa_id for Q&A)
+    blocks = defaultdict(list)
+    block_token_counts = {}
     
     for record in transcript_records:
-        event_id = record.get('event_id', transcript_id)
-        
         if record.get('section_type') == 'MD':
-            block_key = f"speaker_{record.get('speaker_id')}"
+            block_key = f"MD_speaker_{record.get('speaker_id')}"
         else:  # Q&A
-            block_key = f"qa_{record.get('qa_id')}"
+            block_key = f"QA_{record.get('qa_id')}"
         
-        event_blocks[event_id][block_key].append(record)
+        blocks[block_key].append(record)
+    
+    # Calculate token count for each block
+    for block_key, block_records in blocks.items():
+        total_tokens = sum(
+            count_tokens(r.get('paragraph_content', ''))
+            for r in block_records
+        )
+        block_token_counts[block_key] = total_tokens
+        log_execution(f"Block {block_key}: {total_tokens} tokens across {len(block_records)} paragraphs")
     
     # Collect all chunks first before batching
     chunks_to_process = []
     
-    # Process each record to create chunks
-    for record in transcript_records:
+    # Process each block hierarchically
+    for block_key, block_records in blocks.items():
         try:
-            event_id = record.get('event_id', transcript_id)
-            paragraph_id = record.get('paragraph_id', '')
+            block_total_tokens = block_token_counts[block_key]
             
-            # Use original paragraph_content for embeddings
-            paragraph_text = record.get('paragraph_content', '')
-            if not paragraph_text:
-                log_console(f"No paragraph_content found for paragraph {paragraph_id}", "WARNING")
-                continue
+            # Strategy 1: If entire block fits within chunk_threshold, keep it as one chunk
+            if block_total_tokens <= chunk_threshold:
+                # Combine all paragraphs in the block into one chunk
+                combined_text = "\n\n".join([
+                    r.get('paragraph_content', '') 
+                    for r in block_records
+                ])
+                
+                if combined_text.strip():
+                    # Create a single embedding for the entire block, but keep paragraph records
+                    # Use the first record as the representative for the block chunk
+                    first_record = block_records[0]
+                    chunks_to_process.append({
+                        'record': first_record,  # Use first record as base
+                        'paragraph_id': f"block_{block_key}",  # Special ID for block-level chunk
+                        'paragraph_tokens': block_total_tokens,  # Total for block
+                        'block_tokens': block_total_tokens,
+                        'chunk_id': 1,  # Single chunk for whole block
+                        'total_chunks': 1,
+                        'chunk_text': combined_text,
+                        'chunk_tokens': block_total_tokens,
+                        'block_level_chunk': True,  # Mark as block-level
+                        'paragraphs_in_block': len(block_records),
+                        'block_paragraph_ids': [r.get('paragraph_id', '') for r in block_records]
+                    })
+                    log_console(f"Block {block_key} kept as single chunk ({block_total_tokens} tokens, {len(block_records)} paragraphs)")
             
-            # Calculate paragraph tokens
-            paragraph_tokens = count_tokens(paragraph_text)
-            
-            # Calculate block tokens
-            if record.get('section_type') == 'MD':
-                block_key = f"speaker_{record.get('speaker_id')}"
+            # Strategy 2: Block is too large, need to split intelligently
             else:
-                block_key = f"qa_{record.get('qa_id')}"
-            
-            block_records = event_blocks[event_id][block_key]
-            block_tokens = sum(
-                count_tokens(r.get('paragraph_content', ''))
-                for r in block_records
-            )
-            
-            # Chunk if necessary
-            chunks = chunk_text(
-                paragraph_text, 
-                max_tokens=target_chunk_size,
-                chunk_threshold=chunk_threshold,
-                min_final_chunk=min_final_chunk
-            )
-            
-            # Collect chunk information for batch processing
-            for chunk_idx, chunk_data in enumerate(chunks, 1):
-                text_content, token_count = chunk_data
-                chunks_to_process.append({
-                    'record': record,
-                    'paragraph_id': paragraph_id,
-                    'paragraph_tokens': paragraph_tokens,
-                    'block_tokens': block_tokens,
-                    'chunk_id': chunk_idx,
-                    'total_chunks': len(chunks),
-                    'chunk_text': text_content,
-                    'chunk_tokens': token_count
-                })
+                # Try to create chunks at paragraph boundaries
+                current_chunk_paragraphs = []
+                current_chunk_tokens = 0
+                chunk_id = 1
+                
+                for record in block_records:
+                    paragraph_text = record.get('paragraph_content', '')
+                    paragraph_tokens = count_tokens(paragraph_text)
+                    
+                    # Check if adding this paragraph would exceed target
+                    if current_chunk_tokens + paragraph_tokens > target_chunk_size and current_chunk_paragraphs:
+                        # Save current chunk (one embedding for multiple paragraphs)
+                        combined_text = "\n\n".join([
+                            r.get('paragraph_content', '')
+                            for r in current_chunk_paragraphs
+                        ])
+                        
+                        # Use first paragraph as representative
+                        first_record = current_chunk_paragraphs[0]
+                        chunks_to_process.append({
+                            'record': first_record,
+                            'paragraph_id': f"chunk_{block_key}_{chunk_id}",
+                            'paragraph_tokens': current_chunk_tokens,  # Total for this chunk
+                            'block_tokens': block_total_tokens,
+                            'chunk_id': chunk_id,
+                            'total_chunks': -1,  # Will update later
+                            'chunk_text': combined_text,
+                            'chunk_tokens': current_chunk_tokens,
+                            'block_level_chunk': False,
+                            'paragraphs_in_chunk': len(current_chunk_paragraphs),
+                            'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_chunk_paragraphs]
+                        })
+                        
+                        # Start new chunk
+                        current_chunk_paragraphs = [record]
+                        current_chunk_tokens = paragraph_tokens
+                        chunk_id += 1
+                    
+                    # Single paragraph exceeds target - need to split it
+                    elif paragraph_tokens > chunk_threshold:
+                        # First, save any accumulated chunk
+                        if current_chunk_paragraphs:
+                            combined_text = "\n\n".join([
+                                r.get('paragraph_content', '')
+                                for r in current_chunk_paragraphs
+                            ])
+                            
+                            first_record = current_chunk_paragraphs[0]
+                            chunks_to_process.append({
+                                'record': first_record,
+                                'paragraph_id': f"chunk_{block_key}_{chunk_id}",
+                                'paragraph_tokens': current_chunk_tokens,
+                                'block_tokens': block_total_tokens,
+                                'chunk_id': chunk_id,
+                                'total_chunks': -1,
+                                'chunk_text': combined_text,
+                                'chunk_tokens': current_chunk_tokens,
+                                'block_level_chunk': False,
+                                'paragraphs_in_chunk': len(current_chunk_paragraphs),
+                                'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_chunk_paragraphs]
+                            })
+                            chunk_id += 1
+                            current_chunk_paragraphs = []
+                            current_chunk_tokens = 0
+                        
+                        # Split the large paragraph
+                        paragraph_chunks = chunk_text(
+                            paragraph_text,
+                            max_tokens=target_chunk_size,
+                            chunk_threshold=chunk_threshold,
+                            min_final_chunk=min_final_chunk
+                        )
+                        
+                        for para_chunk_idx, (chunk_text_content, chunk_token_count) in enumerate(paragraph_chunks, 1):
+                            chunks_to_process.append({
+                                'record': record,
+                                'paragraph_id': record.get('paragraph_id', ''),
+                                'paragraph_tokens': paragraph_tokens,
+                                'block_tokens': block_total_tokens,
+                                'chunk_id': chunk_id,
+                                'total_chunks': -1,
+                                'chunk_text': chunk_text_content,
+                                'chunk_tokens': chunk_token_count,
+                                'block_level_chunk': False,
+                                'paragraph_chunk': f"{para_chunk_idx}/{len(paragraph_chunks)}"
+                            })
+                            chunk_id += 1
+                    
+                    else:
+                        # Add paragraph to current chunk
+                        current_chunk_paragraphs.append(record)
+                        current_chunk_tokens += paragraph_tokens
+                
+                # Don't forget the last chunk
+                if current_chunk_paragraphs:
+                    combined_text = "\n\n".join([
+                        r.get('paragraph_content', '')
+                        for r in current_chunk_paragraphs
+                    ])
+                    
+                    first_record = current_chunk_paragraphs[0]
+                    chunks_to_process.append({
+                        'record': first_record,
+                        'paragraph_id': f"chunk_{block_key}_{chunk_id}",
+                        'paragraph_tokens': current_chunk_tokens,
+                        'block_tokens': block_total_tokens,
+                        'chunk_id': chunk_id,
+                        'total_chunks': -1,
+                        'chunk_text': combined_text,
+                        'chunk_tokens': current_chunk_tokens,
+                        'block_level_chunk': False,
+                        'paragraphs_in_chunk': len(current_chunk_paragraphs),
+                        'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_chunk_paragraphs]
+                    })
+                
+                # Update total_chunks for this block
+                total_chunks_in_block = chunk_id
+                for chunk in chunks_to_process:
+                    if chunk['total_chunks'] == -1:
+                        chunk['total_chunks'] = total_chunks_in_block
+                
+                log_console(f"Block {block_key} split into {total_chunks_in_block} chunks ({block_total_tokens} tokens)")
             
         except Exception as e:
             enhanced_error_logger.log_processing_error(
                 transcript_id,
-                f"Error processing paragraph {record.get('paragraph_id')}: {str(e)}"
+                f"Error processing block {block_key}: {str(e)}"
             )
     
     # Process chunks in batches
