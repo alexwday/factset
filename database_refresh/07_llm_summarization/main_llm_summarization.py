@@ -1,7 +1,12 @@
 """
 Stage 7: LLM-Based Content Summarization
-Processes Stage 6 classified content to create summaries for each transcript.
+Processes Stage 6 classified content to create block-level summaries for reranking.
 Self-contained standalone script that loads config from NAS at runtime.
+
+Creates condensed summaries at the block level:
+- Q&A Groups: One summary per complete Q&A conversation
+- Management Discussion: One summary per speaker block
+- Focus on speaker attribution, key points, and retrieval relevance
 
 Architecture based on Stage 5/6 patterns with Stage 7 summarization logic.
 Uses per-transcript OAuth refresh, incremental saving, and enhanced error logging.
@@ -775,13 +780,13 @@ def create_qa_group_summary_tools() -> List[Dict]:
         "type": "function",
         "function": {
             "name": "summarize_qa_group",
-            "description": "Summarize complete Q&A group conversation",
+            "description": "Create a condensed block summary for Q&A conversation retrieval and reranking",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string", 
-                        "description": "Comprehensive summary of the complete Q&A conversation for reranking"
+                        "description": "Brief, condensed summary stating: (1) Speaker names involved, (2) Core topics discussed, (3) Retrieval relevance - what queries this block would answer"
                     }
                 },
                 "required": ["summary"]
@@ -796,13 +801,13 @@ def create_management_summary_tools() -> List[Dict]:
         "type": "function",
         "function": {
             "name": "summarize_management_speaker_block",
-            "description": "Summarize a single management speaker block",
+            "description": "Create a condensed block summary for management discussion retrieval and reranking",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string",
-                        "description": "Comprehensive summary of this speaker block for reranking"
+                        "description": "Brief, condensed summary stating: (1) Executive speaker name, (2) Key points covered, (3) Retrieval relevance - what financial/business queries this block addresses"
                     }
                 },
                 "required": ["summary"]
@@ -828,39 +833,42 @@ def create_qa_group_summary_prompt(company_name: str, fiscal_info: str,
 </context>
 
 <objective>
-You are creating a single summary for this complete Q&A conversation that will be assigned to ALL paragraphs in the group.
-This summary will be used for post-retrieval reranking to filter relevant content from earnings call transcripts.
+Create a BRIEF, CONDENSED summary for reranking and retrieval relevance assessment.
+This summary will be used to determine if retrieved chunks match user queries.
 
-The summary should capture:
-- Analyst question and management response
-- Key financial metrics, guidance, or business developments mentioned
-- Strategic insights or forward-looking statements
-- Any quantitative data or performance indicators
+Your summary must be structured in THREE parts:
+1. SPEAKERS: List the analyst and executive names involved
+2. CONTENT: 2-3 sentence condensed summary of what was discussed
+3. RELEVANCE: What types of queries this block would be useful for
 
-RERANKING OPTIMIZATION:
-- Include speaker attribution: [ANALYST] question about [topic] and [EXECUTIVE] response covering [key points]
-- Preserve financial terminology and quantitative data for semantic search
-- Focus on searchable concepts that users might query
-- Write for relevance filtering by smaller models
+CRITICAL REQUIREMENTS:
+- Keep the summary BRIEF and CONDENSED (aim for 3-4 sentences total)
+- Always start with speaker names
+- Focus on the core topic/question and key answer points
+- End with retrieval relevance (e.g., "Useful for queries about...")
+- Include specific metrics, numbers, or guidance mentioned
 </objective>
 
+<format_example>
+"[Analyst: John Smith] asks about Q3 margin compression. [CFO: Jane Doe] explains 200bps decline due to supply chain costs and expects normalization by Q1. Useful for queries about margins, profitability, supply chain impact, or financial guidance."
+</format_example>
+
 <style>
-Professional financial analysis. Summary should read like an executive briefing point optimized for relevance filtering.
+Ultra-concise block summary optimized for reranking decisions.
 </style>
 
 <tone>
-Analytical and concise. Focus on financial substance and business insights.
+Direct and factual. No fluff, just core information for retrieval matching.
 </tone>
 
 <audience>
-A smaller model that will judge relevance to user queries about earnings calls and filter results accordingly.
+A reranking model that needs to quickly assess if this block matches a user's query.
 </audience>
 
 <response_format>
 Use the summarize_qa_group function.
-- Provide one comprehensive summary for the entire Q&A conversation
-- Include speaker attribution and financial context for reranking
-- Preserve quantitative data and forward-looking statements
+- One brief block summary following the three-part structure
+- Keep it condensed and retrieval-focused
 </response_format>
 """
 
@@ -886,49 +894,47 @@ def create_management_speaker_block_prompt(company_name: str, fiscal_info: str,
 </context>
 
 <objective>
-You are creating a summary for this specific management speaker block from a {fiscal_info} earnings call transcript.
-This summary will be used for post-retrieval reranking to filter relevant content from earnings call transcripts.
+Create a BRIEF, CONDENSED summary for reranking and retrieval relevance assessment.
+This summary will be used to determine if retrieved chunks match user queries.
 
-The summary should capture:
-- Key points made by this specific executive
-- Financial metrics or guidance mentioned  
-- Strategic initiatives or decisions discussed
-- Forward-looking statements or outlook
-- Operational updates or challenges addressed
+Your summary must be structured in THREE parts:
+1. SPEAKER: Executive name and role (if mentioned)
+2. CONTENT: 2-3 sentence condensed summary of key points discussed
+3. RELEVANCE: What types of queries this block would answer
 
-RERANKING OPTIMIZATION:
-- Start with speaker attribution: [EXECUTIVE: {speaker_name}]
-- Preserve financial terminology and quantitative data for semantic search
-- Focus on the main topics covered in THIS speaker block
-- Make summary distinctive from other speaker blocks
-- Include context about {company_name}'s {fiscal_info} performance
-- Consider how this block builds on or relates to the previous speaker block summaries provided
+CRITICAL REQUIREMENTS:
+- Keep the summary BRIEF and CONDENSED (aim for 3-4 sentences total)
+- Always start with "[Executive: {speaker_name}]"
+- Focus on the 2-3 most important points or metrics
+- End with retrieval relevance (e.g., "Useful for queries about...")
+- Include specific numbers, guidance, or strategic decisions mentioned
+- Make this block distinguishable from other speaker blocks
 
-Consider the block's position in the earnings call:
-- Opening blocks often contain key financial highlights and quarterly results
-- Middle blocks typically provide detailed segment analysis and operational updates  
-- Closing blocks may contain forward guidance and strategic outlook
-- Use previous block summaries to understand the conversation flow and avoid repetition
+Block position context:
+- {block_position} blocks typically contain {'overview and key results' if block_position == 'opening' else 'detailed analysis' if block_position == 'middle' else 'forward guidance and outlook'}
 </objective>
 
+<format_example>
+"[CEO: John Smith] reports record Q3 revenue of $2.3B (+15% YoY) driven by cloud services growth. Announces $500M buyback program and raises FY guidance to $9.2B. Useful for queries about quarterly performance, revenue growth, cloud business, capital allocation, or financial guidance."
+</format_example>
+
 <style>
-Professional financial analysis. Summary should be concise yet comprehensive, optimized for distinguishing this block from others.
+Ultra-concise block summary optimized for reranking decisions.
 </style>
 
 <tone>
-Analytical and focused. Capture the essence of what THIS executive said in THIS block.
+Direct and factual. Focus on key financial/business points for retrieval matching.
 </tone>
 
 <audience>
-A smaller model that will judge relevance to user queries and needs to distinguish between different speaker blocks.
+A reranking model that needs to quickly assess if this block matches a user's query.
 </audience>
 
 <response_format>
 Use the summarize_management_speaker_block function.
-- Provide one summary for this specific speaker block  
-- Include speaker name and key topics
-- Make summary distinctive from other blocks
-- Focus on what makes this block unique and searchable
+- One brief block summary following the three-part structure
+- Keep it condensed and retrieval-focused
+- Make it distinctive from other blocks
 </response_format>
 """
 
@@ -1007,7 +1013,7 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
                 
                 # Apply same summary to ALL paragraphs in group
                 for record in qa_group_records:
-                    record["paragraph_summary"] = summary
+                    record["block_summary"] = summary
                 
                 enhanced_records.extend(qa_group_records)
                 
@@ -1033,7 +1039,7 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
                 
                 # Set null values for failed group
                 for record in qa_group_records:
-                    record["paragraph_summary"] = None
+                    record["block_summary"] = None
                 
                 enhanced_records.extend(qa_group_records)
         
@@ -1046,7 +1052,7 @@ def process_transcript_qa_groups(transcript_records: List[Dict], transcript_id: 
             
             # Set null values for failed group
             for record in qa_group_records:
-                record["paragraph_summary"] = None
+                record["block_summary"] = None
             
             enhanced_records.extend(qa_group_records)
     
@@ -1115,7 +1121,7 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                     ctx_summary = None
                     for enhanced_record in enhanced_records:
                         if enhanced_record.get("speaker_block_id") == ctx_block_id:
-                            ctx_summary = enhanced_record.get("paragraph_summary")
+                            ctx_summary = enhanced_record.get("block_summary")
                             break
                     
                     if ctx_summary:
@@ -1175,7 +1181,7 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                 
                 # Apply summary to all paragraphs in this speaker block
                 for record in block_records:
-                    record["paragraph_summary"] = summary
+                    record["block_summary"] = summary
                 
                 enhanced_records.extend(block_records)
                 
@@ -1201,7 +1207,7 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
                 
                 # Set null values for failed block
                 for record in block_records:
-                    record["paragraph_summary"] = None
+                    record["block_summary"] = None
                 
                 enhanced_records.extend(block_records)
         
@@ -1214,7 +1220,7 @@ def process_transcript_management(transcript_records: List[Dict], transcript_id:
             
             # Set null values for failed block
             for record in block_records:
-                record["paragraph_summary"] = None
+                record["block_summary"] = None
             
             enhanced_records.extend(block_records)
     
@@ -1240,7 +1246,7 @@ def process_other_records(transcript_records: List[Dict], transcript_id: str) ->
         else:
             summary = f"[{section_name.upper()}] {content}"
         
-        record["paragraph_summary"] = summary
+        record["block_summary"] = summary
     
     return other_records
 
@@ -1266,7 +1272,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
         
         # Return original records with null summary fields
         for record in transcript_records:
-            record["paragraph_summary"] = None
+            record["block_summary"] = None
         
         return transcript_records
 
@@ -1403,7 +1409,7 @@ def main():
         execution_time = end_time - start_time
         
         # Calculate summary statistics
-        records_with_summaries = len([r for r in all_enhanced_records if r.get("paragraph_summary")])
+        records_with_summaries = len([r for r in all_enhanced_records if r.get("block_summary")])
         records_without_summaries = len(all_enhanced_records) - records_with_summaries
         
         stage_summary = {
