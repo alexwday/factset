@@ -1061,19 +1061,37 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     log_console(f"Created {len(blocks)} blocks from {len(transcript_records)} records")
     
     # Calculate token count for each block
+    total_blocks_with_tokens = 0
     for block_key, block_records in blocks.items():
-        total_tokens = sum(
-            count_tokens(r.get('paragraph_content', ''))
-            for r in block_records
-        )
+        # Debug individual paragraph contents (try both field names)
+        paragraph_texts = [r.get('paragraph_content') or r.get('content', '') for r in block_records]
+        paragraph_lengths = [len(text) for text in paragraph_texts]
+        
+        # Calculate tokens with debugging
+        total_tokens = 0
+        for record in block_records:
+            # Try paragraph_content first, fall back to content
+            text = record.get('paragraph_content') or record.get('content', '')
+            tokens = count_tokens(text)
+            if tokens > 0:
+                total_tokens += tokens
+            elif text:  # Has text but 0 tokens?
+                log_console(f"WARNING: Text with length {len(text)} resulted in 0 tokens!", "WARNING")
+                log_console(f"First 100 chars: {text[:100]}", "WARNING")
+        
         block_token_counts[block_key] = total_tokens
         log_execution(f"Block {block_key}: {total_tokens} tokens across {len(block_records)} paragraphs")
         
         # Debug: Check if any records have content
         if total_tokens == 0:
             log_console(f"WARNING: Block {block_key} has 0 tokens!", "WARNING")
-            sample_record = block_records[0] if block_records else {}
-            log_console(f"Sample record fields: {list(sample_record.keys())[:10]}", "WARNING")
+            log_console(f"Paragraph lengths in block: {paragraph_lengths[:5]}", "WARNING")
+            if paragraph_texts and paragraph_texts[0]:
+                log_console(f"First paragraph sample: {paragraph_texts[0][:100]}...", "WARNING")
+        else:
+            total_blocks_with_tokens += 1
+    
+    log_console(f"Blocks with tokens: {total_blocks_with_tokens}/{len(blocks)}")
     
     # Collect all chunks first before batching
     chunks_to_process = []
@@ -1094,7 +1112,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
             if block_total_tokens <= chunk_threshold:
                 # Combine all paragraphs in the block into one chunk
                 combined_text = "\n\n".join([
-                    r.get('paragraph_content', '') 
+                    r.get('paragraph_content') or r.get('content', '') 
                     for r in block_records
                 ])
                 
@@ -1132,9 +1150,10 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 chunk_id = 1
                 
                 for record in block_records:
-                    paragraph_text = record.get('paragraph_content', '')
+                    # Try both field names
+                    paragraph_text = record.get('paragraph_content') or record.get('content', '')
                     if not paragraph_text.strip():
-                        log_console(f"WARNING: Empty paragraph_content in block {block_key}, record {record.get('paragraph_id', 'unknown')}", "WARNING")
+                        log_console(f"WARNING: Empty content in block {block_key}, record {record.get('paragraph_id', 'unknown')}", "WARNING")
                         continue
                     paragraph_tokens = count_tokens(paragraph_text)
                     
@@ -1142,7 +1161,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                     if current_chunk_tokens + paragraph_tokens > target_chunk_size and current_chunk_paragraphs:
                         # Save current chunk (one embedding for multiple paragraphs)
                         combined_text = "\n\n".join([
-                            r.get('paragraph_content', '')
+                            r.get('paragraph_content') or r.get('content', '')
                             for r in current_chunk_paragraphs
                         ])
                         
@@ -1179,7 +1198,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                         # First, save any accumulated chunk
                         if current_chunk_paragraphs:
                             combined_text = "\n\n".join([
-                                r.get('paragraph_content', '')
+                                r.get('paragraph_content') or r.get('content', '')
                                 for r in current_chunk_paragraphs
                             ])
                             
@@ -1245,7 +1264,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 # Don't forget the last chunk
                 if current_chunk_paragraphs:
                     combined_text = "\n\n".join([
-                        r.get('paragraph_content', '')
+                        r.get('paragraph_content') or r.get('content', '')
                         for r in current_chunk_paragraphs
                     ])
                     
