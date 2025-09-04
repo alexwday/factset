@@ -861,9 +861,12 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
             )
             
             # Generate embedding for each chunk
-            for chunk_id, (chunk_text, chunk_tokens) in enumerate(chunks, 1):
+            for chunk_idx, chunk_data in enumerate(chunks, 1):
                 try:
-                    embedding = generate_embedding(chunk_text)
+                    # Unpack the chunk data tuple
+                    text_content, token_count = chunk_data
+                    
+                    embedding = generate_embedding(text_content)
                     
                     if embedding:
                         # Create new record with all original fields plus new ones
@@ -871,10 +874,10 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                             **record,  # Include all original fields
                             'paragraph_tokens': paragraph_tokens,
                             'block_tokens': block_tokens,
-                            'chunk_id': chunk_id,
+                            'chunk_id': chunk_idx,
                             'total_chunks': len(chunks),
-                            'chunk_text': chunk_text,
-                            'chunk_tokens': chunk_tokens,
+                            'chunk_text': text_content,
+                            'chunk_tokens': token_count,
                             'embedding': embedding
                         }
                         enhanced_records.append(enhanced_record)
@@ -884,7 +887,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                         enhanced_error_logger.log_embedding_error(
                             transcript_id,
                             paragraph_id,
-                            f"Failed to generate embedding for chunk {chunk_id}"
+                            f"Failed to generate embedding for chunk {chunk_idx}"
                         )
                         
                 except Exception as e:
