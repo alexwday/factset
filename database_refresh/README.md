@@ -4,7 +4,7 @@ A comprehensive multi-stage data processing pipeline for financial earnings tran
 
 ## Overview
 
-This pipeline processes financial earnings call transcripts through 8 sequential stages, from initial data acquisition to AI-enhanced analysis with relationship scoring for improved retrieval-augmented generation (RAG) applications.
+This pipeline processes financial earnings call transcripts through 9 sequential stages, from initial data acquisition to AI-enhanced analysis with vector embeddings for semantic search and retrieval-augmented generation (RAG) applications.
 
 ### Pipeline Architecture
 
@@ -14,7 +14,7 @@ This pipeline processes financial earnings call transcripts through 8 sequential
 │ Stage 0: Historical │────▶│ Stage 2: Database Sync  │────▶│ Stage 5: Q&A Pairing   │
 │ Stage 1: Daily Sync │     │ Stage 3: Content Extract│     │ Stage 6: Classification │
 └─────────────────────┘     │ Stage 4: Structure Valid│     │ Stage 7: Summarization │
-                            └─────────────────────────┘     │ Stage 8: Relationships │
+                            └─────────────────────────┘     │ Stage 8: Embeddings    │
                                                             └─────────────────────────┘
 ```
 
@@ -65,7 +65,7 @@ NAS_SHARE_NAME=shared_folder
 NAS_BASE_PATH=/base/path
 NAS_PORT=445
 
-# LLM API (for stages 5-7)
+# LLM API (for stages 5-8)
 LLM_CLIENT_ID=your_llm_client_id
 LLM_CLIENT_SECRET=your_llm_client_secret
 
@@ -207,19 +207,19 @@ cd 07_llm_summarization
 python main_llm_summarization.py
 ```
 
-### Stage 8: Speaker Block Relationships
-**Purpose**: Score speaker block relationships for context expansion  
+### Stage 8: Embeddings Generation
+**Purpose**: Generate vector embeddings for semantic search and RAG  
 **Input**: Stage 7 summarized content  
-**Output**: Content with relationship context flags  
+**Output**: Enhanced records with 3072-dimensional embeddings  
 **Key Features**:
-- Boolean context flags
-- Enhanced prompting
-- Inclusive relationship scoring
-- RAG retrieval optimization
+- Intelligent text chunking (>1000 tokens → ~500 token chunks)
+- tiktoken with hybrid fallback for token counting
+- Full 3072-dimensional vectors (text-embedding-3-large)
+- Incremental saving with OAuth refresh per transcript
 
 ```bash
-cd 08_speaker_block_relationships
-python main_speaker_block_relationships.py
+cd 08_embeddings_generation
+python main_embeddings_generation.py
 ```
 
 ## Configuration
@@ -263,7 +263,7 @@ stage_XX_name:
 Each stage generates comprehensive logs saved to NAS:
 - **Execution logs**: Detailed operational information
 - **Error logs**: Categorized error tracking
-- **Cost tracking**: LLM token usage and costs (stages 5-7)
+- **Cost tracking**: LLM token usage and costs (stages 5-8)
 
 ### Common Debug Commands
 
@@ -290,7 +290,7 @@ print('Stages configured:', len([k for k in config.keys() if k.startswith('stage
 ### Performance Monitoring
 
 - **Memory usage**: Monitor with sliding windows and configurable limits
-- **API costs**: Track LLM token usage across stages 5-7
+- **API costs**: Track LLM token usage across stages 5-8
 - **Processing time**: Log stage execution duration
 - **Error rates**: Monitor validation and processing success rates
 
@@ -304,7 +304,8 @@ print('Stages configured:', len([k for k in config.keys() if k.startswith('stage
 ### Output Data
 - **Structured JSON**: Paragraph-level transcript content
 - **Enhanced Metadata**: Speaker information, categories, summaries
-- **Relationship Data**: Context expansion flags for RAG applications
+- **Vector Embeddings**: 3072-dimensional vectors for semantic search
+- **Token Metrics**: Paragraph and block-level token counts for optimization
 
 ### Security
 - **Credential Management**: Environment variables only
