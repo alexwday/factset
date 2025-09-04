@@ -698,8 +698,45 @@ def load_stage6_data(nas_conn: SMBConnection) -> List[Dict]:
         if not input_data:
             raise RuntimeError(f"Failed to download Stage 6 data from: {input_path}")
         
+        # Decode the data
+        input_str = input_data.decode('utf-8')
+        
+        # Check if the JSON array is properly closed
+        # Stage 6 uses incremental writing and may not have closed the array properly
+        input_str_stripped = input_str.rstrip()
+        if input_str_stripped and not input_str_stripped.endswith(']'):
+            log_console("Stage 6 output file not properly closed, attempting to fix...", "WARNING")
+            
+            # Check if we need to add a closing bracket
+            # Remove any trailing comma and whitespace
+            if input_str_stripped.endswith(','):
+                input_str_stripped = input_str_stripped[:-1].rstrip()
+            
+            # Add closing bracket
+            input_str = input_str_stripped + '\n]'
+            
+            log_execution("Fixed unclosed JSON array from Stage 6")
+        
         # Stage 6 outputs JSON array format
-        stage6_records = json.loads(input_data.decode('utf-8'))
+        try:
+            stage6_records = json.loads(input_str)
+        except json.JSONDecodeError as e:
+            # If still failing, try to diagnose the issue
+            log_error(f"JSON decode error at position {e.pos}: {e.msg}", "json_parsing", {
+                "line": e.lineno if hasattr(e, 'lineno') else None,
+                "column": e.colno if hasattr(e, 'colno') else None,
+                "position": e.pos,
+                "message": e.msg
+            })
+            
+            # Try to show context around the error
+            if hasattr(e, 'pos') and e.pos:
+                start = max(0, e.pos - 100)
+                end = min(len(input_str), e.pos + 100)
+                context = input_str[start:end]
+                log_console(f"Context around error: ...{context}...", "ERROR")
+            
+            raise
         
         log_execution(f"Loaded {len(stage6_records)} records from Stage 6")
         return stage6_records
