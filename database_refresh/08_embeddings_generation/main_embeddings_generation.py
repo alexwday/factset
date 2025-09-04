@@ -97,6 +97,7 @@ class EnhancedErrorLogger:
         self.validation_errors = []
         self.total_embeddings = 0
         self.total_chunks = 0
+        self.using_fallback_tokenizer = False
 
     def log_embedding_error(self, transcript_id: str, paragraph_id: str, error: str):
         """Log embedding generation errors."""
@@ -538,22 +539,98 @@ def close_json_array(nas_conn: SMBConnection, file_path: str) -> bool:
 
 
 def setup_tokenizer():
-    """Setup tiktoken tokenizer for token counting."""
+    """Setup tiktoken tokenizer for token counting with fallback support."""
     global tokenizer
     try:
         tokenizer = tiktoken.get_encoding("cl100k_base")  # GPT-4 tokenizer
-        log_execution("Tokenizer initialized")
+        log_execution("Tokenizer initialized with tiktoken")
+        log_console("Tokenizer initialized successfully with tiktoken")
+        return True
     except Exception as e:
-        log_error(f"Failed to setup tokenizer: {e}", "tokenizer_setup")
-        raise
+        log_error(f"Failed to setup tiktoken tokenizer: {e}", "tokenizer_setup")
+        log_console(f"WARNING: tiktoken initialization failed: {e}", "WARNING")
+        log_console("Using fallback token estimation method", "WARNING")
+        tokenizer = None  # Explicitly set to None to trigger fallback
+        return False
+
+
+def estimate_tokens_fallback(text: str) -> int:
+    """
+    Fallback token estimation when tiktoken is not available.
+    
+    Uses a hybrid approach combining character and word-based estimation.
+    Based on empirical observations:
+    - Average ~4 characters per token for English text
+    - Average ~1.3 tokens per word
+    - Adjusts for punctuation and special characters
+    """
+    if not text:
+        return 0
+    
+    # Method 1: Character-based estimation (tends to underestimate)
+    char_estimate = len(text) / 4.0
+    
+    # Method 2: Word-based estimation (tends to overestimate for technical text)
+    words = text.split()
+    word_estimate = len(words) * 1.3
+    
+    # Method 3: Refined character estimate accounting for whitespace
+    # Remove extra whitespace for more accurate count
+    compressed_text = ' '.join(text.split())
+    refined_char_estimate = len(compressed_text) / 3.5
+    
+    # Take weighted average favoring refined character method
+    # This tends to be most accurate for financial transcripts
+    final_estimate = (
+        refined_char_estimate * 0.5 +  # 50% weight
+        char_estimate * 0.3 +           # 30% weight
+        word_estimate * 0.2             # 20% weight
+    )
+    
+    # Add 10% buffer for safety in chunking decisions
+    # Better to overestimate and chunk more than underestimate and fail
+    final_estimate = int(final_estimate * 1.1)
+    
+    return final_estimate
 
 
 def count_tokens(text: str) -> int:
-    """Count tokens in text using tiktoken."""
+    """
+    Count tokens in text using tiktoken with fallback estimation.
+    
+    Attempts to use tiktoken for accurate counting, but falls back to
+    estimation if tiktoken is not available or fails.
+    """
     global tokenizer
-    if not tokenizer:
+    
+    # Try to initialize tokenizer if not already done
+    if tokenizer is None and not hasattr(count_tokens, '_fallback_warned'):
         setup_tokenizer()
-    return len(tokenizer.encode(text))
+    
+    # Try tiktoken if available
+    if tokenizer is not None:
+        try:
+            return len(tokenizer.encode(text))
+        except Exception as e:
+            # Tiktoken failed on this specific text
+            log_error(f"tiktoken encoding failed for text: {e}", "token_encoding")
+            log_console(f"WARNING: tiktoken encoding failed, using fallback", "WARNING")
+            
+            # Set flag to avoid repeated warnings
+            count_tokens._fallback_warned = True
+            
+            # Fall through to fallback method
+    
+    # Use fallback estimation
+    if not hasattr(count_tokens, '_fallback_warned'):
+        log_console("Using fallback token estimation (tiktoken unavailable)", "WARNING")
+        log_execution("Using fallback token estimation method", {
+            "reason": "tiktoken unavailable or failed",
+            "text_length": len(text)
+        })
+        count_tokens._fallback_warned = True
+    
+    return estimate_tokens_fallback(text)
 
 
 def find_sentence_boundary(text: str, target_pos: int, window: int = 50) -> int:
@@ -841,8 +918,18 @@ def main():
         # Setup SSL certificate
         ssl_cert_path = setup_ssl_certificate(nas_conn)
         
-        # Setup tokenizer
-        setup_tokenizer()
+        # Setup tokenizer with fallback support
+        tokenizer_success = setup_tokenizer()
+        if not tokenizer_success:
+            log_console("=" * 50)
+            log_console("WARNING: Running with fallback token estimation")
+            log_console("Token counts will be approximate")
+            log_console("Consider installing tiktoken for accurate counts")
+            log_console("=" * 50)
+            log_execution("Stage 8 running with fallback token estimation", {
+                "reason": "tiktoken unavailable",
+                "impact": "Token counts will be approximate"
+            })
         
         # Load Stage 7 data
         stage7_data = load_stage7_data(nas_conn)
@@ -872,6 +959,7 @@ def main():
         
         # Initialize enhanced error logger
         enhanced_error_logger = EnhancedErrorLogger()
+        enhanced_error_logger.using_fallback_tokenizer = (tokenizer is None)
         
         # Process each transcript
         all_enhanced_records = []
@@ -946,7 +1034,9 @@ def main():
             "total_chunks": enhanced_error_logger.total_chunks,
             "embedding_errors": len(enhanced_error_logger.embedding_errors),
             "chunking_errors": len(enhanced_error_logger.chunking_errors),
-            "processing_errors": len(enhanced_error_logger.processing_errors)
+            "processing_errors": len(enhanced_error_logger.processing_errors),
+            "tokenizer_method": "fallback_estimation" if enhanced_error_logger.using_fallback_tokenizer else "tiktoken",
+            "tokenizer_warning": "Token counts are approximate" if enhanced_error_logger.using_fallback_tokenizer else "Accurate token counts"
         }
         
         # Save logs

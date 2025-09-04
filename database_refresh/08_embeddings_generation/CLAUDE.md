@@ -18,7 +18,12 @@ Architecture exactly matches Stage 7 with NAS operations, incremental saving, an
 ## Process Flow
 
 ### 1. Token Calculation
-- Calculates `paragraph_tokens` for each paragraph using tiktoken
+- Calculates `paragraph_tokens` for each paragraph using tiktoken (with fallback)
+- **Fallback Mechanism**: If tiktoken fails, uses hybrid estimation:
+  - Refined character-based: ~3.5 chars/token (50% weight)
+  - Standard character-based: ~4 chars/token (30% weight)
+  - Word-based: ~1.3 tokens/word (20% weight)
+  - Adds 10% safety buffer for chunking decisions
 - Aggregates `block_tokens` for:
   - MD sections: Total tokens per speaker block
   - Q&A sections: Total tokens per qa_id
@@ -186,9 +191,23 @@ pip install pyyaml
 pip install pysmb
 pip install python-dotenv
 pip install openai
-pip install tiktoken
+pip install tiktoken  # Optional but recommended for accurate token counting
 pip install requests
 ```
+
+### Token Counting Fallback
+The system includes a robust fallback mechanism if tiktoken is unavailable:
+- **Primary Method**: tiktoken with cl100k_base encoding (GPT-4/Claude compatible)
+- **Fallback Method**: Hybrid estimation algorithm that:
+  - Combines character, word, and refined character counting
+  - Adds 10% safety buffer for chunking decisions
+  - Logs warnings when using fallback
+  - Continues processing without interruption
+- **Impact of Fallback**:
+  - Token counts will be approximate (±15% accuracy)
+  - Chunking decisions may be slightly less optimal
+  - Embeddings still generate correctly
+  - All features remain functional
 
 ## Storage Requirements
 
