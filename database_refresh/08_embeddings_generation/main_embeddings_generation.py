@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from collections import defaultdict
 import tiktoken
+import csv
 
 # Load environment variables
 load_dotenv()
@@ -532,6 +533,91 @@ def save_results_incrementally(results: List[Dict], output_path: str, is_first_b
         error_msg = f"Failed to save results incrementally: {e}"
         log_error(error_msg, "incremental_save", {"error": str(e)})
         raise
+
+
+def save_results_incrementally_csv(results: List[Dict], output_path: str, is_first_batch: bool = False):
+    """Save results incrementally to CSV format for better handling of large datasets."""
+    try:
+        nas_conn = get_nas_connection()
+        if not nas_conn:
+            raise RuntimeError("Failed to connect to NAS for incremental save")
+        
+        # Append records using CSV format
+        if not append_records_to_csv(nas_conn, results, output_path, is_first_batch):
+            raise RuntimeError("Failed to append records to output file")
+        
+        log_console(f"Appended {len(results)} records to CSV output file")
+        log_execution(f"Incrementally saved {len(results)} records to CSV", {
+            "output_path": output_path,
+            "is_first_batch": is_first_batch,
+            "format": "CSV"
+        })
+        
+        nas_conn.close()
+        
+    except Exception as e:
+        error_msg = f"Failed to save results incrementally: {e}"
+        log_error(error_msg, "incremental_save", {"error": str(e)})
+        raise
+
+
+def append_records_to_csv(nas_conn: SMBConnection, records: List[Dict], file_path: str, is_first: bool = False) -> bool:
+    """Append records to a CSV file - much more efficient for large datasets with embeddings."""
+    try:
+        # Get all field names from records (excluding embedding for header)
+        if not records:
+            return True
+        
+        # Define CSV columns - put embedding last since it's large
+        base_fields = []
+        for record in records:
+            for key in record.keys():
+                if key not in base_fields and key != 'embedding':
+                    base_fields.append(key)
+        
+        # Ensure consistent column order
+        base_fields.sort()
+        fieldnames = base_fields + ['embedding']  # Add embedding at the end
+        
+        # Create CSV content
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        
+        # Write header only if first batch
+        if is_first:
+            writer.writeheader()
+        
+        # Write records with embeddings as JSON strings
+        for record in records:
+            row = record.copy()
+            # Convert embedding list to JSON string for CSV storage
+            if 'embedding' in row and isinstance(row['embedding'], list):
+                row['embedding'] = json.dumps(row['embedding'])
+            writer.writerow(row)
+        
+        # Get CSV content
+        csv_content = output.getvalue()
+        
+        # If not first batch, download existing file and append
+        if not is_first and nas_file_exists(nas_conn, file_path):
+            # For CSV, we can truly append without reading the whole file
+            # But since SMB doesn't support append mode, we still need to download and re-upload
+            # However, this is still more efficient than JSON array manipulation
+            existing_content = nas_download_file(nas_conn, file_path)
+            if existing_content:
+                # Combine existing and new content
+                full_content = existing_content.decode('utf-8') + csv_content
+                file_obj = io.BytesIO(full_content.encode('utf-8'))
+            else:
+                file_obj = io.BytesIO(csv_content.encode('utf-8'))
+        else:
+            file_obj = io.BytesIO(csv_content.encode('utf-8'))
+        
+        return nas_upload_file(nas_conn, file_obj, file_path)
+        
+    except Exception as e:
+        log_error(f"Failed to append records to CSV: {e}", "csv_append")
+        return False
 
 
 def append_records_to_json_array(nas_conn: SMBConnection, records: List[Dict], file_path: str, is_first: bool = False) -> bool:
@@ -1061,10 +1147,14 @@ def main():
         all_enhanced_records = []
         failed_transcripts = []
         
+        # Use CSV format for better handling of large datasets with embeddings
+        use_csv_format = config["stage_08_embeddings_generation"].get("use_csv_output", True)
+        file_extension = "csv" if use_csv_format else "json"
         output_path = nas_path_join(
             config["stage_08_embeddings_generation"]["output_data_path"],
-            "stage_08_embeddings.json"
+            f"stage_08_embeddings.{file_extension}"
         )
+        log_console(f"Output format: {file_extension.upper()}")
         
         for i, (transcript_id, transcript_records) in enumerate(transcripts.items(), 1):
             transcript_start = datetime.now()
@@ -1080,7 +1170,10 @@ def main():
                 enhanced_records = process_transcript(transcript_records, transcript_id, enhanced_error_logger)
                 
                 # Save results incrementally
-                save_results_incrementally(enhanced_records, output_path, is_first_batch=(i == 1))
+                if use_csv_format:
+                    save_results_incrementally_csv(enhanced_records, output_path, is_first_batch=(i == 1))
+                else:
+                    save_results_incrementally(enhanced_records, output_path, is_first_batch=(i == 1))
                 
                 all_enhanced_records.extend(enhanced_records)
                 
@@ -1103,11 +1196,12 @@ def main():
                 
                 log_console(f"Failed to process transcript {transcript_id}: {e}", "ERROR")
         
-        # Close JSON array
-        nas_conn_final = get_nas_connection()
-        if nas_conn_final:
-            close_json_array(nas_conn_final, output_path)
-            nas_conn_final.close()
+        # Close JSON array (only if using JSON format)
+        if not use_csv_format:
+            nas_conn_final = get_nas_connection()
+            if nas_conn_final:
+                close_json_array(nas_conn_final, output_path)
+                nas_conn_final.close()
         
         # Save failed transcripts
         save_failed_transcripts(failed_transcripts, nas_conn)
@@ -1132,7 +1226,8 @@ def main():
             "chunking_errors": len(enhanced_error_logger.chunking_errors),
             "processing_errors": len(enhanced_error_logger.processing_errors),
             "tokenizer_method": "fallback_estimation" if enhanced_error_logger.using_fallback_tokenizer else "tiktoken",
-            "tokenizer_warning": "Token counts are approximate" if enhanced_error_logger.using_fallback_tokenizer else "Accurate token counts"
+            "tokenizer_warning": "Token counts are approximate" if enhanced_error_logger.using_fallback_tokenizer else "Accurate token counts",
+            "output_format": "CSV" if use_csv_format else "JSON"
         }
         
         # Save logs

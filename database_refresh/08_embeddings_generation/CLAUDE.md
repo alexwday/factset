@@ -4,7 +4,7 @@
 This stage generates vector embeddings from the original paragraph text (with Stage 7's summaries preserved) for semantic search and retrieval-augmented generation (RAG). While Stage 7 adds summaries for display and reranking, Stage 8 creates embeddings from the full original content to capture complete semantic meaning.
 
 **Input**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json` (contains both original text and summaries)
-**Output**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.json`
+**Output**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.csv` (or `.json` if configured)
 
 Architecture exactly matches Stage 7 with NAS operations, incremental saving, and OAuth refresh.
 
@@ -92,6 +92,7 @@ stage_08_embeddings_generation:
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 10
+  use_csv_output: true  # Use CSV format for better handling of large datasets (default: true)
   
   # Embedding configuration
   embedding_config:
@@ -102,6 +103,7 @@ stage_08_embeddings_generation:
     min_final_chunk: 300
     rate_limit_pause: 100
     token_refresh_interval: 500
+    batch_size: 50  # Number of texts to embed in each API call
   
   # LLM configuration (same OAuth as Stage 07)
   llm_config:
@@ -142,7 +144,37 @@ The script provides detailed statistics:
 
 ## Working with Embeddings
 
-### Loading and Searching Embeddings
+### Loading CSV Output (Recommended for Large Datasets)
+```python
+import csv
+import json
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Load embeddings from CSV
+embeddings_data = []
+with open('stage_08_embeddings.csv', 'r') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        # Convert embedding from JSON string back to list
+        row['embedding'] = json.loads(row['embedding'])
+        embeddings_data.append(row)
+
+# Extract embeddings and texts
+embeddings = np.array([record['embedding'] for record in embeddings_data])
+texts = [record['chunk_text'] for record in embeddings_data]
+
+# Search for similar content
+query_embedding = generate_embedding("your search query")  # Use same model
+similarities = cosine_similarity([query_embedding], embeddings)[0]
+top_5_indices = np.argsort(similarities)[-5:][::-1]
+
+for idx in top_5_indices:
+    print(f"Similarity: {similarities[idx]:.3f}")
+    print(f"Text: {texts[idx][:200]}...\n")
+```
+
+### Loading JSON Output (Alternative)
 ```python
 import json
 import numpy as np
@@ -219,10 +251,24 @@ The system includes a robust fallback mechanism if tiktoken is unavailable:
 - **Full Dimensions**: All 3072 dimensions from text-embedding-3-large
 - **Precision**: 32-bit floats for maximum accuracy
 - **Size per embedding**: ~12KB (3072 × 4 bytes)
-- **JSON file size estimates**:
-  - 1,000 embeddings: ~15 MB
-  - 10,000 embeddings: ~150 MB
-  - 100,000 embeddings: ~1.5 GB
+- **File size estimates**:
+  - 1,000 embeddings: ~15 MB (CSV or JSON)
+  - 10,000 embeddings: ~150 MB (CSV or JSON)
+  - 100,000 embeddings: ~1.5 GB (CSV or JSON)
+
+### CSV vs JSON Format
+**CSV Advantages** (Default):
+- More efficient appending (doesn't require reading entire file)
+- Better for streaming/chunked reading
+- Lower memory footprint for large datasets
+- Compatible with data analysis tools (pandas, Excel, etc.)
+- Embeddings stored as JSON strings in cells
+
+**JSON Advantages**:
+- Native list structure for embeddings
+- Easier to parse in some languages
+- Maintains exact numeric precision
+- Better for smaller datasets (<50MB)
 
 ## Next Steps
 The embeddings generated in this stage enable:
