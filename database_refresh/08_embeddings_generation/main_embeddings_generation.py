@@ -1064,20 +1064,32 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     total_blocks_with_tokens = 0
     for block_key, block_records in blocks.items():
         # Debug individual paragraph contents (try both field names)
-        paragraph_texts = [r.get('paragraph_content') or r.get('content', '') for r in block_records]
+        paragraph_texts = []
+        for r in block_records:
+            # Check what fields are actually present
+            if 'paragraph_content' in r:
+                text = r['paragraph_content']
+            elif 'content' in r:
+                text = r['content']
+            else:
+                # Debug: Log available fields
+                log_console(f"DEBUG: Record has no paragraph_content or content. Available fields: {list(r.keys())[:10]}", "WARNING")
+                text = ''
+            paragraph_texts.append(text)
+        
         paragraph_lengths = [len(text) for text in paragraph_texts]
         
         # Calculate tokens with debugging
         total_tokens = 0
-        for record in block_records:
-            # Try paragraph_content first, fall back to content
-            text = record.get('paragraph_content') or record.get('content', '')
-            tokens = count_tokens(text)
-            if tokens > 0:
-                total_tokens += tokens
-            elif text:  # Has text but 0 tokens?
-                log_console(f"WARNING: Text with length {len(text)} resulted in 0 tokens!", "WARNING")
-                log_console(f"First 100 chars: {text[:100]}", "WARNING")
+        for i, record in enumerate(block_records):
+            text = paragraph_texts[i]
+            if text:
+                tokens = count_tokens(text)
+                if tokens > 0:
+                    total_tokens += tokens
+                else:  # Has text but 0 tokens?
+                    log_console(f"WARNING: Text with length {len(text)} resulted in 0 tokens!", "WARNING")
+                    log_console(f"Text type: {type(text)}, First 100 chars: {text[:100] if isinstance(text, str) else str(text)[:100]}", "WARNING")
         
         block_token_counts[block_key] = total_tokens
         log_execution(f"Block {block_key}: {total_tokens} tokens across {len(block_records)} paragraphs")
@@ -1087,7 +1099,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
             log_console(f"WARNING: Block {block_key} has 0 tokens!", "WARNING")
             log_console(f"Paragraph lengths in block: {paragraph_lengths[:5]}", "WARNING")
             if paragraph_texts and paragraph_texts[0]:
-                log_console(f"First paragraph sample: {paragraph_texts[0][:100]}...", "WARNING")
+                log_console(f"First paragraph type: {type(paragraph_texts[0])}, sample: {str(paragraph_texts[0])[:100]}...", "WARNING")
         else:
             total_blocks_with_tokens += 1
     
@@ -1106,6 +1118,13 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
             # Skip blocks with no tokens
             if block_total_tokens == 0:
                 log_console(f"Skipping block {block_key} with 0 tokens", "WARNING")
+                # Debug: Check why tokens are 0
+                if block_records:
+                    sample_record = block_records[0]
+                    sample_text = sample_record.get('paragraph_content') or sample_record.get('content', '')
+                    log_console(f"DEBUG: Sample text length: {len(sample_text)}, text type: {type(sample_text)}", "WARNING")
+                    if sample_text:
+                        log_console(f"DEBUG: First 100 chars: {sample_text[:100]}", "WARNING")
                 continue
                 
             # Strategy 1: If entire block fits within chunk_threshold, keep it as one chunk
@@ -1141,6 +1160,11 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                     }
                     chunks_to_process.append(chunk_data)
                     log_console(f"Block {block_key} kept as single chunk ({block_total_tokens} tokens, {len(block_records)} paragraphs)")
+                    log_execution(f"Added single-block chunk: {block_key}", {
+                        "block_tokens": block_total_tokens,
+                        "paragraphs": len(block_records),
+                        "text_length": len(combined_text)
+                    })
             
             # Strategy 2: Block is too large, need to split intelligently
             else:
@@ -1303,6 +1327,14 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 transcript_id,
                 f"Error processing block {block_key}: {str(e)}"
             )
+            log_console(f"ERROR processing block {block_key}: {str(e)}", "ERROR")
+    
+    # Debug: Log chunks_to_process status
+    log_console(f"Total chunks created from blocks: {len(chunks_to_process)}")
+    if len(chunks_to_process) == 0:
+        log_console("WARNING: No chunks were created from any blocks!", "WARNING")
+        log_console(f"Total blocks processed: {len(blocks)}", "WARNING")
+        log_console(f"Blocks with tokens: {total_blocks_with_tokens}", "WARNING")
     
     # Process chunks in batches
     total_chunks = len(chunks_to_process)
@@ -1331,7 +1363,17 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                         'total_chunks': chunk_info['total_chunks'],
                         'chunk_text': chunk_info['chunk_text'],
                         'chunk_tokens': chunk_info['chunk_tokens'],
-                        'embedding': embeddings[i]
+                        'embedding': embeddings[i],
+                        # Include aggregated category fields if present
+                        'primary_category_id': chunk_info.get('primary_category_id', ''),
+                        'primary_category_name': chunk_info.get('primary_category_name', ''),
+                        'secondary_category_ids': chunk_info.get('secondary_category_ids', []),
+                        'secondary_category_names': chunk_info.get('secondary_category_names', []),
+                        # Include chunk metadata if present
+                        'block_level_chunk': chunk_info.get('block_level_chunk', False),
+                        'paragraphs_in_chunk': chunk_info.get('paragraphs_in_chunk', 1),
+                        'chunk_paragraph_ids': chunk_info.get('chunk_paragraph_ids', chunk_info.get('block_paragraph_ids', [])),
+                        'paragraph_chunk': chunk_info.get('paragraph_chunk', '')
                     }
                     enhanced_records.append(enhanced_record)
                     enhanced_error_logger.total_embeddings += 1
