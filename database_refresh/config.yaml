@@ -177,6 +177,24 @@ stage_08_embeddings_generation:
     max_retries: 3
     token_endpoint: "https://auth.example.com/oauth/token"  # Same as Stage 07
 
+# Stage 09 specific settings (PDF Generation)
+stage_09_pdf_generation:
+  description: "Generate PDF documents from Stage 8 embeddings data"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.csv"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
+  dev_mode: true
+  dev_max_transcripts: 5
+  
+  # PDF generation configuration
+  pdf_config:
+    page_size: "letter"  # letter or A4
+    margins: 1.0  # inches
+    font_family: "Helvetica"
+    include_embeddings: false  # Don't include embeddings in PDF
+    include_summaries: false  # Don't include AI summaries
+    max_pages_per_pdf: 500  # Safety limit
+
 # References to external configuration files
 # The monitored_institutions and financial_categories are now in separate files
 # to keep this main config cleaner and more maintainable.
