@@ -28,11 +28,12 @@ from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, KeepTogether, Flowable
 from reportlab.platypus.tableofcontents import TableOfContents
 from reportlab.platypus import PageTemplate, Frame, BaseDocTemplate
 from reportlab.platypus.paragraph import Paragraph as PlatypusParagraph
 from reportlab.pdfgen import canvas
+from reportlab.platypus.flowables import KeepTogether
 
 # Load environment variables
 load_dotenv()
@@ -359,8 +360,10 @@ class TranscriptPDF:
         self.bank = first_record.get('bank', self.ticker)  # Use ticker as fallback
         
         # Page tracking
-        self.current_section = "Title"
+        self.current_section = "COVER PAGE"
         self.page_num = 1  # Start at 1, not 0
+        self.current_speaker = None
+        self.current_qa_conversation = None
         
     def _setup_custom_styles(self):
         """Set up custom paragraph styles for the PDF."""
@@ -368,9 +371,9 @@ class TranscriptPDF:
         self.styles.add(ParagraphStyle(
             name='CustomTitle',
             parent=self.styles['Title'],
-            fontSize=24,
+            fontSize=20,
             textColor=colors.HexColor('#1a1a1a'),
-            spaceAfter=30,
+            spaceAfter=20,
             alignment=TA_CENTER
         ))
         
@@ -378,10 +381,10 @@ class TranscriptPDF:
         self.styles.add(ParagraphStyle(
             name='Subtitle',
             parent=self.styles['Normal'],
-            fontSize=14,
+            fontSize=12,
             textColor=colors.HexColor('#4a4a4a'),
-            spaceBefore=6,
-            spaceAfter=6,
+            spaceBefore=4,
+            spaceAfter=4,
             alignment=TA_CENTER
         ))
         
@@ -389,10 +392,10 @@ class TranscriptPDF:
         self.styles.add(ParagraphStyle(
             name='SectionHeader',
             parent=self.styles['Heading1'],
-            fontSize=18,
+            fontSize=16,
             textColor=colors.HexColor('#2c3e50'),
-            spaceBefore=20,
-            spaceAfter=20,
+            spaceBefore=12,
+            spaceAfter=12,
             keepWithNext=True,
             alignment=TA_LEFT
         ))
@@ -401,10 +404,10 @@ class TranscriptPDF:
         self.styles.add(ParagraphStyle(
             name='QAHeader',
             parent=self.styles['Heading2'],
-            fontSize=14,
+            fontSize=12,
             textColor=colors.HexColor('#34495e'),
-            spaceBefore=15,
-            spaceAfter=10,
+            spaceBefore=8,
+            spaceAfter=6,
             keepWithNext=True,
             leftIndent=0
         ))
@@ -413,11 +416,11 @@ class TranscriptPDF:
         self.styles.add(ParagraphStyle(
             name='Speaker',
             parent=self.styles['Normal'],
-            fontSize=12,
+            fontSize=10,
             textColor=colors.HexColor('#2c3e50'),
             fontName='Helvetica-Bold',
-            spaceBefore=10,
-            spaceAfter=6,
+            spaceBefore=6,
+            spaceAfter=4,
             keepWithNext=True,
             leftIndent=20
         ))
@@ -426,14 +429,14 @@ class TranscriptPDF:
         self.styles.add(ParagraphStyle(
             name='Content',
             parent=self.styles['Normal'],
-            fontSize=11,
+            fontSize=9,
             textColor=colors.HexColor('#333333'),
-            spaceBefore=3,
-            spaceAfter=3,
+            spaceBefore=2,
+            spaceAfter=2,
             alignment=TA_JUSTIFY,
             leftIndent=40,
             rightIndent=20,
-            leading=14
+            leading=12
         ))
         
         # Header/Footer style
@@ -460,8 +463,9 @@ class TranscriptPDF:
         canvas_obj.setStrokeColor(colors.HexColor('#cccccc'))
         canvas_obj.line(inch, letter[1] - 0.6*inch, letter[0] - inch, letter[1] - 0.6*inch)
         
-        # Footer
-        footer_text = f"{self.bank} | FY{self.fiscal_year} Q{self.fiscal_quarter}"
+        # Footer - fix quarter formatting
+        quarter_text = f"Q{self.fiscal_quarter}" if self.fiscal_quarter else ""
+        footer_text = f"{self.bank} | FY{self.fiscal_year} {quarter_text}"
         canvas_obj.drawString(inch, 0.5*inch, footer_text)
         canvas_obj.drawRightString(letter[0] - inch, 0.5*inch, f"Page {self.page_num}")
         
@@ -519,7 +523,7 @@ class TranscriptPDF:
         
         return grouped
     
-    def _create_speaker_block(self, block_id: int, paragraphs: List[Dict]) -> List:
+    def _create_speaker_block(self, block_id: int, paragraphs: List[Dict], is_continuation: bool = False) -> List:
         """Create a speaker block with paragraphs."""
         elements = []
         
@@ -529,8 +533,14 @@ class TranscriptPDF:
         else:
             return elements
         
+        # Add (Continued...) if this is a continuation
+        if is_continuation:
+            speaker_text = f"{speaker} (Continued...)"
+        else:
+            speaker_text = speaker
+            
         # Speaker name
-        speaker_para = Paragraph(speaker, self.styles['Speaker'])
+        speaker_para = Paragraph(speaker_text, self.styles['Speaker'])
         
         # Collect all paragraph content for this speaker block
         content_paras = []
@@ -540,17 +550,15 @@ class TranscriptPDF:
             if content:
                 # Clean and escape content for reportlab
                 content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                content_paras.append(Paragraph(content, self.styles['Content']))
+                # Each paragraph should be kept together (not split)
+                content_paras.append(KeepTogether([Paragraph(content, self.styles['Content'])]))
         
-        # Keep speaker and at least first paragraph together
+        # Keep speaker with first paragraph
         if content_paras:
-            # Try to keep entire speaker block together if not too large
-            if len(content_paras) <= 3:
-                elements.append(KeepTogether([speaker_para] + content_paras))
-            else:
-                # Keep speaker with first paragraph, rest can flow
-                elements.append(KeepTogether([speaker_para, content_paras[0]]))
-                elements.extend(content_paras[1:])
+            # Keep speaker name with at least first paragraph
+            elements.append(KeepTogether([speaker_para, content_paras[0]]))
+            # Rest of paragraphs can flow but each kept whole
+            elements.extend(content_paras[1:])
         else:
             elements.append(speaker_para)
         
@@ -559,11 +567,25 @@ class TranscriptPDF:
     def _create_md_section(self, content: Dict[int, List]) -> List:
         """Create Management Discussion section."""
         elements = []
-        self.current_section = "Management Discussion"
         
-        # Section header
+        # Section header on its own page
+        elements.append(PageBreak())
+        
+        # Create custom flowable to update section
+        class SectionUpdater(Flowable):
+            def __init__(self, pdf_doc, section_name):
+                Flowable.__init__(self)
+                self.pdf_doc = pdf_doc
+                self.section_name = section_name
+                self.width = 0
+                self.height = 0
+                
+            def draw(self):
+                self.pdf_doc.current_section = self.section_name
+        
+        elements.append(SectionUpdater(self, "MANAGEMENT DISCUSSION SECTION"))
         elements.append(Paragraph("Management Discussion", self.styles['SectionHeader']))
-        elements.append(Spacer(1, 0.2*inch))
+        elements.append(Spacer(1, 0.1*inch))
         
         # Process each speaker block in order (sorted by block_id)
         for block_id in sorted(content.keys()):
@@ -571,44 +593,63 @@ class TranscriptPDF:
             if paragraphs:
                 speaker_elements = self._create_speaker_block(block_id, paragraphs)
                 elements.extend(speaker_elements)
-                elements.append(Spacer(1, 0.1*inch))
+                elements.append(Spacer(1, 0.05*inch))
         
-        elements.append(PageBreak())
         return elements
     
     def _create_qa_section(self, content: Dict[int, Dict[int, List]]) -> List:
         """Create Q&A section."""
         elements = []
-        self.current_section = "Q&A"
         
-        # Section header
+        # Start Q&A on new page
+        elements.append(PageBreak())
+        
+        # Create custom flowable to update section
+        class SectionUpdater(Flowable):
+            def __init__(self, pdf_doc, section_name):
+                Flowable.__init__(self)
+                self.pdf_doc = pdf_doc
+                self.section_name = section_name
+                self.width = 0
+                self.height = 0
+                
+            def draw(self):
+                self.pdf_doc.current_section = self.section_name
+        
+        elements.append(SectionUpdater(self, "Q&A"))
         elements.append(Paragraph("Questions & Answers", self.styles['SectionHeader']))
-        elements.append(Spacer(1, 0.2*inch))
+        elements.append(Spacer(1, 0.1*inch))
         
         # Process each Q&A group in order
-        for qa_group_id in sorted(content.keys()):
+        for qa_idx, qa_group_id in enumerate(sorted(content.keys())):
             qa_group = content[qa_group_id]
             
             # Q&A group header (conversation number)
-            qa_header = Paragraph(f"Q&A Conversation {qa_group_id}", self.styles['QAHeader'])
+            qa_header_text = f"Q&A Conversation {qa_group_id}"
+            qa_header = Paragraph(qa_header_text, self.styles['QAHeader'])
+            
+            # Keep Q&A header with first content
             qa_elements = [qa_header]
             
             # Process speaker blocks within Q&A group
+            first_speaker = True
             for block_id in sorted(qa_group.keys()):
                 paragraphs = qa_group[block_id]
                 if paragraphs:
                     speaker_elements = self._create_speaker_block(block_id, paragraphs)
-                    qa_elements.extend(speaker_elements)
+                    if first_speaker:
+                        # Keep Q&A header with first speaker
+                        qa_elements.append(KeepTogether([qa_header] + speaker_elements[:1]))
+                        qa_elements.extend(speaker_elements[1:])
+                        first_speaker = False
+                    else:
+                        qa_elements.extend(speaker_elements)
             
-            # Try to keep Q&A conversations together if reasonable size
-            if len(qa_elements) <= 10:
-                elements.append(KeepTogether(qa_elements))
-            else:
-                # Keep header with first speaker block
-                elements.append(KeepTogether(qa_elements[:3]))
-                elements.extend(qa_elements[3:])
+            elements.extend(qa_elements[1:])  # Skip duplicate header
             
-            elements.append(Spacer(1, 0.15*inch))
+            # Add spacing between Q&A conversations (but not a page break)
+            if qa_idx < len(content) - 1:
+                elements.append(Spacer(1, 0.1*inch))
         
         return elements
     
