@@ -9,12 +9,12 @@ This pipeline processes financial earnings call transcripts through 9 sequential
 ### Pipeline Architecture
 
 ```
-📥 Data Acquisition          🔄 Processing & Validation     🤖 AI Enhancement
-┌─────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐
-│ Stage 0: Historical │────▶│ Stage 2: Database Sync  │────▶│ Stage 5: Q&A Pairing   │
-│ Stage 1: Daily Sync │     │ Stage 3: Content Extract│     │ Stage 6: Classification │
-└─────────────────────┘     │ Stage 4: Structure Valid│     │ Stage 7: Summarization │
-                            └─────────────────────────┘     │ Stage 8: Embeddings    │
+📥 Data Acquisition          🔄 Processing & Validation     🤖 AI Enhancement              📄 Output
+┌─────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐     ┌──────────┐
+│ Stage 0: Historical │────▶│ Stage 2: Database Sync  │────▶│ Stage 5: Q&A Pairing   │────▶│ Stage 9: │
+│ Stage 1: Daily Sync │     │ Stage 3: Content Extract│     │ Stage 6: Classification │     │   PDF    │
+└─────────────────────┘     │ Stage 4: Structure Valid│     │ Stage 7: Summarization │     │Generation│
+                            └─────────────────────────┘     │ Stage 8: Embeddings    │     └──────────┘
                                                             └─────────────────────────┘
 ```
 
@@ -220,6 +220,21 @@ python main_llm_summarization.py
 ```bash
 cd 08_embeddings_generation
 python main_embeddings_generation.py
+```
+
+### Stage 9: PDF Generation
+**Purpose**: Generate professionally formatted PDF documents from processed transcripts  
+**Input**: Stage 8 embeddings data  
+**Output**: PDF documents with structured layout and formatting  
+**Key Features**:
+- Professional layout with title page and section breaks
+- Smart paragraph placement (no splits at page boundaries)
+- Headers/footers with dynamic content
+- KeepTogether logic for speaker blocks and Q&A groups
+
+```bash
+cd 09_pdf_generation
+python main_pdf_generation.py
 ```
 
 ## Configuration
