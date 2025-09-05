@@ -512,8 +512,8 @@ class TranscriptPDF:
         elements.append(Paragraph(f"Fiscal Year {self.fiscal_year}, Quarter {self.fiscal_quarter}", 
                                 self.styles['Subtitle']))
         
-        # No page break here - let content flow naturally
-        elements.append(Spacer(1, 0.3*inch))
+        # Page break after title page - MD starts on page 2
+        elements.append(PageBreak())
         return elements
     
     def _group_content_by_structure(self) -> Dict[str, Any]:
