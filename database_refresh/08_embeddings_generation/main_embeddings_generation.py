@@ -635,8 +635,8 @@ def append_records_to_csv(nas_conn: SMBConnection, records: List[Dict], file_pat
             row['section_id'] = record.get('section_id', '')
             row['section_name'] = record.get('section_name', '')
             row['speaker_block_id'] = record.get('speaker_block_id', '')  # Stage 3 field name
-            row['speaker_block_tokens'] = record.get('block_tokens', 0)
-            row['speaker_name'] = record.get('speaker', '')  # Stage 3 uses 'speaker' not 'speaker_name'
+            row['speaker_block_tokens'] = record.get('block_tokens', 0)  # Calculated in Stage 8 during chunking
+            row['speaker_name'] = record.get('speaker', '')  # Stage 7 uses 'speaker'
             row['qa_group_id'] = record.get('qa_group_id', '')  # Stage 5 field name
             row['primary_category_id'] = record.get('primary_category_id', '')
             row['primary_category_name'] = record.get('primary_category_name', '')
@@ -644,7 +644,7 @@ def append_records_to_csv(nas_conn: SMBConnection, records: List[Dict], file_pat
             row['secondary_category_names'] = record.get('secondary_category_names', [])
             row['block_summary'] = record.get('block_summary', '')
             row['chunk_id'] = record.get('chunk_id', '')
-            row['chunk_content'] = record.get('chunk_text', record.get('chunk_content', ''))
+            row['chunk_content'] = record.get('chunk_text', '')  # chunk_text is set during chunking
             row['chunk_tokens'] = record.get('chunk_tokens', 0)
             row['chunk_paragraph_ids'] = record.get('chunk_paragraph_ids', record.get('block_paragraph_ids', []))
             row['chunk_embedding'] = record.get('embedding', record.get('chunk_embedding', []))
@@ -973,9 +973,9 @@ def aggregate_categories(records: List[Dict]) -> Tuple[str, str, List[str], List
     all_category_names = []
     
     for record in records:
-        # Handle both old and new field names
-        cat_ids = record.get('category_ids', record.get('primary_category_id', []))
-        cat_names = record.get('categories', record.get('primary_category_name', []))
+        # Use Stage 7 field names: classification_ids and classification_names
+        cat_ids = record.get('classification_ids', [])
+        cat_names = record.get('classification_names', [])
         
         # Ensure they're lists (handle str, int, float, None, etc.)
         if not isinstance(cat_ids, list):
@@ -1283,10 +1283,11 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                                 'block_level_chunk': False,
                                 'paragraph_chunk': f"{para_chunk_idx}/{len(paragraph_chunks)}",
                                 # Use the paragraph's own categories since it's a single paragraph
-                                'primary_category_id': record.get('primary_category_id', ''),
-                                'primary_category_name': record.get('primary_category_name', ''),
-                                'secondary_category_ids': record.get('secondary_category_ids', []),
-                                'secondary_category_names': record.get('secondary_category_names', [])
+                                # Aggregate from classification_ids and classification_names
+                                'primary_category_id': record.get('classification_ids', [''])[0] if record.get('classification_ids') else '',
+                                'primary_category_name': record.get('classification_names', [''])[0] if record.get('classification_names') else '',
+                                'secondary_category_ids': record.get('classification_ids', [])[1:] if len(record.get('classification_ids', [])) > 1 else [],
+                                'secondary_category_names': record.get('classification_names', [])[1:] if len(record.get('classification_names', [])) > 1 else []
                             })
                             chunk_id += 1
                     
@@ -1368,7 +1369,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                     enhanced_record = {
                         **chunk_info['record'],  # Include all original fields
                         'paragraph_tokens': chunk_info['paragraph_tokens'],
-                        'block_tokens': chunk_info['block_tokens'],
+                        'block_tokens': chunk_info['block_tokens'],  # Total tokens in the speaker block
                         'chunk_id': chunk_info['chunk_id'],
                         'total_chunks': chunk_info['total_chunks'],
                         'chunk_text': chunk_info['chunk_text'],
