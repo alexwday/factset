@@ -1294,10 +1294,8 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                     'block_level_chunk': False,
                     'paragraphs_in_chunk': len(current_records),
                     'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_records],
-                    'primary_category_id': primary_cat_id,
-                    'primary_category_name': primary_cat_name,
-                    'secondary_category_ids': secondary_cat_ids,
-                    'secondary_category_names': secondary_cat_names,
+                    'classification_ids': classification_ids,
+                    'classification_names': classification_names,
                     'qa_group_id': qa_group_id
                 })
             

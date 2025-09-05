@@ -6,36 +6,32 @@
 Records with embeddings and chunking metadata added.
 
 **Format:** Enhanced Stage 7 records with embeddings and chunk-level organization  
-**Content:** Chunk-level records with embeddings, where chunks may contain one or more paragraphs
+**Content:** Chunk-level records with formatted text and embeddings, where chunks may contain one or more paragraphs
 
 **All Fields (in CSV column order):**
 - **file_path**: Full NAS path to the transcript XML file
 - **filename**: Name of the XML file
 - **date_last_modified**: ISO 8601 timestamp when file was last modified
+- **title**: Title extracted from XML meta section
+- **transcript_type**: Type from filename (e.g., "Corrected", "Final", "E1")
 - **event_id**: Event ID from filename
 - **version_id**: Version ID from filename
-- **title**: Title extracted from XML meta section
 - **fiscal_year**: Year from directory structure
 - **fiscal_quarter**: Quarter from directory structure
 - **institution_type**: Type from directory structure (e.g., "Banks")
 - **institution_id**: ID from monitored_institutions config (can be null)
 - **ticker**: Stock ticker identifying the company
 - **company_name**: Company name from config lookup (can be null)
-- **section_id**: Sequential number of the section
-- **section_name**: Name of the section from XML
+- **section_name**: Name of the section ("MANAGEMENT DISCUSSION SECTION" or "Q&A")
 - **speaker_block_id**: Sequential ID for speaker blocks
-- **speaker_block_tokens**: Total tokens in the speaker block (calculated in Stage 8)
-- **speaker_name**: Formatted speaker string (name, title, affiliation)
-- **qa_group_id**: Q&A conversation group ID (from Stage 5)
-- **primary_category_id**: Most common category ID from aggregated classifications
-- **primary_category_name**: Most common category name from aggregated classifications
-- **secondary_category_ids**: List of other unique category IDs (JSON array in CSV)
-- **secondary_category_names**: List of other unique category names (JSON array in CSV)
+- **qa_group_id**: Q&A conversation group ID (from Stage 5, only for Q&A sections)
+- **classification_ids**: Array of classification IDs from Stage 6 (JSON array in CSV)
+- **classification_names**: Array of classification names from Stage 6 (JSON array in CSV)
 - **block_summary**: Block-level summary from Stage 7
-- **chunk_id**: Sequential chunk number within the speaker block
-- **chunk_content**: The actual text that was embedded (may combine multiple paragraphs)
+- **chunk_id**: Sequential chunk number within the speaker block or Q&A group
 - **chunk_tokens**: Number of tokens in this chunk (calculated with tiktoken or fallback)
-- **chunk_paragraph_ids**: List of paragraph IDs included in this chunk (JSON array in CSV)
+- **chunk_content**: Formatted text with headers that gets embedded
+- **chunk_paragraph_ids**: List of original paragraph IDs in this chunk (JSON array in CSV)
 - **chunk_embedding**: 3072-dimensional vector (JSON array in CSV)
 
 **Additional Fields in Enhanced Records (internal processing):**
@@ -70,29 +66,46 @@ Metadata about transcripts that failed processing.
 
 ## Chunking and Embedding Logic
 
-### Hierarchical Chunking Strategy (from lines 1047-1334):
-1. **Group by speaker_block_id**: All records grouped by speaker blocks first
-2. **Token calculation**: Count tokens for each block using tiktoken (or fallback estimation)
-3. **Chunking decision**:
-   - If block ≤ 1000 tokens: Keep as single chunk
-   - If block > 1000 tokens: Split intelligently
+### Content Formatting
+Before embedding, content is formatted with appropriate headers:
 
-### Single Block Chunking (from lines 1138-1175):
-- **When applied**: Block total tokens ≤ chunk_threshold (1000)
-- **Result**: One chunk = entire speaker block
-- **Fields preserved**: All Stage 7 fields from first record (all identical within block)
-- **Merged data**: All paragraph_content concatenated with "\n\n"
-- **Categories**: Aggregated from all paragraphs in block
-- **Output**: Single embedding for entire block
+**Management Discussion Format:**
+```
+[Speaker Name, Title, Company]
+Paragraph 1...
+Paragraph 2...
+```
 
-### Multi-Chunk Splitting (from lines 1177-1332):
-- **When applied**: Block total tokens > chunk_threshold
-- **Strategy**: 
-  - Try to keep paragraphs together
-  - Target ~500 tokens per chunk
-  - Split within paragraphs only when single paragraph > 1000 tokens
-- **Paragraph boundaries**: Respected when possible
-- **Final chunk handling**: Merged with previous if < 300 tokens
+**Q&A Format:**
+```
+[Q&A Group 123]
+
+[Analyst Name, Company]
+Question paragraph...
+
+[Executive Name, Title]
+Answer paragraph...
+```
+
+### Hierarchical Chunking Strategy:
+1. **Management Discussion**: Group by `speaker_block_id`
+2. **Q&A Sections**: Group by `qa_group_id` first to preserve conversations
+3. **Token calculation**: Count tokens for formatted content using tiktoken (or fallback)
+4. **Chunking decision**:
+   - If ≤ 1000 tokens: Keep as single chunk
+   - If > 1000 tokens: Split intelligently
+
+### Management Discussion Chunking:
+- **Single chunk**: When speaker block ≤ 1000 tokens
+- **Multi-chunk**: Split at paragraph boundaries when > 1000 tokens
+- **Smart merging**: Final chunks < 300 tokens merged with previous chunk
+- **Headers preserved**: Each chunk includes speaker header
+
+### Q&A Section Chunking:
+- **Primary grouping**: By `qa_group_id` to keep conversations together
+- **Single chunk**: Entire Q&A group when ≤ 1000 tokens
+- **Multi-chunk**: Split at speaker block boundaries when possible
+- **Headers preserved**: Q&A Group header and speaker subheaders in each chunk
 
 ### Embedding Generation (from lines 912-944):
 - **Model**: text-embedding-3-large
@@ -117,12 +130,11 @@ Metadata about transcripts that failed processing.
 - **Safety buffer**: +10% for chunking decisions
 - **Accuracy**: ±15% of actual token count
 
-## Category Aggregation (from lines 969-1010):
-- **Input**: Arrays of classification_ids and classification_names from Stage 7
-- **Processing**: Count occurrences across all paragraphs in chunk
-- **Primary category**: Most common category (by frequency)
-- **Secondary categories**: All other unique categories
-- **Output**: Separated into primary and secondary fields
+## Classification Handling:
+- **Input**: Arrays of `classification_ids` and `classification_names` from Stage 7
+- **Processing**: No aggregation needed - Stage 6 provides block-level classifications
+- **Consistency**: All paragraphs within a block share the same classifications
+- **Output**: Direct pass-through of classification arrays from Stage 7
 
 ## Output Format Details
 
