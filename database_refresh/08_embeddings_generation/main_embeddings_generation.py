@@ -597,10 +597,7 @@ def append_records_to_csv(nas_conn: SMBConnection, records: List[Dict], file_pat
         ]
         
         # Add any additional fields not in our predefined list (maintain backward compatibility)
-        for record in records:
-            for key in record.keys():
-                if key not in fieldnames:
-                    fieldnames.insert(-1, key)  # Insert before embedding
+        # NOTE: Only use the defined fieldnames - don't add extra fields from records
         
         # Create CSV content
         output = io.StringIO()
