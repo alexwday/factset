@@ -30,10 +30,11 @@ from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, KeepTogether, Flowable
 from reportlab.platypus.tableofcontents import TableOfContents
-from reportlab.platypus import PageTemplate, Frame, BaseDocTemplate
+from reportlab.platypus import PageTemplate, Frame, BaseDocTemplate, NextPageTemplate, FrameBreak
 from reportlab.platypus.paragraph import Paragraph as PlatypusParagraph
 from reportlab.pdfgen import canvas
 from reportlab.platypus.flowables import KeepTogether
+from reportlab.platypus.doctemplate import ActionFlowable
 
 # Load environment variables
 load_dotenv()
@@ -364,6 +365,7 @@ class TranscriptPDF:
         self.page_num = 1  # Start at 1, not 0
         self.current_speaker = None
         self.current_qa_conversation = None
+        self.continuation_info = {}  # Track what needs continuation on each page
         
     def _setup_custom_styles(self):
         """Set up custom paragraph styles for the PDF."""
@@ -452,6 +454,28 @@ class TranscriptPDF:
         """Create headers and footers for each page."""
         canvas_obj.saveState()
         
+        # Check if this page needs continuation markers
+        page_info = self.continuation_info.get(self.page_num, {})
+        
+        # Add continuation info if this is not the first page of a section
+        if self.page_num > 1 and page_info:
+            y_position = letter[1] - 0.8*inch
+            
+            # Add Q&A conversation continuation if applicable
+            if 'qa_id' in page_info and self.current_section == "Q&A":
+                canvas_obj.setFont("Helvetica-Bold", 10)
+                canvas_obj.setFillColor(colors.HexColor('#34495e'))
+                canvas_obj.drawString(inch + 0.2*inch, y_position, 
+                                    f"Q&A Conversation {page_info['qa_id']} (Continued...)")
+                y_position -= 0.2*inch
+            
+            # Add speaker continuation
+            if 'speaker' in page_info:
+                canvas_obj.setFont("Helvetica-Bold", 9)
+                canvas_obj.setFillColor(colors.HexColor('#2c3e50'))
+                canvas_obj.drawString(inch + 0.4*inch, y_position,
+                                    f"{page_info['speaker']} (Continued...)")
+        
         # Header
         header_text = f"{self.title[:50]}... | {self.current_section}"
         canvas_obj.setFont("Helvetica", 9)
@@ -488,7 +512,8 @@ class TranscriptPDF:
         elements.append(Paragraph(f"Fiscal Year {self.fiscal_year}, Quarter {self.fiscal_quarter}", 
                                 self.styles['Subtitle']))
         
-        elements.append(PageBreak())
+        # No page break here - let content flow naturally
+        elements.append(Spacer(1, 0.3*inch))
         return elements
     
     def _group_content_by_structure(self) -> Dict[str, Any]:
@@ -523,7 +548,7 @@ class TranscriptPDF:
         
         return grouped
     
-    def _create_speaker_block(self, block_id: int, paragraphs: List[Dict], is_continuation: bool = False) -> List:
+    def _create_speaker_block(self, block_id: int, paragraphs: List[Dict], qa_group_id: int = None) -> List:
         """Create a speaker block with paragraphs."""
         elements = []
         
@@ -533,14 +558,28 @@ class TranscriptPDF:
         else:
             return elements
         
-        # Add (Continued...) if this is a continuation
-        if is_continuation:
-            speaker_text = f"{speaker} (Continued...)"
-        else:
-            speaker_text = speaker
-            
+        # Create a marker flowable to track current speaker/QA
+        class SpeakerMarker(ActionFlowable):
+            def __init__(self, pdf_doc, speaker_name, qa_id=None):
+                ActionFlowable.__init__(self)
+                self.pdf_doc = pdf_doc
+                self.speaker_name = speaker_name
+                self.qa_id = qa_id
+                
+            def apply(self, doc):
+                # Store current speaker and QA info for page continuations
+                page_num = doc.page
+                if page_num not in self.pdf_doc.continuation_info:
+                    self.pdf_doc.continuation_info[page_num] = {}
+                self.pdf_doc.continuation_info[page_num]['speaker'] = self.speaker_name
+                if self.qa_id is not None:
+                    self.pdf_doc.continuation_info[page_num]['qa_id'] = self.qa_id
+        
+        # Add marker to track this speaker block
+        elements.append(SpeakerMarker(self, speaker, qa_group_id))
+        
         # Speaker name
-        speaker_para = Paragraph(speaker_text, self.styles['Speaker'])
+        speaker_para = Paragraph(speaker, self.styles['Speaker'])
         
         # Collect all paragraph content for this speaker block
         content_paras = []
@@ -568,9 +607,6 @@ class TranscriptPDF:
         """Create Management Discussion section."""
         elements = []
         
-        # Section header on its own page
-        elements.append(PageBreak())
-        
         # Create custom flowable to update section
         class SectionUpdater(Flowable):
             def __init__(self, pdf_doc, section_name):
@@ -595,14 +631,15 @@ class TranscriptPDF:
                 elements.extend(speaker_elements)
                 elements.append(Spacer(1, 0.05*inch))
         
+        # Only page break here - between MD and Q&A sections
+        elements.append(PageBreak())
         return elements
     
     def _create_qa_section(self, content: Dict[int, Dict[int, List]]) -> List:
         """Create Q&A section."""
         elements = []
         
-        # Start Q&A on new page
-        elements.append(PageBreak())
+        # No page break here - already added at end of MD section
         
         # Create custom flowable to update section
         class SectionUpdater(Flowable):
@@ -636,7 +673,7 @@ class TranscriptPDF:
             for block_id in sorted(qa_group.keys()):
                 paragraphs = qa_group[block_id]
                 if paragraphs:
-                    speaker_elements = self._create_speaker_block(block_id, paragraphs)
+                    speaker_elements = self._create_speaker_block(block_id, paragraphs, qa_group_id)
                     if first_speaker:
                         # Keep Q&A header with first speaker
                         qa_elements.append(KeepTogether([qa_header] + speaker_elements[:1]))
