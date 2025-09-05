@@ -1066,7 +1066,8 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     batch_size = embed_config.get("batch_size", 50)  # Default to 50 texts per batch
     
     # Separate Management Discussion and Q&A sections
-    md_records = [r for r in transcript_records if r.get('section_name') == 'Management Discussion Section']
+    # Note: Section names come from Stage 4 validation config (usually all caps)
+    md_records = [r for r in transcript_records if r.get('section_name') in ['MANAGEMENT DISCUSSION SECTION', 'Management Discussion Section']]
     qa_records = [r for r in transcript_records if r.get('section_name') == 'Q&A']
     
     log_console(f"Processing {len(md_records)} MD records and {len(qa_records)} Q&A records")
@@ -1172,28 +1173,63 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                     current_paragraphs.append(para)
                     current_tokens += para_tokens
             
-            # Save last chunk
+            # Save last chunk (with smart handling for small chunks)
             if current_paragraphs:
                 chunk_content = format_md_content(speaker, current_paragraphs)
+                final_chunk_tokens = count_tokens(chunk_content)
                 start_idx = len(paragraphs) - len(current_paragraphs)
                 chunk_records = block_records[start_idx:]
                 
-                chunks_to_process.append({
-                    'record': block_records[0],
-                    'paragraph_id': f"md_speaker_{speaker_block_id}_chunk_{chunk_id}",
-                    'block_tokens': block_tokens,
-                    'chunk_id': chunk_id,
-                    'total_chunks': chunk_id,
-                    'chunk_text': chunk_content,
-                    'chunk_tokens': count_tokens(chunk_content),
-                    'block_level_chunk': False,
-                    'paragraphs_in_chunk': len(current_paragraphs),
-                    'chunk_paragraph_ids': [chunk_records[j].get('paragraph_id', '') for j in range(len(current_paragraphs))],
-                    'primary_category_id': primary_cat_id,
-                    'primary_category_name': primary_cat_name,
-                    'secondary_category_ids': secondary_cat_ids,
-                    'secondary_category_names': secondary_cat_names
-                })
+                # Check if final chunk is too small and we have previous chunks
+                if final_chunk_tokens < min_final_chunk and chunk_id > 1 and len(chunks_to_process) > 0:
+                    # Merge with previous chunk
+                    prev_chunk_idx = len(chunks_to_process) - 1
+                    prev_chunk = chunks_to_process[prev_chunk_idx]
+                    
+                    # Combine paragraphs from both chunks
+                    prev_para_count = prev_chunk['paragraphs_in_chunk']
+                    combined_start_idx = len(paragraphs) - len(current_paragraphs) - prev_para_count
+                    combined_paragraphs = paragraphs[combined_start_idx:]
+                    combined_content = format_md_content(speaker, combined_paragraphs)
+                    combined_records = block_records[combined_start_idx:]
+                    
+                    # Update the previous chunk with combined content
+                    chunks_to_process[prev_chunk_idx] = {
+                        'record': block_records[0],
+                        'paragraph_id': f"md_speaker_{speaker_block_id}_chunk_{chunk_id-1}",
+                        'block_tokens': block_tokens,
+                        'chunk_id': chunk_id - 1,
+                        'total_chunks': chunk_id - 1,  # One less chunk now
+                        'chunk_text': combined_content,
+                        'chunk_tokens': count_tokens(combined_content),
+                        'block_level_chunk': False,
+                        'paragraphs_in_chunk': len(combined_paragraphs),
+                        'chunk_paragraph_ids': [combined_records[j].get('paragraph_id', '') for j in range(len(combined_records))],
+                        'primary_category_id': primary_cat_id,
+                        'primary_category_name': primary_cat_name,
+                        'secondary_category_ids': secondary_cat_ids,
+                        'secondary_category_names': secondary_cat_names
+                    }
+                    chunk_id -= 1  # Decrease total chunk count
+                    log_console(f"Merged small final chunk ({final_chunk_tokens} tokens) with previous chunk")
+                else:
+                    # Keep as separate chunk
+                    chunks_to_process.append({
+                        'record': block_records[0],
+                        'paragraph_id': f"md_speaker_{speaker_block_id}_chunk_{chunk_id}",
+                        'block_tokens': block_tokens,
+                        'chunk_id': chunk_id,
+                        'total_chunks': chunk_id,
+                        'chunk_text': chunk_content,
+                        'chunk_tokens': final_chunk_tokens,
+                        'block_level_chunk': False,
+                        'paragraphs_in_chunk': len(current_paragraphs),
+                        'chunk_paragraph_ids': [chunk_records[j].get('paragraph_id', '') for j in range(len(current_paragraphs))],
+                        'primary_category_id': primary_cat_id,
+                        'primary_category_name': primary_cat_name,
+                        'secondary_category_ids': secondary_cat_ids,
+                        'secondary_category_names': secondary_cat_names
+                    })
             
             # Update total_chunks for this MD block
             for chunk in chunks_to_process[-chunk_id:]:
@@ -1359,7 +1395,7 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 for i, chunk_info in enumerate(batch_chunks):
                     enhanced_record = {
                         **chunk_info['record'],  # Include all original fields
-                        'paragraph_tokens': chunk_info['paragraph_tokens'],
+                        'paragraph_tokens': chunk_info.get('paragraph_tokens', chunk_info['chunk_tokens']),  # Use chunk_tokens if paragraph_tokens not set
                         'block_tokens': chunk_info['block_tokens'],  # Total tokens in the speaker block
                         'chunk_id': chunk_info['chunk_id'],
                         'total_chunks': chunk_info['total_chunks'],
