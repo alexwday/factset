@@ -360,8 +360,8 @@ class TranscriptPDF:
         self.bank = first_record.get('bank', self.ticker)  # Use ticker as fallback
         
         # Page tracking
-        self.current_section = "COVER PAGE"
-        self.page_num = 1  # Start at 1, not 0
+        self.current_section = "TITLE PAGE"  # Changed from COVER PAGE
+        self.page_num = 0  # Start at 0, incremented to 1 on first page callback
         self.current_speaker = None
         self.current_qa_conversation = None
         self.speaker_continued = False  # Track if speaker continues from previous page
@@ -456,8 +456,8 @@ class TranscriptPDF:
         # Add continuation info at top of page for speaker continuations
         # Only show continued speaker on pages after the first occurrence
         if self.page_num > 1 and self.speaker_continued:
-            # Position below the header line
-            y_position = letter[1] - 0.75*inch
+            # Position with proper spacing below the header line (Issue #2)
+            y_position = letter[1] - 0.85*inch  # Increased from 0.75 to add gap
             
             # Show the continuing speaker name
             canvas_obj.setFont("Helvetica-Bold", 10)
@@ -477,8 +477,8 @@ class TranscriptPDF:
         canvas_obj.line(inch, letter[1] - 0.6*inch, letter[0] - inch, letter[1] - 0.6*inch)
         
         # Footer - fix quarter formatting
-        quarter_text = f"Q{self.fiscal_quarter}" if self.fiscal_quarter else ""
-        footer_text = f"{self.bank} | FY{self.fiscal_year} {quarter_text}"
+        quarter_text = f" Q{self.fiscal_quarter}" if self.fiscal_quarter else ""
+        footer_text = f"{self.bank} | FY{self.fiscal_year}{quarter_text}"
         canvas_obj.drawString(inch, 0.5*inch, footer_text)
         canvas_obj.drawRightString(letter[0] - inch, 0.5*inch, f"Page {self.page_num}")
         
@@ -491,6 +491,16 @@ class TranscriptPDF:
         """Create the title page elements."""
         elements = []
         
+        # Set section for title page
+        class TitlePageSection(ActionFlowable):
+            def __init__(self, pdf_doc):
+                ActionFlowable.__init__(self)
+                self.pdf_doc = pdf_doc
+            def apply(self, doc):
+                self.pdf_doc.current_section = "TITLE PAGE"
+        
+        elements.append(TitlePageSection(self))
+        
         # Main title
         elements.append(Paragraph(self.title, self.styles['CustomTitle']))
         elements.append(Spacer(1, 0.5*inch))
@@ -498,7 +508,8 @@ class TranscriptPDF:
         # Metadata
         elements.append(Paragraph(f"<b>{self.bank}</b>", self.styles['Subtitle']))
         elements.append(Paragraph(f"Ticker: {self.ticker}", self.styles['Subtitle']))
-        elements.append(Paragraph(f"Fiscal Year {self.fiscal_year}, Quarter {self.fiscal_quarter}", 
+        quarter_text = f", Quarter {self.fiscal_quarter}" if self.fiscal_quarter else ""
+        elements.append(Paragraph(f"Fiscal Year {self.fiscal_year}{quarter_text}", 
                                 self.styles['Subtitle']))
         
         # Page break after title page - MD starts on page 2
@@ -542,10 +553,11 @@ class TranscriptPDF:
         elements = []
         
         # Get actual speaker name from first record
-        if paragraphs:
-            speaker = paragraphs[0].get('speaker', f'Speaker {block_id}')
-        else:
+        if not paragraphs:
+            # Still need to track empty blocks for consistency
             return elements
+        
+        speaker = paragraphs[0].get('speaker', f'Speaker {block_id}')
         
         # Custom flowables to track speaker and page breaks
         class SpeakerStart(ActionFlowable):
@@ -557,21 +569,22 @@ class TranscriptPDF:
                 self.qa_id = qa_id
                 
             def apply(self, doc):
-                # New speaker starting
+                # New speaker starting - always reset continued flag
                 self.pdf_doc.current_speaker = self.speaker_name
-                self.pdf_doc.speaker_continued = False
+                self.pdf_doc.speaker_continued = False  # Reset for new speaker
                 if self.qa_id is not None:
                     self.pdf_doc.current_qa_conversation = self.qa_id
         
         class PageBreakDetector(ActionFlowable):
             """Detects when content spans to next page."""
-            def __init__(self, pdf_doc):
+            def __init__(self, pdf_doc, is_last_para=False):
                 ActionFlowable.__init__(self)
                 self.pdf_doc = pdf_doc
+                self.is_last_para = is_last_para
                 
             def apply(self, doc):
-                # If we're still in the same speaker block, mark as continued
-                if self.pdf_doc.current_speaker:
+                # Only set continued if not the last paragraph
+                if not self.is_last_para and self.pdf_doc.current_speaker:
                     self.pdf_doc.speaker_continued = True
         
         # Mark the start of this speaker block
@@ -589,18 +602,27 @@ class TranscriptPDF:
                 content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
                 content_paras.append(Paragraph(content, self.styles['Content']))
         
-        # If the speaker block is short (1-2 paragraphs), keep it together
-        if len(content_paras) <= 2:
-            # Keep speaker name with first 1-2 paragraphs
+        # Keep speaker with content but also prevent paragraph splitting
+        if len(content_paras) == 0:
+            # Just speaker, no content
+            elements.append(speaker_para)
+        elif len(content_paras) == 1:
+            # Keep speaker with single paragraph
+            elements.append(KeepTogether([speaker_para, content_paras[0]]))
+        elif len(content_paras) <= 3:
+            # For 2-3 paragraphs, try to keep all together
             keep_together_elements = [speaker_para] + content_paras
             elements.append(KeepTogether(keep_together_elements))
         else:
             # For longer blocks, keep speaker with first paragraph
             elements.append(KeepTogether([speaker_para, content_paras[0]]))
-            # Add page break detector between paragraphs
-            for i, para in enumerate(content_paras[1:], 1):
-                elements.append(PageBreakDetector(self))
-                elements.append(para)
+            # Add remaining paragraphs with KeepTogether to prevent splitting
+            remaining_paras = content_paras[1:]
+            for i, para in enumerate(remaining_paras):
+                is_last = (i == len(remaining_paras) - 1)
+                elements.append(PageBreakDetector(self, is_last_para=is_last))
+                # Wrap each paragraph in KeepTogether to prevent mid-paragraph splits
+                elements.append(KeepTogether([para]))
         
         return elements
     
@@ -608,19 +630,18 @@ class TranscriptPDF:
         """Create Management Discussion section."""
         elements = []
         
-        # Create custom flowable to update section
-        class SectionUpdater(Flowable):
+        # Create custom flowable to update section immediately
+        class SectionUpdater(ActionFlowable):
             def __init__(self, pdf_doc, section_name):
-                Flowable.__init__(self)
+                ActionFlowable.__init__(self)
                 self.pdf_doc = pdf_doc
                 self.section_name = section_name
-                self.width = 0
-                self.height = 0
                 
-            def draw(self):
+            def apply(self, doc):
                 self.pdf_doc.current_section = self.section_name
         
         # MD section starts on its own page (page 2 after title page)
+        # Update section BEFORE adding content (Issue #1)
         elements.append(SectionUpdater(self, "MANAGEMENT DISCUSSION"))
         elements.append(Paragraph("Management Discussion", self.styles['SectionHeader']))
         elements.append(Spacer(1, 0.1*inch))
@@ -634,8 +655,19 @@ class TranscriptPDF:
                 # Small space between speaker blocks, but no page break
                 elements.append(Spacer(1, 0.1*inch))
         
+        # Clear speaker continuation before page break (Issue #4)
+        class ClearSpeaker(ActionFlowable):
+            def __init__(self, pdf_doc):
+                ActionFlowable.__init__(self)
+                self.pdf_doc = pdf_doc
+            def apply(self, doc):
+                self.pdf_doc.current_speaker = None
+                self.pdf_doc.speaker_continued = False
+        
         # Page break before Q&A section
         elements.append(PageBreak())
+        # Clear speaker AFTER page break for clean Q&A start
+        elements.append(ClearSpeaker(self))
         return elements
     
     def _create_qa_section(self, content: Dict[int, Dict[int, List]]) -> List:
@@ -644,19 +676,18 @@ class TranscriptPDF:
         
         # Q&A section already starts on new page due to PageBreak at end of MD section
         
-        # Create custom flowable to update section
-        class SectionUpdater(Flowable):
+        # Create custom flowable to update section immediately
+        class SectionUpdater(ActionFlowable):
             def __init__(self, pdf_doc, section_name):
-                Flowable.__init__(self)
+                ActionFlowable.__init__(self)
                 self.pdf_doc = pdf_doc
                 self.section_name = section_name
-                self.width = 0
-                self.height = 0
                 
-            def draw(self):
+            def apply(self, doc):
                 self.pdf_doc.current_section = self.section_name
         
-        elements.append(SectionUpdater(self, "Q&A"))
+        # Update section to Q&A immediately (Issue #5)
+        elements.append(SectionUpdater(self, "QUESTIONS & ANSWERS"))
         elements.append(Paragraph("Questions & Answers", self.styles['SectionHeader']))
         elements.append(Spacer(1, 0.1*inch))
         
@@ -688,13 +719,13 @@ class TranscriptPDF:
     def generate(self) -> bool:
         """Generate the PDF document."""
         try:
-            # Create the document
+            # Create the document with adjusted top margin for continued speakers
             doc = SimpleDocTemplate(
                 self.output_path,
                 pagesize=letter,
                 rightMargin=inch,
                 leftMargin=inch,
-                topMargin=inch,
+                topMargin=1.1*inch,  # Slightly increased for continued speaker text
                 bottomMargin=inch
             )
             
@@ -717,8 +748,8 @@ class TranscriptPDF:
             
             # Build PDF with header/footer
             def on_page(canvas_obj, doc):
+                self.page_num += 1  # Increment BEFORE drawing header
                 self._create_header_footer(canvas_obj, doc)
-                self.page_num += 1
             
             doc.build(elements, onFirstPage=on_page, onLaterPages=on_page)
             
@@ -803,13 +834,18 @@ def process_stage_07_output(conn: SMBConnection, error_logger: EnhancedErrorLogg
         try:
             all_records = json.loads(stage_07_content.decode('utf-8'))
         except json.JSONDecodeError:
-            # Handle potentially unclosed JSON array from Stage 7
+            # Try to parse as-is first, only repair if needed
             content_str = stage_07_content.decode('utf-8').strip()
-            if content_str.endswith(','):
-                content_str = content_str[:-1] + ']'
-            elif not content_str.endswith(']'):
-                content_str = content_str + ']'
-            all_records = json.loads(content_str)
+            try:
+                all_records = json.loads(content_str)
+            except json.JSONDecodeError as e:
+                # Only attempt repair for specific known issues
+                if 'Expecting value' in str(e) and content_str.endswith(','):
+                    # Remove trailing comma before closing bracket
+                    content_str = content_str[:-1] + ']'
+                    all_records = json.loads(content_str)
+                else:
+                    raise
         
         log_console(f"Loaded {len(all_records)} records from Stage 7")
         
@@ -855,7 +891,7 @@ def process_stage_07_output(conn: SMBConnection, error_logger: EnhancedErrorLogg
         })
         
     except Exception as e:
-        log_error(f"Error processing Stage 8 output: {str(e)}", "processing", {"error": str(e)})
+        log_error(f"Error processing Stage 7 output: {str(e)}", "processing", {"error": str(e)})
         raise
 
 
