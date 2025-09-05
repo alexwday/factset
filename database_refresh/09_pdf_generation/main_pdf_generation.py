@@ -28,12 +28,11 @@ from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, KeepTogether, Flowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Flowable
 from reportlab.platypus.tableofcontents import TableOfContents
-from reportlab.platypus import PageTemplate, Frame, BaseDocTemplate, NextPageTemplate, FrameBreak
+from reportlab.platypus import PageTemplate, Frame, BaseDocTemplate
 from reportlab.platypus.paragraph import Paragraph as PlatypusParagraph
 from reportlab.pdfgen import canvas
-from reportlab.platypus.flowables import KeepTogether
 from reportlab.platypus.doctemplate import ActionFlowable
 
 # Load environment variables
@@ -365,7 +364,6 @@ class TranscriptPDF:
         self.page_num = 1  # Start at 1, not 0
         self.current_speaker = None
         self.current_qa_conversation = None
-        self.continuation_info = {}  # Track what needs continuation on each page
         
     def _setup_custom_styles(self):
         """Set up custom paragraph styles for the PDF."""
@@ -454,27 +452,25 @@ class TranscriptPDF:
         """Create headers and footers for each page."""
         canvas_obj.saveState()
         
-        # Check if this page needs continuation markers
-        page_info = self.continuation_info.get(self.page_num, {})
-        
-        # Add continuation info if this is not the first page of a section
-        if self.page_num > 1 and page_info:
+        # Add continuation info at top of page (except page 1)
+        if self.page_num > 2:  # Skip title page and first content page
             y_position = letter[1] - 0.8*inch
             
-            # Add Q&A conversation continuation if applicable
-            if 'qa_id' in page_info and self.current_section == "Q&A":
+            # For Q&A section, show conversation number
+            if self.current_section == "Q&A" and self.current_qa_conversation is not None:
                 canvas_obj.setFont("Helvetica-Bold", 10)
                 canvas_obj.setFillColor(colors.HexColor('#34495e'))
-                canvas_obj.drawString(inch + 0.2*inch, y_position, 
-                                    f"Q&A Conversation {page_info['qa_id']} (Continued...)")
+                canvas_obj.drawString(inch, y_position, 
+                                    f"Q&A Conversation {self.current_qa_conversation} (Continued...)")
                 y_position -= 0.2*inch
             
-            # Add speaker continuation
-            if 'speaker' in page_info:
+            # Always show current speaker for continuations
+            if self.current_speaker:
                 canvas_obj.setFont("Helvetica-Bold", 9)
                 canvas_obj.setFillColor(colors.HexColor('#2c3e50'))
-                canvas_obj.drawString(inch + 0.4*inch, y_position,
-                                    f"{page_info['speaker']} (Continued...)")
+                indent = inch + 0.2*inch if self.current_section == "Q&A" else inch
+                canvas_obj.drawString(indent, y_position,
+                                    f"{self.current_speaker} (Continued...)")
         
         # Header
         header_text = f"{self.title[:50]}... | {self.current_section}"
@@ -548,7 +544,7 @@ class TranscriptPDF:
         
         return grouped
     
-    def _create_speaker_block(self, block_id: int, paragraphs: List[Dict], qa_group_id: int = None) -> List:
+    def _create_speaker_block(self, block_id: int, paragraphs: List[Dict], qa_group_id: int = None, is_first_in_section: bool = False) -> List:
         """Create a speaker block with paragraphs."""
         elements = []
         
@@ -567,39 +563,28 @@ class TranscriptPDF:
                 self.qa_id = qa_id
                 
             def apply(self, doc):
-                # Store current speaker and QA info for page continuations
-                page_num = doc.page
-                if page_num not in self.pdf_doc.continuation_info:
-                    self.pdf_doc.continuation_info[page_num] = {}
-                self.pdf_doc.continuation_info[page_num]['speaker'] = self.speaker_name
+                # Update current speaker and QA info
+                self.pdf_doc.current_speaker = self.speaker_name
                 if self.qa_id is not None:
-                    self.pdf_doc.continuation_info[page_num]['qa_id'] = self.qa_id
+                    self.pdf_doc.current_qa_conversation = self.qa_id
         
         # Add marker to track this speaker block
         elements.append(SpeakerMarker(self, speaker, qa_group_id))
         
-        # Speaker name
-        speaker_para = Paragraph(speaker, self.styles['Speaker'])
+        # Only show speaker name on first occurrence (continuations handled in header)
+        if is_first_in_section:
+            speaker_para = Paragraph(speaker, self.styles['Speaker'])
+            elements.append(speaker_para)
         
-        # Collect all paragraph content for this speaker block
-        content_paras = []
+        # Add all paragraphs - they flow naturally
         for para_data in paragraphs:
             # Use paragraph_content from Stage 7
             content = para_data.get('paragraph_content', '').strip()
             if content:
                 # Clean and escape content for reportlab
                 content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                # Each paragraph should be kept together (not split)
-                content_paras.append(KeepTogether([Paragraph(content, self.styles['Content'])]))
-        
-        # Keep speaker with first paragraph
-        if content_paras:
-            # Keep speaker name with at least first paragraph
-            elements.append(KeepTogether([speaker_para, content_paras[0]]))
-            # Rest of paragraphs can flow but each kept whole
-            elements.extend(content_paras[1:])
-        else:
-            elements.append(speaker_para)
+                # Add paragraph directly - reportlab won't split it mid-content
+                elements.append(Paragraph(content, self.styles['Content']))
         
         return elements
     
@@ -624,10 +609,11 @@ class TranscriptPDF:
         elements.append(Spacer(1, 0.1*inch))
         
         # Process each speaker block in order (sorted by block_id)
-        for block_id in sorted(content.keys()):
+        for idx, block_id in enumerate(sorted(content.keys())):
             paragraphs = content[block_id]
             if paragraphs:
-                speaker_elements = self._create_speaker_block(block_id, paragraphs)
+                is_first = (idx == 0)
+                speaker_elements = self._create_speaker_block(block_id, paragraphs, is_first_in_section=is_first)
                 elements.extend(speaker_elements)
                 elements.append(Spacer(1, 0.05*inch))
         
@@ -668,21 +654,16 @@ class TranscriptPDF:
             # Keep Q&A header with first content
             qa_elements = [qa_header]
             
+            # Add Q&A header
+            elements.append(qa_header)
+            
             # Process speaker blocks within Q&A group
-            first_speaker = True
-            for block_id in sorted(qa_group.keys()):
+            for idx, block_id in enumerate(sorted(qa_group.keys())):
                 paragraphs = qa_group[block_id]
                 if paragraphs:
-                    speaker_elements = self._create_speaker_block(block_id, paragraphs, qa_group_id)
-                    if first_speaker:
-                        # Keep Q&A header with first speaker
-                        qa_elements.append(KeepTogether([qa_header] + speaker_elements[:1]))
-                        qa_elements.extend(speaker_elements[1:])
-                        first_speaker = False
-                    else:
-                        qa_elements.extend(speaker_elements)
-            
-            elements.extend(qa_elements[1:])  # Skip duplicate header
+                    is_first = (idx == 0)
+                    speaker_elements = self._create_speaker_block(block_id, paragraphs, qa_group_id, is_first_in_section=is_first)
+                    elements.extend(speaker_elements)
             
             # Add spacing between Q&A conversations (but not a page break)
             if qa_idx < len(content) - 1:
