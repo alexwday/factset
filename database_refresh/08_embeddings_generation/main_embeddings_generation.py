@@ -573,31 +573,27 @@ def append_records_to_csv(nas_conn: SMBConnection, records: List[Dict], file_pat
             'file_path',                    # Full path to file
             'filename',                     # Just the filename
             'date_last_modified',           # File modification date
+            'title',                        # Transcript title
+            'transcript_type',              # Type from filename (e.g., "Corrected", "Final")
             'event_id',                     # Event identifier
             'version_id',                   # Version identifier
-            'title',                        # Transcript title
             'fiscal_year',                  # Fiscal year
-            'fiscal_quarter',               # Fiscal quarter (was 'quarter')
+            'fiscal_quarter',               # Fiscal quarter
             'institution_type',             # Institution type
             'institution_id',               # Institution identifier
             'ticker',                       # Stock ticker
             'company_name',                 # Company name
-            'section_id',                   # Section identifier
             'section_name',                 # Section name (MD/Q&A)
-            'speaker_block_id',             # Speaker identifier (was 'speaker_id')
-            'speaker_block_tokens',         # Total tokens in speaker block (was 'block_tokens')
-            'speaker_name',                 # Speaker name
-            'qa_group_id',                  # Q&A group identifier (was 'qa_id')
-            'primary_category_id',          # Primary category from aggregated
-            'primary_category_name',        # Primary category name from aggregated
-            'secondary_category_ids',       # List of secondary category IDs
-            'secondary_category_names',     # List of secondary category names
-            'block_summary',                # Summary of the block
-            'chunk_id',                     # Chunk identifier
-            'chunk_content',                # Chunk text (was 'chunk_text')
-            'chunk_tokens',                 # Tokens in chunk
-            'chunk_paragraph_ids',          # List of paragraph IDs in this chunk (for traceability)
-            'chunk_embedding'               # Embedding vector (was 'embedding')
+            'speaker_block_id',             # Speaker block identifier
+            'qa_group_id',                  # Q&A group identifier (for Q&A sections)
+            'classification_ids',           # List of classification IDs from Stage 6
+            'classification_names',         # List of classification names from Stage 6
+            'block_summary',                # Summary from Stage 7
+            'chunk_id',                     # Chunk identifier within block/group
+            'chunk_tokens',                 # Number of tokens in chunk
+            'chunk_content',                # Formatted text with headers that gets embedded
+            'chunk_paragraph_ids',          # List of original paragraph IDs in this chunk
+            'chunk_embedding'               # 3072-dimensional embedding vector
         ]
         
         # Add any additional fields not in our predefined list (maintain backward compatibility)
@@ -623,41 +619,37 @@ def append_records_to_csv(nas_conn: SMBConnection, records: List[Dict], file_pat
             row['file_path'] = record.get('file_path', '')
             row['filename'] = record.get('filename', '')
             row['date_last_modified'] = record.get('date_last_modified', '')
+            row['title'] = record.get('title', '')
+            row['transcript_type'] = record.get('transcript_type', '')  # Add transcript type
             row['event_id'] = record.get('event_id', '')
             row['version_id'] = record.get('version_id', '')
-            row['title'] = record.get('title', '')
             row['fiscal_year'] = record.get('fiscal_year', '')
             row['fiscal_quarter'] = record.get('fiscal_quarter', '')  # Stage 3 field name
             row['institution_type'] = record.get('institution_type', '')
             row['institution_id'] = record.get('institution_id', '')
             row['ticker'] = record.get('ticker', '')
             row['company_name'] = record.get('company_name', '')
-            row['section_id'] = record.get('section_id', '')
             row['section_name'] = record.get('section_name', '')
             row['speaker_block_id'] = record.get('speaker_block_id', '')  # Stage 3 field name
-            row['speaker_block_tokens'] = record.get('block_tokens', 0)  # Calculated in Stage 8 during chunking
-            row['speaker_name'] = record.get('speaker', '')  # Stage 7 uses 'speaker'
             row['qa_group_id'] = record.get('qa_group_id', '')  # Stage 5 field name
-            row['primary_category_id'] = record.get('primary_category_id', '')
-            row['primary_category_name'] = record.get('primary_category_name', '')
-            row['secondary_category_ids'] = record.get('secondary_category_ids', [])
-            row['secondary_category_names'] = record.get('secondary_category_names', [])
+            row['classification_ids'] = record.get('classification_ids', [])
+            row['classification_names'] = record.get('classification_names', [])
             row['block_summary'] = record.get('block_summary', '')
-            row['chunk_id'] = record.get('chunk_id', '')
-            row['chunk_content'] = record.get('chunk_text', '')  # chunk_text is set during chunking
+            row['chunk_id'] = record.get('chunk_id', 0)
             row['chunk_tokens'] = record.get('chunk_tokens', 0)
+            row['chunk_content'] = record.get('chunk_text', '')  # chunk_text is set during chunking
             row['chunk_paragraph_ids'] = record.get('chunk_paragraph_ids', record.get('block_paragraph_ids', []))
-            row['chunk_embedding'] = record.get('embedding', record.get('chunk_embedding', []))
+            row['chunk_embedding'] = record.get('embedding', [])  # From embeddings generation
             
             # Convert lists to JSON strings for CSV storage
             if isinstance(row['chunk_embedding'], list):
                 row['chunk_embedding'] = json.dumps(row['chunk_embedding'])
             if isinstance(row['chunk_paragraph_ids'], list):
                 row['chunk_paragraph_ids'] = json.dumps(row['chunk_paragraph_ids'])
-            if isinstance(row['secondary_category_ids'], list):
-                row['secondary_category_ids'] = json.dumps(row['secondary_category_ids'])
-            if isinstance(row['secondary_category_names'], list):
-                row['secondary_category_names'] = json.dumps(row['secondary_category_names'])
+            if isinstance(row['classification_ids'], list):
+                row['classification_ids'] = json.dumps(row['classification_ids'])
+            if isinstance(row['classification_names'], list):
+                row['classification_names'] = json.dumps(row['classification_names'])
             
             writer.writerow(row)
         
@@ -966,48 +958,8 @@ def load_stage7_data(nas_conn: SMBConnection) -> List[Dict]:
         raise
 
 
-def aggregate_categories(records: List[Dict]) -> Tuple[str, str, List[str], List[str]]:
-    """Aggregate categories from multiple paragraphs into primary and secondary."""
-    # Collect all category IDs and names
-    all_category_ids = []
-    all_category_names = []
-    
-    for record in records:
-        # Use Stage 7 field names: classification_ids and classification_names
-        cat_ids = record.get('classification_ids', [])
-        cat_names = record.get('classification_names', [])
-        
-        # Ensure they're lists (handle str, int, float, None, etc.)
-        if not isinstance(cat_ids, list):
-            cat_ids = [cat_ids] if cat_ids else []
-        if not isinstance(cat_names, list):
-            cat_names = [cat_names] if cat_names else []
-        
-        # Filter out any None values before extending
-        cat_ids = [id for id in cat_ids if id is not None]
-        cat_names = [name for name in cat_names if name is not None]
-        
-        all_category_ids.extend(cat_ids)
-        all_category_names.extend(cat_names)
-    
-    # Count occurrences to find most common (primary)
-    from collections import Counter
-    id_counts = Counter(all_category_ids)
-    name_counts = Counter(all_category_names)
-    
-    # Get primary (most common) category
-    primary_id = ''
-    primary_name = ''
-    if id_counts:
-        primary_id = id_counts.most_common(1)[0][0]
-    if name_counts:
-        primary_name = name_counts.most_common(1)[0][0]
-    
-    # Get unique secondary categories (excluding primary)
-    secondary_ids = list(set(all_category_ids) - {primary_id})
-    secondary_names = list(set(all_category_names) - {primary_name})
-    
-    return primary_id, primary_name, secondary_ids, secondary_names
+# Removed aggregate_categories function - no longer needed
+# Stage 6 provides block-level classifications that are already consistent within blocks
 
 
 def format_md_content(speaker: str, paragraphs: List[str]) -> str:
@@ -1108,8 +1060,9 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
         formatted_content = format_md_content(speaker, paragraphs)
         block_tokens = count_tokens(formatted_content)
         
-        # Aggregate categories from all paragraphs in block
-        primary_cat_id, primary_cat_name, secondary_cat_ids, secondary_cat_names = aggregate_categories(block_records)
+        # Get classifications from first record (all records in block have same classifications)
+        classification_ids = block_records[0].get('classification_ids', [])
+        classification_names = block_records[0].get('classification_names', [])
         
         # Strategy: Keep as single chunk if possible
         if block_tokens <= chunk_threshold:
@@ -1126,10 +1079,8 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 'block_level_chunk': True,
                 'paragraphs_in_block': len(block_records),
                 'block_paragraph_ids': [r.get('paragraph_id', '') for r in block_records],
-                'primary_category_id': primary_cat_id,
-                'primary_category_name': primary_cat_name,
-                'secondary_category_ids': secondary_cat_ids,
-                'secondary_category_names': secondary_cat_names
+                'classification_ids': classification_ids,
+                'classification_names': classification_names
             }
             chunks_to_process.append(chunk_data)
             log_console(f"MD speaker block {speaker_block_id} kept as single chunk ({block_tokens} tokens)")
@@ -1159,10 +1110,8 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                         'block_level_chunk': False,
                         'paragraphs_in_chunk': len(current_paragraphs),
                         'chunk_paragraph_ids': [chunk_records[j].get('paragraph_id', '') for j in range(len(current_paragraphs))],
-                        'primary_category_id': primary_cat_id,
-                        'primary_category_name': primary_cat_name,
-                        'secondary_category_ids': secondary_cat_ids,
-                        'secondary_category_names': secondary_cat_names
+                        'classification_ids': classification_ids,
+                        'classification_names': classification_names
                     })
                     
                     # Start new chunk
@@ -1205,10 +1154,8 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                         'block_level_chunk': False,
                         'paragraphs_in_chunk': len(combined_paragraphs),
                         'chunk_paragraph_ids': [combined_records[j].get('paragraph_id', '') for j in range(len(combined_records))],
-                        'primary_category_id': primary_cat_id,
-                        'primary_category_name': primary_cat_name,
-                        'secondary_category_ids': secondary_cat_ids,
-                        'secondary_category_names': secondary_cat_names
+                        'classification_ids': classification_ids,
+                        'classification_names': classification_names
                     }
                     chunk_id -= 1  # Decrease total chunk count
                     log_console(f"Merged small final chunk ({final_chunk_tokens} tokens) with previous chunk")
@@ -1225,10 +1172,8 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                         'block_level_chunk': False,
                         'paragraphs_in_chunk': len(current_paragraphs),
                         'chunk_paragraph_ids': [chunk_records[j].get('paragraph_id', '') for j in range(len(current_paragraphs))],
-                        'primary_category_id': primary_cat_id,
-                        'primary_category_name': primary_cat_name,
-                        'secondary_category_ids': secondary_cat_ids,
-                        'secondary_category_names': secondary_cat_names
+                        'classification_ids': classification_ids,
+                        'classification_names': classification_names
                     })
             
             # Update total_chunks for this MD block
@@ -1265,8 +1210,9 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
         formatted_content = format_qa_content(qa_group_id, qa_speaker_blocks)
         qa_group_tokens = count_tokens(formatted_content)
         
-        # Aggregate categories from all records in Q&A group
-        primary_cat_id, primary_cat_name, secondary_cat_ids, secondary_cat_names = aggregate_categories(qa_group_records)
+        # Get classifications from first record (all records should have same classifications at block level)
+        classification_ids = qa_group_records[0].get('classification_ids', []) if qa_group_records else []
+        classification_names = qa_group_records[0].get('classification_names', []) if qa_group_records else []
         
         # Try to keep entire Q&A group together if possible
         if qa_group_tokens <= chunk_threshold:
@@ -1283,10 +1229,8 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                 'block_level_chunk': True,
                 'paragraphs_in_block': len(qa_group_records),
                 'block_paragraph_ids': [r.get('paragraph_id', '') for r in qa_group_records],
-                'primary_category_id': primary_cat_id,
-                'primary_category_name': primary_cat_name,
-                'secondary_category_ids': secondary_cat_ids,
-                'secondary_category_names': secondary_cat_names,
+                'classification_ids': classification_ids,
+                'classification_names': classification_names,
                 'qa_group_id': qa_group_id
             }
             chunks_to_process.append(chunk_data)
@@ -1320,10 +1264,8 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                         'block_level_chunk': False,
                         'paragraphs_in_chunk': len(current_records),
                         'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_records],
-                        'primary_category_id': primary_cat_id,
-                        'primary_category_name': primary_cat_name,
-                        'secondary_category_ids': secondary_cat_ids,
-                        'secondary_category_names': secondary_cat_names,
+                        'classification_ids': classification_ids,
+                        'classification_names': classification_names,
                         'qa_group_id': qa_group_id
                     })
                     
@@ -1402,11 +1344,9 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
                         'chunk_text': chunk_info['chunk_text'],
                         'chunk_tokens': chunk_info['chunk_tokens'],
                         'embedding': embeddings[i],
-                        # Include aggregated category fields if present
-                        'primary_category_id': chunk_info.get('primary_category_id', ''),
-                        'primary_category_name': chunk_info.get('primary_category_name', ''),
-                        'secondary_category_ids': chunk_info.get('secondary_category_ids', []),
-                        'secondary_category_names': chunk_info.get('secondary_category_names', []),
+                        # Include classification fields
+                        'classification_ids': chunk_info.get('classification_ids', []),
+                        'classification_names': chunk_info.get('classification_names', []),
                         # Include chunk metadata if present
                         'block_level_chunk': chunk_info.get('block_level_chunk', False),
                         'paragraphs_in_chunk': chunk_info.get('paragraphs_in_chunk', 1),
