@@ -1010,6 +1010,27 @@ def aggregate_categories(records: List[Dict]) -> Tuple[str, str, List[str], List
     return primary_id, primary_name, secondary_ids, secondary_names
 
 
+def format_md_content(speaker: str, paragraphs: List[str]) -> str:
+    """Format Management Discussion content with speaker header."""
+    formatted = f"[{speaker}]\n\n"
+    formatted += "\n\n".join(paragraphs)
+    return formatted
+
+
+def format_qa_content(qa_group_id: str, speaker_blocks: List[Dict]) -> str:
+    """Format Q&A content with Q&A group header and speaker subheaders."""
+    formatted = f"[Q&A Group {qa_group_id}]\n\n"
+    
+    for block in speaker_blocks:
+        speaker = block['speaker']
+        paragraphs = block['paragraphs']
+        formatted += f"[{speaker}]\n"
+        formatted += "\n\n".join(paragraphs)
+        formatted += "\n\n"
+    
+    return formatted.rstrip()
+
+
 def process_transcript(transcript_records: List[Dict], transcript_id: str, enhanced_error_logger: EnhancedErrorLogger) -> List[Dict]:
     """Process all records for a single transcript to generate embeddings with hierarchical chunking."""
     
@@ -1044,308 +1065,278 @@ def process_transcript(transcript_records: List[Dict], transcript_id: str, enhan
     min_final_chunk = embed_config.get("min_final_chunk", 300)
     batch_size = embed_config.get("batch_size", 50)  # Default to 50 texts per batch
     
-    # Group all records by speaker blocks (for both MD and Q&A sections)
-    blocks = defaultdict(list)
-    block_token_counts = {}
+    # Separate Management Discussion and Q&A sections
+    md_records = [r for r in transcript_records if r.get('section_name') == 'Management Discussion Section']
+    qa_records = [r for r in transcript_records if r.get('section_name') == 'Q&A']
     
-    log_console(f"Grouping {len(transcript_records)} records into speaker blocks")
+    log_console(f"Processing {len(md_records)} MD records and {len(qa_records)} Q&A records")
     
-    for record in transcript_records:
-        # Always group by speaker_block_id, regardless of section type
+    # Process Management Discussion by speaker blocks
+    md_blocks = defaultdict(list)
+    for record in md_records:
         speaker_block_id = record.get('speaker_block_id')
-        section_name = record.get('section_name', 'UNK')
-        
-        if not speaker_block_id:
-            log_console(f"WARNING: Record missing speaker_block_id: {record.get('paragraph_id', 'unknown')}", "WARNING")
-            continue
-            
-        block_key = f"{section_name}_speaker_block_{speaker_block_id}"
-        blocks[block_key].append(record)
+        if speaker_block_id:
+            md_blocks[speaker_block_id].append(record)
     
-    log_console(f"Created {len(blocks)} blocks from {len(transcript_records)} records")
+    # Process Q&A by qa_group_id first, then speaker blocks within
+    qa_groups = defaultdict(lambda: defaultdict(list))
+    for record in qa_records:
+        qa_group_id = record.get('qa_group_id')
+        speaker_block_id = record.get('speaker_block_id')
+        if qa_group_id and speaker_block_id:
+            qa_groups[qa_group_id][speaker_block_id].append(record)
     
-    # Calculate token count for each block
-    total_blocks_with_tokens = 0
-    for block_key, block_records in blocks.items():
-        # Debug individual paragraph contents (try both field names)
-        paragraph_texts = []
-        for r in block_records:
-            # Check what fields are actually present
-            if 'paragraph_content' in r:
-                text = r['paragraph_content']
-            elif 'content' in r:
-                text = r['content']
-            else:
-                # Debug: Log available fields
-                log_console(f"DEBUG: Record has no paragraph_content or content. Available fields: {list(r.keys())[:10]}", "WARNING")
-                text = ''
-            # Convert to string if not already (handles int, float, etc.)
-            if text and not isinstance(text, str):
-                text = str(text)
-            paragraph_texts.append(text)
-        
-        paragraph_lengths = [len(text) for text in paragraph_texts]
-        
-        # Calculate tokens with debugging
-        total_tokens = 0
-        for i, record in enumerate(block_records):
-            text = paragraph_texts[i]
-            if text:
-                tokens = count_tokens(text)
-                if tokens > 0:
-                    total_tokens += tokens
-                else:  # Has text but 0 tokens?
-                    log_console(f"WARNING: Text with length {len(text)} resulted in 0 tokens!", "WARNING")
-                    log_console(f"Text type: {type(text)}, First 100 chars: {text[:100] if isinstance(text, str) else str(text)[:100]}", "WARNING")
-        
-        block_token_counts[block_key] = total_tokens
-        log_execution(f"Block {block_key}: {total_tokens} tokens across {len(block_records)} paragraphs")
-        
-        # Debug: Check if any records have content
-        if total_tokens == 0:
-            log_console(f"WARNING: Block {block_key} has 0 tokens!", "WARNING")
-            log_console(f"Paragraph lengths in block: {paragraph_lengths[:5]}", "WARNING")
-            if paragraph_texts and paragraph_texts[0]:
-                log_console(f"First paragraph type: {type(paragraph_texts[0])}, sample: {str(paragraph_texts[0])[:100]}...", "WARNING")
-        else:
-            total_blocks_with_tokens += 1
-    
-    log_console(f"Blocks with tokens: {total_blocks_with_tokens}/{len(blocks)}")
+    log_console(f"Created {len(md_blocks)} MD speaker blocks and {len(qa_groups)} Q&A groups")
     
     # Collect all chunks first before batching
     chunks_to_process = []
     
-    log_console(f"Processing {len(blocks)} speaker blocks for transcript {transcript_id}")
-    
-    # Process each block hierarchically
-    for block_key, block_records in blocks.items():
-        try:
-            block_total_tokens = block_token_counts[block_key]
+    # Process Management Discussion blocks
+    for speaker_block_id, block_records in md_blocks.items():
+        if not block_records:
+            continue
             
-            # Skip blocks with no tokens
-            if block_total_tokens == 0:
-                log_console(f"Skipping block {block_key} with 0 tokens", "WARNING")
-                # Debug: Check why tokens are 0
-                if block_records:
-                    sample_record = block_records[0]
-                    sample_text = sample_record.get('paragraph_content') or sample_record.get('content', '')
-                    log_console(f"DEBUG: Sample text length: {len(sample_text)}, text type: {type(sample_text)}", "WARNING")
-                    if sample_text:
-                        log_console(f"DEBUG: First 100 chars: {sample_text[:100]}", "WARNING")
-                continue
-                
-            # Strategy 1: If entire block fits within chunk_threshold, keep it as one chunk
-            if block_total_tokens <= chunk_threshold:
-                # Combine all paragraphs in the block into one chunk
-                combined_text = "\n\n".join([
-                    str(r.get('paragraph_content') or r.get('content', ''))
-                    for r in block_records
-                ])
-                
-                if combined_text.strip():
-                    # Aggregate categories from all paragraphs in the block
-                    primary_cat_id, primary_cat_name, secondary_cat_ids, secondary_cat_names = aggregate_categories(block_records)
-                    
-                    # Create a single embedding for the entire block
-                    first_record = block_records[0]
-                    chunk_data = {
-                        'record': first_record,  # Use first record as base
-                        'paragraph_id': f"block_{block_key}",  # Special ID for block-level chunk
-                        'paragraph_tokens': block_total_tokens,  # Total for block
-                        'block_tokens': block_total_tokens,
-                        'chunk_id': 1,  # Single chunk for whole block
-                        'total_chunks': 1,
-                        'chunk_text': combined_text,
-                        'chunk_tokens': block_total_tokens,
-                        'block_level_chunk': True,  # Mark as block-level
-                        'paragraphs_in_block': len(block_records),
-                        'block_paragraph_ids': [r.get('paragraph_id', '') for r in block_records],
-                        'primary_category_id': primary_cat_id,
-                        'primary_category_name': primary_cat_name,
-                        'secondary_category_ids': secondary_cat_ids,
-                        'secondary_category_names': secondary_cat_names
-                    }
-                    chunks_to_process.append(chunk_data)
-                    log_console(f"Block {block_key} kept as single chunk ({block_total_tokens} tokens, {len(block_records)} paragraphs)")
-                    log_execution(f"Added single-block chunk: {block_key}", {
-                        "block_tokens": block_total_tokens,
-                        "paragraphs": len(block_records),
-                        "text_length": len(combined_text)
-                    })
+        # Extract speaker and paragraphs
+        speaker = block_records[0].get('speaker', 'Unknown Speaker')
+        paragraphs = [str(r.get('paragraph_content', '')) for r in block_records if r.get('paragraph_content')]
+        
+        if not paragraphs:
+            continue
             
-            # Strategy 2: Block is too large, need to split intelligently
-            else:
-                # Try to create chunks at paragraph boundaries
-                current_chunk_paragraphs = []
-                current_chunk_tokens = 0
-                chunk_id = 1
+        # Format content with speaker header
+        formatted_content = format_md_content(speaker, paragraphs)
+        block_tokens = count_tokens(formatted_content)
+        
+        # Aggregate categories from all paragraphs in block
+        primary_cat_id, primary_cat_name, secondary_cat_ids, secondary_cat_names = aggregate_categories(block_records)
+        
+        # Strategy: Keep as single chunk if possible
+        if block_tokens <= chunk_threshold:
+            # Single chunk for entire speaker block
+            first_record = block_records[0]
+            chunk_data = {
+                'record': first_record,
+                'paragraph_id': f"md_speaker_{speaker_block_id}",
+                'block_tokens': block_tokens,
+                'chunk_id': 1,
+                'total_chunks': 1,
+                'chunk_text': formatted_content,
+                'chunk_tokens': block_tokens,
+                'block_level_chunk': True,
+                'paragraphs_in_block': len(block_records),
+                'block_paragraph_ids': [r.get('paragraph_id', '') for r in block_records],
+                'primary_category_id': primary_cat_id,
+                'primary_category_name': primary_cat_name,
+                'secondary_category_ids': secondary_cat_ids,
+                'secondary_category_names': secondary_cat_names
+            }
+            chunks_to_process.append(chunk_data)
+            log_console(f"MD speaker block {speaker_block_id} kept as single chunk ({block_tokens} tokens)")
+        else:
+            # Need to chunk at paragraph boundaries
+            current_paragraphs = []
+            current_tokens = count_tokens(f"[{speaker}]\n\n")  # Header tokens
+            chunk_id = 1
+            
+            for i, para in enumerate(paragraphs):
+                para_tokens = count_tokens(para)
                 
-                for record in block_records:
-                    # Try both field names
-                    paragraph_text = record.get('paragraph_content') or record.get('content', '')
-                    # Convert to string if not already
-                    if paragraph_text and not isinstance(paragraph_text, str):
-                        paragraph_text = str(paragraph_text)
-                    if not paragraph_text or not paragraph_text.strip():
-                        log_console(f"WARNING: Empty content in block {block_key}, record {record.get('paragraph_id', 'unknown')}", "WARNING")
-                        continue
-                    paragraph_tokens = count_tokens(paragraph_text)
+                # Check if adding this paragraph exceeds target
+                if current_tokens + para_tokens > target_chunk_size and current_paragraphs:
+                    # Save current chunk
+                    chunk_content = format_md_content(speaker, current_paragraphs)
+                    chunk_records = block_records[:len(current_paragraphs)]
                     
-                    # Check if adding this paragraph would exceed target
-                    if current_chunk_tokens + paragraph_tokens > target_chunk_size and current_chunk_paragraphs:
-                        # Save current chunk (one embedding for multiple paragraphs)
-                        combined_text = "\n\n".join([
-                            str(r.get('paragraph_content') or r.get('content', ''))
-                            for r in current_chunk_paragraphs
-                        ])
-                        
-                        # Aggregate categories from paragraphs in this chunk
-                        primary_cat_id, primary_cat_name, secondary_cat_ids, secondary_cat_names = aggregate_categories(current_chunk_paragraphs)
-                        
-                        # Use first paragraph as representative
-                        first_record = current_chunk_paragraphs[0]
-                        chunks_to_process.append({
-                            'record': first_record,
-                            'paragraph_id': f"chunk_{block_key}_{chunk_id}",
-                            'paragraph_tokens': current_chunk_tokens,  # Total for this chunk
-                            'block_tokens': block_total_tokens,
-                            'chunk_id': chunk_id,
-                            'total_chunks': -1,  # Will update later
-                            'chunk_text': combined_text,
-                            'chunk_tokens': current_chunk_tokens,
-                            'block_level_chunk': False,
-                            'paragraphs_in_chunk': len(current_chunk_paragraphs),
-                            'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_chunk_paragraphs],
-                            'primary_category_id': primary_cat_id,
-                            'primary_category_name': primary_cat_name,
-                            'secondary_category_ids': secondary_cat_ids,
-                            'secondary_category_names': secondary_cat_names
-                        })
-                        
-                        # Start new chunk
-                        current_chunk_paragraphs = [record]
-                        current_chunk_tokens = paragraph_tokens
-                        chunk_id += 1
-                    
-                    # Single paragraph exceeds target - need to split it
-                    elif paragraph_tokens > chunk_threshold:
-                        # First, save any accumulated chunk
-                        if current_chunk_paragraphs:
-                            combined_text = "\n\n".join([
-                                str(r.get('paragraph_content') or r.get('content', ''))
-                                for r in current_chunk_paragraphs
-                            ])
-                            
-                            # Aggregate categories for this chunk
-                            primary_cat_id, primary_cat_name, secondary_cat_ids, secondary_cat_names = aggregate_categories(current_chunk_paragraphs)
-                            
-                            first_record = current_chunk_paragraphs[0]
-                            chunks_to_process.append({
-                                'record': first_record,
-                                'paragraph_id': f"chunk_{block_key}_{chunk_id}",
-                                'paragraph_tokens': current_chunk_tokens,
-                                'block_tokens': block_total_tokens,
-                                'chunk_id': chunk_id,
-                                'total_chunks': -1,
-                                'chunk_text': combined_text,
-                                'chunk_tokens': current_chunk_tokens,
-                                'block_level_chunk': False,
-                                'paragraphs_in_chunk': len(current_chunk_paragraphs),
-                                'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_chunk_paragraphs],
-                                'primary_category_id': primary_cat_id,
-                                'primary_category_name': primary_cat_name,
-                                'secondary_category_ids': secondary_cat_ids,
-                                'secondary_category_names': secondary_cat_names
-                            })
-                            chunk_id += 1
-                            current_chunk_paragraphs = []
-                            current_chunk_tokens = 0
-                        
-                        # Split the large paragraph
-                        paragraph_chunks = chunk_text(
-                            paragraph_text,
-                            max_tokens=target_chunk_size,
-                            chunk_threshold=chunk_threshold,
-                            min_final_chunk=min_final_chunk
-                        )
-                        
-                        for para_chunk_idx, (chunk_text_content, chunk_token_count) in enumerate(paragraph_chunks, 1):
-                            # For single paragraph split, use that paragraph's categories directly
-                            chunks_to_process.append({
-                                'record': record,
-                                'paragraph_id': record.get('paragraph_id', ''),
-                                'paragraph_tokens': paragraph_tokens,
-                                'block_tokens': block_total_tokens,
-                                'chunk_id': chunk_id,
-                                'total_chunks': -1,
-                                'chunk_text': chunk_text_content,
-                                'chunk_tokens': chunk_token_count,
-                                'block_level_chunk': False,
-                                'paragraph_chunk': f"{para_chunk_idx}/{len(paragraph_chunks)}",
-                                # Use the paragraph's own categories since it's a single paragraph
-                                # Aggregate from classification_ids and classification_names
-                                'primary_category_id': record.get('classification_ids', [''])[0] if record.get('classification_ids') else '',
-                                'primary_category_name': record.get('classification_names', [''])[0] if record.get('classification_names') else '',
-                                'secondary_category_ids': record.get('classification_ids', [])[1:] if len(record.get('classification_ids', [])) > 1 else [],
-                                'secondary_category_names': record.get('classification_names', [])[1:] if len(record.get('classification_names', [])) > 1 else []
-                            })
-                            chunk_id += 1
-                    
-                    else:
-                        # Add paragraph to current chunk
-                        current_chunk_paragraphs.append(record)
-                        current_chunk_tokens += paragraph_tokens
-                
-                # Don't forget the last chunk
-                if current_chunk_paragraphs:
-                    combined_text = "\n\n".join([
-                        str(r.get('paragraph_content') or r.get('content', ''))
-                        for r in current_chunk_paragraphs
-                    ])
-                    
-                    # Aggregate categories for final chunk
-                    primary_cat_id, primary_cat_name, secondary_cat_ids, secondary_cat_names = aggregate_categories(current_chunk_paragraphs)
-                    
-                    first_record = current_chunk_paragraphs[0]
                     chunks_to_process.append({
-                        'record': first_record,
-                        'paragraph_id': f"chunk_{block_key}_{chunk_id}",
-                        'paragraph_tokens': current_chunk_tokens,
-                        'block_tokens': block_total_tokens,
+                        'record': block_records[0],
+                        'paragraph_id': f"md_speaker_{speaker_block_id}_chunk_{chunk_id}",
+                        'block_tokens': block_tokens,
                         'chunk_id': chunk_id,
-                        'total_chunks': -1,
-                        'chunk_text': combined_text,
-                        'chunk_tokens': current_chunk_tokens,
+                        'total_chunks': -1,  # Will update later
+                        'chunk_text': chunk_content,
+                        'chunk_tokens': count_tokens(chunk_content),
                         'block_level_chunk': False,
-                        'paragraphs_in_chunk': len(current_chunk_paragraphs),
-                        'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_chunk_paragraphs],
+                        'paragraphs_in_chunk': len(current_paragraphs),
+                        'chunk_paragraph_ids': [chunk_records[j].get('paragraph_id', '') for j in range(len(current_paragraphs))],
                         'primary_category_id': primary_cat_id,
                         'primary_category_name': primary_cat_name,
                         'secondary_category_ids': secondary_cat_ids,
                         'secondary_category_names': secondary_cat_names
                     })
-                
-                # Update total_chunks for this block
-                total_chunks_in_block = chunk_id
-                for chunk in chunks_to_process:
-                    if chunk['total_chunks'] == -1:
-                        chunk['total_chunks'] = total_chunks_in_block
-                
-                log_console(f"Block {block_key} split into {total_chunks_in_block} chunks ({block_total_tokens} tokens)")
+                    
+                    # Start new chunk
+                    current_paragraphs = [para]
+                    current_tokens = count_tokens(f"[{speaker}]\n\n") + para_tokens
+                    chunk_id += 1
+                else:
+                    current_paragraphs.append(para)
+                    current_tokens += para_tokens
             
-        except Exception as e:
-            enhanced_error_logger.log_processing_error(
-                transcript_id,
-                f"Error processing block {block_key}: {str(e)}"
-            )
-            log_console(f"ERROR processing block {block_key}: {str(e)}", "ERROR")
+            # Save last chunk
+            if current_paragraphs:
+                chunk_content = format_md_content(speaker, current_paragraphs)
+                start_idx = len(paragraphs) - len(current_paragraphs)
+                chunk_records = block_records[start_idx:]
+                
+                chunks_to_process.append({
+                    'record': block_records[0],
+                    'paragraph_id': f"md_speaker_{speaker_block_id}_chunk_{chunk_id}",
+                    'block_tokens': block_tokens,
+                    'chunk_id': chunk_id,
+                    'total_chunks': chunk_id,
+                    'chunk_text': chunk_content,
+                    'chunk_tokens': count_tokens(chunk_content),
+                    'block_level_chunk': False,
+                    'paragraphs_in_chunk': len(current_paragraphs),
+                    'chunk_paragraph_ids': [chunk_records[j].get('paragraph_id', '') for j in range(len(current_paragraphs))],
+                    'primary_category_id': primary_cat_id,
+                    'primary_category_name': primary_cat_name,
+                    'secondary_category_ids': secondary_cat_ids,
+                    'secondary_category_names': secondary_cat_names
+                })
+            
+            # Update total_chunks for this MD block
+            for chunk in chunks_to_process[-chunk_id:]:
+                if chunk['total_chunks'] == -1:
+                    chunk['total_chunks'] = chunk_id
+            
+            log_console(f"MD speaker block {speaker_block_id} split into {chunk_id} chunks")
+    
+    # Process Q&A groups
+    for qa_group_id, speaker_blocks in qa_groups.items():
+        # Collect all records and speaker blocks for this Q&A group
+        qa_group_records = []
+        qa_speaker_blocks = []
+        
+        # Sort speaker blocks by ID to maintain order
+        for speaker_block_id in sorted(speaker_blocks.keys()):
+            block_records = speaker_blocks[speaker_block_id]
+            if block_records:
+                qa_group_records.extend(block_records)
+                speaker = block_records[0].get('speaker', 'Unknown Speaker')
+                paragraphs = [str(r.get('paragraph_content', '')) for r in block_records if r.get('paragraph_content')]
+                if paragraphs:
+                    qa_speaker_blocks.append({
+                        'speaker': speaker,
+                        'paragraphs': paragraphs,
+                        'records': block_records
+                    })
+        
+        if not qa_speaker_blocks:
+            continue
+        
+        # Format the entire Q&A group
+        formatted_content = format_qa_content(qa_group_id, qa_speaker_blocks)
+        qa_group_tokens = count_tokens(formatted_content)
+        
+        # Aggregate categories from all records in Q&A group
+        primary_cat_id, primary_cat_name, secondary_cat_ids, secondary_cat_names = aggregate_categories(qa_group_records)
+        
+        # Try to keep entire Q&A group together if possible
+        if qa_group_tokens <= chunk_threshold:
+            # Single chunk for entire Q&A group
+            first_record = qa_group_records[0]
+            chunk_data = {
+                'record': first_record,
+                'paragraph_id': f"qa_group_{qa_group_id}",
+                'block_tokens': qa_group_tokens,
+                'chunk_id': 1,
+                'total_chunks': 1,
+                'chunk_text': formatted_content,
+                'chunk_tokens': qa_group_tokens,
+                'block_level_chunk': True,
+                'paragraphs_in_block': len(qa_group_records),
+                'block_paragraph_ids': [r.get('paragraph_id', '') for r in qa_group_records],
+                'primary_category_id': primary_cat_id,
+                'primary_category_name': primary_cat_name,
+                'secondary_category_ids': secondary_cat_ids,
+                'secondary_category_names': secondary_cat_names,
+                'qa_group_id': qa_group_id
+            }
+            chunks_to_process.append(chunk_data)
+            log_console(f"Q&A group {qa_group_id} kept as single chunk ({qa_group_tokens} tokens)")
+        else:
+            # Need to split Q&A group - try to keep speaker blocks together
+            chunk_id = 1
+            current_speaker_blocks = []
+            current_records = []
+            header_tokens = count_tokens(f"[Q&A Group {qa_group_id}]\n\n")
+            current_tokens = header_tokens
+            
+            for speaker_block in qa_speaker_blocks:
+                # Calculate tokens for this speaker block
+                speaker_text = f"[{speaker_block['speaker']}]\n" + "\n\n".join(speaker_block['paragraphs'])
+                speaker_tokens = count_tokens(speaker_text)
+                
+                # Check if adding this speaker block exceeds target
+                if current_tokens + speaker_tokens > target_chunk_size and current_speaker_blocks:
+                    # Save current chunk
+                    chunk_content = format_qa_content(qa_group_id, current_speaker_blocks)
+                    
+                    chunks_to_process.append({
+                        'record': current_records[0],
+                        'paragraph_id': f"qa_group_{qa_group_id}_chunk_{chunk_id}",
+                        'block_tokens': qa_group_tokens,
+                        'chunk_id': chunk_id,
+                        'total_chunks': -1,  # Will update later
+                        'chunk_text': chunk_content,
+                        'chunk_tokens': count_tokens(chunk_content),
+                        'block_level_chunk': False,
+                        'paragraphs_in_chunk': len(current_records),
+                        'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_records],
+                        'primary_category_id': primary_cat_id,
+                        'primary_category_name': primary_cat_name,
+                        'secondary_category_ids': secondary_cat_ids,
+                        'secondary_category_names': secondary_cat_names,
+                        'qa_group_id': qa_group_id
+                    })
+                    
+                    # Start new chunk
+                    current_speaker_blocks = [speaker_block]
+                    current_records = speaker_block['records']
+                    current_tokens = header_tokens + speaker_tokens
+                    chunk_id += 1
+                else:
+                    current_speaker_blocks.append(speaker_block)
+                    current_records.extend(speaker_block['records'])
+                    current_tokens += speaker_tokens
+            
+            # Save last chunk if any
+            if current_speaker_blocks:
+                chunk_content = format_qa_content(qa_group_id, current_speaker_blocks)
+                
+                chunks_to_process.append({
+                    'record': current_records[0],
+                    'paragraph_id': f"qa_group_{qa_group_id}_chunk_{chunk_id}",
+                    'block_tokens': qa_group_tokens,
+                    'chunk_id': chunk_id,
+                    'total_chunks': chunk_id,
+                    'chunk_text': chunk_content,
+                    'chunk_tokens': count_tokens(chunk_content),
+                    'block_level_chunk': False,
+                    'paragraphs_in_chunk': len(current_records),
+                    'chunk_paragraph_ids': [r.get('paragraph_id', '') for r in current_records],
+                    'primary_category_id': primary_cat_id,
+                    'primary_category_name': primary_cat_name,
+                    'secondary_category_ids': secondary_cat_ids,
+                    'secondary_category_names': secondary_cat_names,
+                    'qa_group_id': qa_group_id
+                })
+            
+            # Update total_chunks for this Q&A group
+            qa_chunk_start = len(chunks_to_process) - chunk_id
+            for i in range(qa_chunk_start, len(chunks_to_process)):
+                if chunks_to_process[i].get('qa_group_id') == qa_group_id and chunks_to_process[i]['total_chunks'] == -1:
+                    chunks_to_process[i]['total_chunks'] = chunk_id
+            
+            log_console(f"Q&A group {qa_group_id} split into {chunk_id} chunks")
     
     # Debug: Log chunks_to_process status
-    log_console(f"Total chunks created from blocks: {len(chunks_to_process)}")
+    log_console(f"Total chunks created: {len(chunks_to_process)}")
     if len(chunks_to_process) == 0:
-        log_console("WARNING: No chunks were created from any blocks!", "WARNING")
-        log_console(f"Total blocks processed: {len(blocks)}", "WARNING")
-        log_console(f"Blocks with tokens: {total_blocks_with_tokens}", "WARNING")
+        log_console("WARNING: No chunks were created!", "WARNING")
+        log_console(f"MD blocks processed: {len(md_blocks)}", "WARNING")
+        log_console(f"Q&A groups processed: {len(qa_groups)}", "WARNING")
     
     # Process chunks in batches
     total_chunks = len(chunks_to_process)
