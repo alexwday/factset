@@ -360,7 +360,7 @@ class TranscriptPDF:
         
         # Page tracking
         self.current_section = "Title"
-        self.page_num = 0
+        self.page_num = 1  # Start at 1, not 0
         
     def _setup_custom_styles(self):
         """Set up custom paragraph styles for the PDF."""
@@ -469,7 +469,6 @@ class TranscriptPDF:
         canvas_obj.line(inch, 0.6*inch, letter[0] - inch, 0.6*inch)
         
         canvas_obj.restoreState()
-        self.page_num += 1
     
     def _create_title_page(self) -> List:
         """Create the title page elements."""
@@ -498,14 +497,19 @@ class TranscriptPDF:
         for record in self.transcript_data['records']:
             section = record.get('section_name', '')
             
-            if section == 'Management Discussion':
-                speaker_id = record.get('speaker_id', 'Unknown')
-                grouped['Management Discussion'][speaker_id].append(record)
+            # Match exact section names from Stage 8
+            if section == 'MANAGEMENT DISCUSSION SECTION':
+                # Use 'speaker' field, not 'speaker_id'
+                speaker = record.get('speaker', 'Unknown')
+                # Group by speaker_block_id to keep blocks together
+                block_id = record.get('speaker_block_id', speaker)
+                grouped['Management Discussion'][block_id].append(record)
             
             elif section == 'Q&A':
-                qa_id = record.get('qa_id', 'Unknown')
-                speaker_id = record.get('speaker_id', 'Unknown')
-                grouped['Q&A'][qa_id][speaker_id].append(record)
+                # Use qa_group_id from Stage 5/8
+                qa_group_id = record.get('qa_group_id', 'Unknown')
+                speaker = record.get('speaker', 'Unknown')
+                grouped['Q&A'][qa_group_id][speaker].append(record)
         
         return grouped
     
@@ -513,13 +517,20 @@ class TranscriptPDF:
         """Create a speaker block with paragraphs."""
         elements = []
         
+        # Get actual speaker name from first record (speaker field from Stage 3)
+        if paragraphs:
+            actual_speaker = paragraphs[0].get('speaker', speaker)
+        else:
+            actual_speaker = speaker
+        
         # Speaker name
-        speaker_para = Paragraph(speaker, self.styles['Speaker'])
+        speaker_para = Paragraph(actual_speaker, self.styles['Speaker'])
         
         # Collect all paragraph content for this speaker
         content_paras = []
         for para_data in paragraphs:
-            content = para_data.get('paragraph_content', '').strip()
+            # Use chunk_content if available (from Stage 8), otherwise paragraph_content
+            content = para_data.get('chunk_content', para_data.get('paragraph_content', '')).strip()
             if content:
                 # Clean and escape content for reportlab
                 content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
@@ -622,8 +633,11 @@ class TranscriptPDF:
                 elements.extend(self._create_qa_section(grouped_content['Q&A']))
             
             # Build PDF with header/footer
-            doc.build(elements, onFirstPage=self._create_header_footer, 
-                     onLaterPages=self._create_header_footer)
+            def on_page(canvas_obj, doc):
+                self._create_header_footer(canvas_obj, doc)
+                self.page_num += 1
+            
+            doc.build(elements, onFirstPage=on_page, onLaterPages=on_page)
             
             return True
             
