@@ -173,37 +173,46 @@ def validate_nas_path(path: str) -> bool:
 
 def nas_create_connection() -> Optional[SMBConnection]:
     """Create and return SMB connection to NAS."""
-    global config
-    
     try:
         log_console("Connecting to NAS...")
         
-        # Get credentials from environment
-        nas_user = os.getenv("NAS_USER")
+        # Get credentials from environment (matching Stage 8 pattern)
+        nas_username = os.getenv("NAS_USERNAME")
         nas_password = os.getenv("NAS_PASSWORD")
-        nas_domain = os.getenv("NAS_DOMAIN", "")
+        nas_server_name = os.getenv("NAS_SERVER_NAME")
+        nas_server_ip = os.getenv("NAS_SERVER_IP")
+        client_machine_name = os.getenv("CLIENT_MACHINE_NAME", "python_script")
         
-        if not nas_user or not nas_password:
+        if not nas_username or not nas_password:
             log_error("NAS credentials not found in environment", "authentication")
             return None
         
-        # Create SMB connection
+        # Create SMB connection (matching Stage 8 exactly)
         conn = SMBConnection(
-            nas_user,
-            nas_password,
-            "python_script",
-            config.get("nas_server_name", "NAS"),
-            domain=nas_domain,
-            use_ntlm_v2=True
+            username=nas_username,
+            password=nas_password,
+            my_name=client_machine_name,
+            remote_name=nas_server_name,
+            use_ntlm_v2=True,
+            is_direct_tcp=True
         )
         
         # Connect to NAS
-        if not conn.connect(config.get("nas_server_ip"), 139):
-            log_error("Failed to connect to NAS", "connection")
+        nas_port = int(os.getenv("NAS_PORT", 445))
+        if conn.connect(nas_server_ip, nas_port):
+            log_console("Connected to NAS successfully")
+            log_execution("NAS connection established successfully", {
+                "connection_type": "SMB/CIFS",
+                "server": nas_server_name,
+                "port": nas_port
+            })
+            return conn
+        else:
+            log_error("Failed to connect to NAS", "connection", {
+                "server": nas_server_name,
+                "port": nas_port
+            })
             return None
-        
-        log_console("Connected to NAS successfully")
-        return conn
         
     except Exception as e:
         log_error(f"Error connecting to NAS: {str(e)}", "connection", {"error": str(e)})
@@ -300,7 +309,8 @@ def nas_load_config(conn: SMBConnection) -> Dict[str, Any]:
     """Load configuration from NAS."""
     global config
     
-    config_path = "Finance Data and Analytics/DSA/Earnings Call Transcripts/config.yaml"
+    # Use CONFIG_PATH environment variable like Stage 8
+    config_path = os.getenv("CONFIG_PATH", "Finance Data and Analytics/DSA/Earnings Call Transcripts/config.yaml")
     log_console("Loading configuration from NAS...")
     
     try:
@@ -308,20 +318,19 @@ def nas_load_config(conn: SMBConnection) -> Dict[str, Any]:
         if not config_content:
             raise Exception("Failed to download config file")
         
-        config_data = yaml.safe_load(config_content)
+        config_data = yaml.safe_load(config_content.decode('utf-8'))
         
         # Extract Stage 9 specific config
         stage_config = config_data.get("stage_09_pdf_generation", {})
         
-        # Update global config with NAS settings
-        config.update({
-            "nas_server_ip": config_data.get("nas_server_ip", "10.188.70.70"),
-            "nas_server_name": config_data.get("nas_server_name", "NAS"),
-            **stage_config
-        })
+        # Store the full config (following Stage 8 pattern)
+        config.update(config_data)
         
         log_console("Configuration loaded successfully")
-        log_execution("Configuration loaded", {"config": stage_config})
+        log_execution("Configuration loaded", {
+            "config_path": config_path,
+            "stage_config": stage_config
+        })
         
         return config
         
