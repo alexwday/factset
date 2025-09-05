@@ -1,7 +1,8 @@
 """
 Stage 6: LLM-Based Financial Content Classification
-ID-based classification with two-pass system and sliding context windows.
-Processes entire speaker blocks with historical context for improved accuracy.
+Single-pass classification system returning all applicable categories.
+Management Discussion: Speaker block level classification with 2-block context.
+Q&A: Conversation level classification (entire Q&A group) with no context.
 """
 
 import os
@@ -94,8 +95,6 @@ class EnhancedErrorLogger:
         self.processing_errors = []
         self.total_cost = 0.0
         self.total_tokens = 0
-        self.primary_pass_tokens = 0
-        self.secondary_pass_tokens = 0
 
     def log_classification_error(self, transcript_id: str, pass_type: str, error: str):
         """Log classification-specific errors."""
@@ -133,17 +132,13 @@ class EnhancedErrorLogger:
             "action_required": "Review transcript data and processing logic"
         })
 
-    def accumulate_costs(self, token_usage: dict = None, pass_type: str = "primary"):
+    def accumulate_costs(self, token_usage: dict = None):
         """Accumulate total cost and token usage for final summary."""
         if token_usage:
             if "cost" in token_usage:
                 self.total_cost += token_usage["cost"]["total_cost"]
             if "total_tokens" in token_usage:
                 self.total_tokens += token_usage["total_tokens"]
-                if pass_type == "primary":
-                    self.primary_pass_tokens += token_usage["total_tokens"]
-                else:
-                    self.secondary_pass_tokens += token_usage["total_tokens"]
 
     def save_error_logs(self, nas_conn: SMBConnection):
         """Save error logs to separate JSON files on NAS."""
@@ -890,18 +885,8 @@ def nas_create_directory_recursive(conn: SMBConnection, dir_path: str) -> bool:
 
 
 # ============================================================================
-# NEW V2 CLASSIFICATION FUNCTIONS
+# CLASSIFICATION HELPER FUNCTIONS
 # ============================================================================
-
-def index_speaker_block_paragraphs(speaker_block_records: List[Dict]) -> List[Dict]:
-    """Add paragraph index (starting at 1) within each speaker block."""
-    indexed_records = []
-    for idx, record in enumerate(sorted(speaker_block_records, key=lambda x: x["paragraph_id"]), start=1):
-        record_copy = record.copy()
-        record_copy["paragraph_index"] = idx
-        indexed_records.append(record_copy)
-    return indexed_records
-
 
 def build_numbered_category_list() -> str:
     """Build formatted category list with IDs and descriptions."""
@@ -917,7 +902,7 @@ def build_numbered_category_list() -> str:
 
 def format_previous_speaker_blocks_with_classifications(
     previous_blocks: List[Dict], 
-    max_blocks: int = 5
+    max_blocks: int = 2
 ) -> str:
     """Format previous speaker blocks with their classifications for context."""
     
@@ -928,29 +913,31 @@ def format_previous_speaker_blocks_with_classifications(
     recent_blocks = previous_blocks[-max_blocks:] if len(previous_blocks) > max_blocks else previous_blocks
     
     context_parts = []
+    context_parts.append("\n=== PREVIOUS SPEAKER BLOCKS ===")
+    
     for block_idx, block in enumerate(recent_blocks, start=1):
         speaker_name = block["speaker_name"]
-        section_name = block["section_name"]
         paragraphs = block["paragraphs"]
         
-        context_parts.append(f"\n[Previous Block #{block_idx} - {speaker_name} - {section_name} - {len(paragraphs)} paragraphs]")
+        # Add speaker name
+        context_parts.append(f"\n[Previous Block {block_idx}: {speaker_name}]:")
         
+        # Show paragraphs (limited for context)
         for para in paragraphs[:3]:  # Show first 3 paragraphs as preview
-            # Fix field name: Stage 3 uses 'paragraph_content', not 'content'
             content = para.get('paragraph_content', para.get('content', ''))
-            content_preview = content[:150] + "..." if len(content) > 150 else content
-            primary_id = para.get('primary_classification', 0)
-            primary_name = CATEGORY_REGISTRY[primary_id]['name']
-            
-            context_parts.append(f"P{para['paragraph_index']}: \"{content_preview}\"")
-            context_parts.append(f"  → Primary: {primary_id} ({primary_name})")
-            
-            if para.get('secondary_classifications'):
-                secondary_names = [f"{sid} ({CATEGORY_REGISTRY[sid]['name']})" for sid in para['secondary_classifications']]
-                context_parts.append(f"  → Secondary: {', '.join(secondary_names)}")
+            if len(content) > 200:
+                content = content[:200] + "..."
+            context_parts.append(content)
         
         if len(paragraphs) > 3:
-            context_parts.append(f"  ... and {len(paragraphs) - 3} more paragraphs")
+            context_parts.append(f"... and {len(paragraphs) - 3} more paragraphs")
+        
+        # Show classifications at the end (all paragraphs have same in new system)
+        if paragraphs:
+            classification_ids = paragraphs[0].get('classification_ids', [])
+            if classification_ids:
+                classification_names = [f"{cid}: {CATEGORY_REGISTRY[cid]['name']}" for cid in classification_ids]
+                context_parts.append(f"\nClassifications: {', '.join(classification_names)}")
     
     return "\n".join(context_parts)
 
@@ -958,157 +945,263 @@ def format_previous_speaker_blocks_with_classifications(
 def format_current_speaker_block(speaker_block_records: List[Dict]) -> str:
     """Format current speaker block for classification."""
     
+    if not speaker_block_records:
+        return ""
+    
+    # Get speaker name from first record
+    first_record = speaker_block_records[0]
+    speaker_name = first_record.get("speaker", first_record.get("speaker_name", "Unknown"))
+    
     context_parts = []
     context_parts.append("\n=== CURRENT SPEAKER BLOCK ===")
+    context_parts.append(f"\n[{speaker_name}]:")
     
+    # Add all paragraphs without labeling
     for record in speaker_block_records:
-        para_idx = record["paragraph_index"]
-        content = record["paragraph_content"]
-        context_parts.append(f"\nP{para_idx}: {content}")
+        content = record.get("paragraph_content", record.get("content", ""))
+        context_parts.append(content)
     
     return "\n".join(context_parts)
 
 
-def create_primary_classification_prompt(
-    bank_name: str,
-    fiscal_year: int,
-    fiscal_quarter: str,
-    section_type: str,
-    speaker_name: str,
-    speaker_role: str,
-    speaker_block_number: int,
-    total_speaker_blocks: int,
-    previous_blocks: List[Dict],
-    current_block_paragraphs: List[Dict]
-) -> str:
-    """Create comprehensive system prompt for primary classification."""
+
+
+def process_qa_conversation_single_pass(
+    qa_conversation_records: List[Dict],
+    transcript_info: Dict[str, Any],
+    qa_group_id: int,
+    total_qa_groups: int,
+    enhanced_error_logger: EnhancedErrorLogger
+) -> List[Dict]:
+    """Process Q&A conversation with single-pass classification at conversation level."""
+    global llm_client, config
     
-    categories_list = build_numbered_category_list()
-    previous_context = format_previous_speaker_blocks_with_classifications(previous_blocks)
-    current_block = format_current_speaker_block(current_block_paragraphs)
+    log_console(f"Processing Q&A group {qa_group_id} ({len(qa_conversation_records)} paragraphs)")
     
-    return f"""You are a financial analyst specializing in earnings call transcript classification for major financial institutions.
+    # Build conversation text for classification
+    sorted_records = sorted(qa_conversation_records, key=lambda x: x["paragraph_id"])
+    
+    # Group by speaker blocks for readability in prompt
+    qa_speaker_blocks = defaultdict(list)
+    for record in sorted_records:
+        qa_speaker_blocks[record["speaker_block_id"]].append(record)
+    
+    # Format conversation for prompt - show as current Q&A group
+    conversation_parts = []
+    conversation_parts.append("\n=== CURRENT Q&A CONVERSATION ===")
+    conversation_parts.append(f"Q&A Group ID: {qa_group_id}")
+    
+    speaker_block_count = 0
+    for speaker_block_id, block_records in sorted(qa_speaker_blocks.items()):
+        speaker_block_count += 1
+        speaker_name = block_records[0].get("speaker", block_records[0].get("speaker_name", "Unknown"))
+        
+        # Label each speaker block within the Q&A
+        conversation_parts.append(f"\n[Speaker Block {speaker_block_count}: {speaker_name}]:")
+        
+        # Add all paragraphs for this speaker
+        for record in block_records:
+            content = record.get("paragraph_content", record.get("content", ""))
+            conversation_parts.append(content)
+    
+    full_conversation = "\n".join(conversation_parts)
+    
+    # ========== SINGLE-PASS CLASSIFICATION (One set for entire conversation) ==========
+    try:
+        categories_list = build_numbered_category_list()
+        
+        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification for a retrieval system.
 
 <document_context>
-You are analyzing an earnings call transcript with the following context:
-- Institution: {bank_name}
-- Document Type: Quarterly Earnings Call Transcript
-- Fiscal Period: {fiscal_quarter} {fiscal_year}
-- Section: {section_type}
-- Current Speaker: {speaker_name}, {speaker_role if speaker_role else 'Role Unknown'}
-- Speaker Block: #{speaker_block_number} of {total_speaker_blocks}
+Institution: {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}
+Fiscal Period: {transcript_info.get("fiscal_quarter", "Q1")} {transcript_info.get("fiscal_year", 2024)}
+Section: Q&A Conversation
+Q&A Group: {qa_group_id} of {total_qa_groups}
 </document_context>
 
 <task_description>
-You are performing PRIMARY classification for a retrieval system. The primary category will receive PRIORITY treatment when users search for content.
-Assign exactly ONE category ID (0-22) to each paragraph - this should be the MAIN financial topic that best represents the content.
-This primary classification determines which searches will surface this content with highest relevance.
+You are performing comprehensive classification for the ENTIRE Q&A conversation.
+Assign ALL applicable category IDs to this complete Q&A exchange.
+All paragraphs in this conversation will receive the same classification list.
+Include all topics discussed in both questions and answers.
 </task_description>
 
 <retrieval_context>
-This classification enables a search system where:
-- Users query for specific financial topics (e.g., "show me discussions about margins")
-- Content with matching PRIMARY categories appears first in results
-- Secondary categories (assigned in next pass) provide additional coverage
-- The goal is accurate, prioritized retrieval of financial insights
+This classification enables comprehensive retrieval of Q&A conversations:
+- Users searching for ANY topic mentioned will find this entire Q&A exchange
+- The complete question-answer context is preserved
+- Multiple categories ensure no relevant content is missed
+- The goal is complete retrieval of all financial insights discussed
 </retrieval_context>
 
 <classification_guidelines>
-1. Choose the SINGLE MOST relevant category that best represents the paragraph's MAIN topic
-2. This should be the category a user would most likely search for to find this content
-3. Focus on the dominant financial theme, not minor mentions
-4. Consider the context from previous speaker blocks when classifying
-5. For {bank_name}, be aware of their specific terminology and reporting structure
-6. IMPORTANT: Only use category 0 (Non-Relevant) for pure procedural content with NO financial information
-7. If content has ANY financial or business relevance, assign the most appropriate non-zero category
-8. The primary category should capture what this paragraph is fundamentally ABOUT
+1. Classify the ENTIRE conversation as a single unit
+2. Include ALL topics mentioned in questions AND answers
+3. Be comprehensive - any topic discussed gets included
+4. Do NOT use previous conversation context (each Q&A is independent)
+5. Think broadly about what searches should surface this conversation
 </classification_guidelines>
 
 <financial_categories>
 {categories_list}
 </financial_categories>
 
-<previous_context>
-{previous_context}
-</previous_context>
-
-<current_task>
-Classify each paragraph in the current speaker block with a PRIMARY category ID (0-22).
-{current_block}
-</current_task>
+<conversation>
+{full_conversation}
+</conversation>
 
 <response_format>
-Use the classify_speaker_block_primary function to provide the primary category ID for each paragraph by its index number (P1, P2, P3, etc.).
+Use the classify_qa_conversation function to provide ALL applicable category IDs for this entire Q&A conversation.
 </response_format>"""
 
+        response = llm_client.chat.completions.create(
+            model=config["stage_06_llm_classification"]["llm_config"]["model"],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Please classify this Q&A conversation with ALL applicable categories."}
+            ],
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "classify_qa_conversation",
+                    "description": "Assign ALL applicable category IDs to the Q&A conversation",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "category_ids": {
+                                "type": "array",
+                                "items": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 22
+                                },
+                                "description": "ALL applicable category IDs for this Q&A conversation"
+                            }
+                        },
+                        "required": ["category_ids"]
+                    }
+                }
+            }],
+            tool_choice="required",
+            temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
+            max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
+        )
+        
+        # Parse classifications
+        classification_ids = []
+        if response.choices[0].message.tool_calls:
+            tool_call = response.choices[0].message.tool_calls[0]
+            result = json.loads(tool_call.function.arguments)
+            
+            # Validate category IDs
+            for cat_id in result.get("category_ids", []):
+                if cat_id in CATEGORY_REGISTRY:
+                    classification_ids.append(cat_id)
+                else:
+                    log_console(f"Invalid category ID {cat_id}, skipping", "WARNING")
+        
+        # Track costs
+        if hasattr(response, 'usage') and response.usage:
+            cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
+            enhanced_error_logger.accumulate_costs({
+                "total_tokens": response.usage.total_tokens,
+                "cost": cost_info
+            })
+        
+        # If no categories assigned, use fallback
+        if not classification_ids:
+            classification_ids = [0]
+            log_console(f"No categories assigned to Q&A group {qa_group_id}, using fallback", "WARNING")
+        
+    except Exception as e:
+        error_msg = f"Q&A classification failed for group {qa_group_id}: {e}"
+        log_error(error_msg, "qa_classification", {"qa_group": qa_group_id, "error": str(e)})
+        enhanced_error_logger.log_classification_error(
+            transcript_info.get("ticker", "unknown"),
+            "qa_single_pass",
+            error_msg
+        )
+        
+        # Fallback to category 0
+        classification_ids = [0]
+        log_console(f"Applying fallback category 0 to Q&A group {qa_group_id}", "WARNING")
+    
+    # Apply same classifications to all records in the conversation
+    classification_names = [CATEGORY_REGISTRY[cid]["name"] for cid in classification_ids]
+    
+    for record in sorted_records:
+        record["classification_ids"] = classification_ids
+        record["classification_names"] = classification_names
+    
+    return sorted_records
 
-def create_secondary_classification_prompt(
-    bank_name: str,
-    fiscal_year: int,
-    fiscal_quarter: str,
-    section_type: str,
-    speaker_name: str,
-    speaker_role: str,
+
+def process_speaker_block_single_pass(
+    speaker_block_records: List[Dict],
+    transcript_info: Dict[str, Any],
     speaker_block_number: int,
     total_speaker_blocks: int,
     previous_blocks: List[Dict],
-    current_block_paragraphs: List[Dict]
-) -> str:
-    """Create comprehensive system prompt for secondary classification."""
+    enhanced_error_logger: EnhancedErrorLogger
+) -> List[Dict]:
+    """Process a speaker block with single-pass classification."""
+    global llm_client, config
     
-    categories_list = build_numbered_category_list()
+    # Sort records by paragraph_id to maintain order
+    sorted_records = sorted(speaker_block_records, key=lambda x: x["paragraph_id"])
     
-    # Format current block with primary classifications
-    context_parts = []
-    context_parts.append("\n=== CURRENT SPEAKER BLOCK WITH PRIMARY CLASSIFICATIONS ===")
+    # Extract speaker and section info
+    first_record = sorted_records[0]
+    # Fix field name mismatch: Stage 3 uses 'speaker', not 'speaker_name'
+    speaker_name = first_record.get("speaker", first_record.get("speaker_name", "Unknown"))
+    speaker_role = ""  # Could be extracted from speaker name if formatted
+    section_name = first_record.get("section_name", "Unknown")
     
-    for record in current_block_paragraphs:
-        para_idx = record["paragraph_index"]
-        content = record["paragraph_content"]
-        primary_id = record.get("primary_classification", 0)
-        primary_name = CATEGORY_REGISTRY[primary_id]["name"]
+    log_console(f"Processing speaker block #{speaker_block_number} - {speaker_name} ({len(sorted_records)} paragraphs)")
+    
+    # ========== SINGLE-PASS CLASSIFICATION ==========
+    try:
+        # Build prompt for single-pass classification
+        categories_list = build_numbered_category_list()
+        # Reduce context to last 2 blocks
+        previous_context = format_previous_speaker_blocks_with_classifications(previous_blocks[-2:] if len(previous_blocks) > 2 else previous_blocks)
+        current_block = format_current_speaker_block(sorted_records)
         
-        context_parts.append(f"\nP{para_idx}: {content}")
-        context_parts.append(f"  Primary Classification: {primary_id} ({primary_name})")
-    
-    current_block_with_primary = "\n".join(context_parts)
-    previous_context = format_previous_speaker_blocks_with_classifications(previous_blocks)
-    
-    return f"""You are a financial analyst specializing in earnings call transcript classification for major financial institutions.
+        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification for major financial institutions.
 
 <document_context>
 You are analyzing an earnings call transcript with the following context:
-- Institution: {bank_name}
+- Institution: {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}
 - Document Type: Quarterly Earnings Call Transcript
-- Fiscal Period: {fiscal_quarter} {fiscal_year}
-- Section: {section_type}
+- Fiscal Period: {transcript_info.get("fiscal_quarter", "Q1")} {transcript_info.get("fiscal_year", 2024)}
+- Section: {section_name}
 - Current Speaker: {speaker_name}, {speaker_role if speaker_role else 'Role Unknown'}
 - Speaker Block: #{speaker_block_number} of {total_speaker_blocks}
 </document_context>
 
 <task_description>
-You are performing SECONDARY classification for a retrieval system. Secondary categories ensure COMPREHENSIVE coverage so no relevant content is missed.
-For each paragraph, identify ALL OTHER categories that apply beyond the primary. Be EXHAUSTIVE - these act as a safety net for retrieval.
-When users search for any of these secondary topics, this content will still be found (though not prioritized like primary matches).
+You are performing comprehensive classification for a retrieval system. 
+Assign ALL applicable category IDs to this entire speaker block.
+All paragraphs in this speaker block will receive the same classification list.
+Include both the main topic and any secondary topics mentioned or referenced.
 </task_description>
 
 <retrieval_context>
-Secondary classifications serve as comprehensive coverage:
-- They catch content that MENTIONS a topic even if it's not the MAIN topic
-- Users searching for any secondary category will still find this content
-- This prevents relevant content from being missed in searches
-- Think: "What other topics might someone search for where this content would be relevant?"
-Example: A paragraph mainly about revenue (primary) that mentions margin pressure would have "Margins" as secondary
+This classification enables a search system where:
+- Users query for specific financial topics (e.g., "show me discussions about margins")
+- Content matching ANY of the assigned categories will be found
+- Multiple categories ensure comprehensive coverage
+- The goal is complete retrieval of all relevant financial insights
 </retrieval_context>
 
 <classification_guidelines>
-1. Be COMPREHENSIVE - include ALL categories that have ANY relevance to the content
-2. Include categories for topics that are mentioned, referenced, or implied
-3. Consider related topics that users might search for to find this content
-4. Include cross-cutting themes (e.g., ESG aspects of a revenue discussion)
-5. Do NOT include the primary category in secondary classifications
-6. Return empty list [] ONLY if absolutely no other categories apply
-7. When in doubt, include the category - better to over-include than miss relevant content
+1. Assign ALL applicable categories for this speaker block
+2. Include the main topic AND all secondary topics mentioned or referenced
+3. Be comprehensive - include any category that has relevance to the content
+4. Consider the context from the last 2 speaker blocks when classifying
+5. For {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}, be aware of their specific terminology and reporting structure
+6. Only use category 0 (Non-Relevant) alone for pure procedural content with NO financial information
+7. If content has ANY financial or business relevance, include all applicable categories
 8. Think broadly about what searches should surface this content
 </classification_guidelines>
 
@@ -1121,232 +1214,40 @@ Example: A paragraph mainly about revenue (primary) that mentions margin pressur
 </previous_context>
 
 <current_task>
-Identify SECONDARY category IDs for each paragraph (if any) beyond their primary classification.
-{current_block_with_primary}
+Classify the entire speaker block with ALL applicable category IDs (0-22).
+All paragraphs in this block will receive the same classification list.
+{current_block}
 </current_task>
 
 <response_format>
-Use the classify_speaker_block_secondary function to provide secondary category IDs for each paragraph.
-Return empty list [] for paragraphs with no relevant secondary categories.
+Use the classify_speaker_block function to provide ALL applicable category IDs for this speaker block.
 </response_format>"""
-
-
-def create_primary_classification_tools() -> List[Dict]:
-    """Function calling schema for primary classification."""
-    
-    return [{
-        "type": "function",
-        "function": {
-            "name": "classify_speaker_block_primary",
-            "description": "Assign primary category ID to each paragraph in the speaker block",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "classifications": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "paragraph_index": {
-                                    "type": "integer",
-                                    "description": "Paragraph index within speaker block (1, 2, 3, etc.)"
-                                },
-                                "primary_category_id": {
+        
+        response = llm_client.chat.completions.create(
+            model=config["stage_06_llm_classification"]["llm_config"]["model"],
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Please classify this speaker block with ALL applicable categories."}
+            ],
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "classify_speaker_block",
+                    "description": "Assign ALL applicable category IDs to the speaker block",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "category_ids": {
+                                "type": "array",
+                                "items": {
                                     "type": "integer",
                                     "minimum": 0,
-                                    "maximum": 22,
-                                    "description": "Primary category ID (0-22)"
-                                }
-                            },
-                            "required": ["paragraph_index", "primary_category_id"]
-                        },
-                        "description": "Classification for each paragraph"
-                    }
-                },
-                "required": ["classifications"]
-            }
-        }
-    }]
-
-
-def create_secondary_classification_tools() -> List[Dict]:
-    """Function calling schema for secondary classification."""
-    
-    return [{
-        "type": "function",
-        "function": {
-            "name": "classify_speaker_block_secondary",
-            "description": "Assign secondary category IDs to each paragraph in the speaker block",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "classifications": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "paragraph_index": {
-                                    "type": "integer",
-                                    "description": "Paragraph index within speaker block (1, 2, 3, etc.)"
+                                    "maximum": 22
                                 },
-                                "secondary_category_ids": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "integer",
-                                        "minimum": 0,
-                                        "maximum": 22
-                                    },
-                                    "description": "List of secondary category IDs (can be empty)"
-                                }
-                            },
-                            "required": ["paragraph_index", "secondary_category_ids"]
-                        },
-                        "description": "Secondary classifications for each paragraph"
-                    }
-                },
-                "required": ["classifications"]
-            }
-        }
-    }]
-
-
-def process_qa_conversation_two_pass(
-    qa_conversation_records: List[Dict],
-    transcript_info: Dict[str, Any],
-    qa_group_id: int,
-    total_qa_groups: int,
-    previous_conversations: List[Dict],
-    enhanced_error_logger: EnhancedErrorLogger
-) -> List[Dict]:
-    """Process Q&A conversation with speaker-block-level classification (same as MD approach)."""
-    global llm_client, config
-    
-    # Group records by speaker blocks within the Q&A conversation
-    qa_speaker_blocks = defaultdict(list)
-    for record in sorted(qa_conversation_records, key=lambda x: x["paragraph_id"]):
-        qa_speaker_blocks[record["speaker_block_id"]].append(record)
-    
-    # Create indexed speaker blocks for classification
-    indexed_speaker_blocks = []
-    all_records_with_sb_index = []
-    
-    for sb_idx, (speaker_block_id, block_records) in enumerate(sorted(qa_speaker_blocks.items()), start=1):
-        speaker_name = block_records[0].get("speaker", block_records[0].get("speaker_name", "Unknown"))
-        
-        # Create speaker block summary for prompt
-        speaker_block_text = []
-        for para in block_records:
-            content = para.get("paragraph_content", para.get("content", ""))
-            speaker_block_text.append(content)
-        
-        indexed_speaker_blocks.append({
-            "speaker_block_index": sb_idx,
-            "speaker_block_id": speaker_block_id,
-            "speaker": speaker_name,
-            "paragraph_count": len(block_records),
-            "content": " ".join(speaker_block_text),
-            "records": block_records  # Keep original records for later
-        })
-        
-        # Mark all records in this block with their speaker block index
-        for record in block_records:
-            record_copy = record.copy()
-            record_copy["speaker_block_index"] = sb_idx
-            all_records_with_sb_index.append(record_copy)
-    
-    log_console(f"Processing Q&A group {qa_group_id} with {len(indexed_speaker_blocks)} speaker blocks")
-    
-    # Format the conversation showing speaker blocks
-    conversation_text = []
-    for sb in indexed_speaker_blocks:
-        conversation_text.append(f"[Speaker Block {sb['speaker_block_index']} - {sb['speaker']} - {sb['paragraph_count']} paragraphs]")
-        conversation_text.append(sb['content'])
-        conversation_text.append("")  # blank line between blocks
-    
-    full_conversation = "\n".join(conversation_text)
-    
-    # ========== PASS 1: PRIMARY CLASSIFICATION (One per speaker block) ==========
-    try:
-        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification for a retrieval system.
-
-<document_context>
-Institution: {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}
-Fiscal Period: {transcript_info.get("fiscal_quarter", "Q1")} {transcript_info.get("fiscal_year", 2024)}
-Section: Q&A Conversation
-Q&A Group: {qa_group_id} of {total_qa_groups}
-Total Speaker Blocks in this Q&A: {len(indexed_speaker_blocks)}
-</document_context>
-
-<task_description>
-You are performing PRIMARY classification at SPEAKER BLOCK level for a Q&A conversation.
-Assign exactly ONE primary category to EACH speaker block (SB1, SB2, etc.) that best captures its main topic.
-Each speaker block gets its own classification based on what that specific speaker is discussing.
-The question context informs answer classifications, but each block is classified independently.
-</task_description>
-
-<retrieval_context>
-This enables granular retrieval within Q&A conversations:
-- Question blocks are classified based on what's being asked
-- Each answer block is classified based on what aspect is being addressed
-- Users searching for specific topics will find the relevant parts of Q&A exchanges
-- Primary categories determine priority ranking in search results
-</retrieval_context>
-
-<classification_guidelines>
-1. Classify EACH speaker block independently with its most relevant category
-2. Question blocks: classify based on what the analyst is asking about
-3. Answer blocks: classify based on what management is discussing in that specific block
-4. Consider the question context when classifying answers, but focus on the block's content
-5. Speaker blocks from the same speaker may have different classifications if topics shift
-</classification_guidelines>
-
-<financial_categories>
-{build_numbered_category_list()}
-</financial_categories>
-
-<conversation>
-{full_conversation}
-</conversation>
-
-Use the classify_qa_speaker_blocks_primary function to assign ONE primary category ID to EACH speaker block."""
-
-        response = llm_client.chat.completions.create(
-            model=config["stage_06_llm_classification"]["llm_config"]["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Please classify each speaker block with its primary category."}
-            ],
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "classify_qa_speaker_blocks_primary",
-                    "description": "Assign primary category to each speaker block in Q&A",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "classifications": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "speaker_block_index": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "description": "Speaker block index (1, 2, 3, etc.)"
-                                        },
-                                        "primary_category_id": {
-                                            "type": "integer",
-                                            "minimum": 0,
-                                            "maximum": 22,
-                                            "description": "Primary category ID for this speaker block"
-                                        }
-                                    },
-                                    "required": ["speaker_block_index", "primary_category_id"]
-                                },
-                                "description": "Primary classification for each speaker block"
+                                "description": "ALL applicable category IDs for this speaker block (0-22)"
                             }
                         },
-                        "required": ["classifications"]
+                        "required": ["category_ids"]
                     }
                 }
             }],
@@ -1355,25 +1256,18 @@ Use the classify_qa_speaker_blocks_primary function to assign ONE primary catego
             max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
         )
         
-        # Parse primary classifications for each speaker block
+        # Parse classifications
+        classification_ids = []
         if response.choices[0].message.tool_calls:
             tool_call = response.choices[0].message.tool_calls[0]
             result = json.loads(tool_call.function.arguments)
             
-            # Apply classifications to each speaker block
-            for classification in result["classifications"]:
-                sb_idx = classification["speaker_block_index"]
-                primary_id = classification["primary_category_id"]
-                
-                # Validate category ID
-                if primary_id not in CATEGORY_REGISTRY:
-                    log_console(f"Invalid category ID {primary_id} for SB{sb_idx}, defaulting to 0", "WARNING")
-                    primary_id = 0
-                
-                # Apply to all records in this speaker block
-                for record in all_records_with_sb_index:
-                    if record.get("speaker_block_index") == sb_idx:
-                        record["primary_classification"] = primary_id
+            # Validate category IDs
+            for cat_id in result.get("category_ids", []):
+                if cat_id in CATEGORY_REGISTRY:
+                    classification_ids.append(cat_id)
+                else:
+                    log_console(f"Invalid category ID {cat_id}, skipping", "WARNING")
         
         # Track costs
         if hasattr(response, 'usage') and response.usage:
@@ -1381,415 +1275,34 @@ Use the classify_qa_speaker_blocks_primary function to assign ONE primary catego
             enhanced_error_logger.accumulate_costs({
                 "total_tokens": response.usage.total_tokens,
                 "cost": cost_info
-            }, pass_type="qa_primary")
+            })
+        
+        # If no categories assigned or only 0, use fallback
+        if not classification_ids:
+            classification_ids = [0]
+            log_console(f"No categories assigned, using fallback category 0", "WARNING")
         
     except Exception as e:
-        error_msg = f"Q&A primary classification failed for group {qa_group_id}: {e}"
-        log_error(error_msg, "qa_classification", {"qa_group": qa_group_id, "error": str(e)})
+        error_msg = f"Classification failed for speaker block: {e}"
+        log_error(error_msg, "classification", {"speaker": speaker_name, "error": str(e)})
         enhanced_error_logger.log_classification_error(
             transcript_info.get("ticker", "unknown"),
-            "qa_primary",
+            "single_pass",
             error_msg
         )
         
-        # Fallback to category 0 for all records
-        log_console(f"Applying fallback category 0 to Q&A group {qa_group_id}", "WARNING")
-        for record in all_records_with_sb_index:
-            record["primary_classification"] = 0
+        # Fallback to category 0
+        classification_ids = [0]
+        log_console(f"Applying fallback category 0 due to classification error", "WARNING")
     
-    # ========== PASS 2: SECONDARY CLASSIFICATION (Comprehensive per speaker block) ==========
-    try:
-        # Format speaker blocks with their primary classifications for context
-        blocks_with_primary = []
-        for sb in indexed_speaker_blocks:
-            sb_idx = sb["speaker_block_index"]
-            # Find primary classification for this block
-            primary_id = 0
-            for record in all_records_with_sb_index:
-                if record.get("speaker_block_index") == sb_idx:
-                    primary_id = record.get("primary_classification", 0)
-                    break
-            
-            blocks_with_primary.append(
-                f"[Speaker Block {sb_idx} - {sb['speaker']} - Primary: {CATEGORY_REGISTRY[primary_id]['name']}]\n{sb['content']}"
-            )
-        
-        conversation_with_primary = "\n\n".join(blocks_with_primary)
-        
-        system_prompt = f"""You are a financial analyst specializing in earnings call transcript classification for a retrieval system.
-
-<document_context>
-Institution: {transcript_info.get("company_name", transcript_info.get("ticker", "Unknown"))}
-Fiscal Period: {transcript_info.get("fiscal_quarter", "Q1")} {transcript_info.get("fiscal_year", 2024)}
-Section: Q&A Conversation
-Speaker Blocks: {len(indexed_speaker_blocks)}
-</document_context>
-
-<task_description>
-You are performing SECONDARY classification at SPEAKER BLOCK level for comprehensive retrieval coverage.
-Each speaker block already has a primary classification shown.
-Now identify ALL OTHER categories that apply to EACH speaker block.
-Be EXHAUSTIVE - these secondary categories ensure users can find relevant content through multiple search paths.
-</task_description>
-
-<retrieval_context>
-Secondary classifications provide comprehensive safety net for retrieval:
-- Include ALL topics mentioned, referenced, or implied in each block
-- Users searching for ANY of these topics should find the relevant blocks
-- Consider cross-references between question and answer blocks
-- Think: "What other searches should surface each speaker block?"
-Example: An answer block primarily about margins that mentions cost pressures, efficiency programs, and guidance
-         would have ALL those as secondary categories
-</retrieval_context>
-
-<classification_guidelines>
-1. Be COMPREHENSIVE for each speaker block - include ALL relevant categories
-2. Do NOT include the primary category as secondary
-3. Return empty list [] only if absolutely no other categories apply
-4. Consider what each speaker block mentions even briefly
-5. Include related topics that users might search for
-</classification_guidelines>
-
-<financial_categories>
-{build_numbered_category_list()}
-</financial_categories>
-
-<conversation_with_primary>
-{conversation_with_primary}
-</conversation_with_primary>
-
-Use the classify_qa_speaker_blocks_secondary function to identify ALL additional categories for EACH speaker block."""
-
-        response = llm_client.chat.completions.create(
-            model=config["stage_06_llm_classification"]["llm_config"]["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Please identify secondary categories for each speaker block."}
-            ],
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "classify_qa_speaker_blocks_secondary",
-                    "description": "Assign secondary categories to each speaker block",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "classifications": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "speaker_block_index": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "description": "Speaker block index (1, 2, 3, etc.)"
-                                        },
-                                        "secondary_category_ids": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "integer",
-                                                "minimum": 0,
-                                                "maximum": 22
-                                            },
-                                            "description": "List of secondary category IDs (can be empty)"
-                                        }
-                                    },
-                                    "required": ["speaker_block_index", "secondary_category_ids"]
-                                },
-                                "description": "Secondary classifications for each speaker block"
-                            }
-                        },
-                        "required": ["classifications"]
-                    }
-                }
-            }],
-            tool_choice="required",
-            temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
-            max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
-        )
-        
-        # Parse secondary classifications for each speaker block
-        if response.choices[0].message.tool_calls:
-            tool_call = response.choices[0].message.tool_calls[0]
-            result = json.loads(tool_call.function.arguments)
-            
-            # Apply secondary classifications to each speaker block
-            for classification in result["classifications"]:
-                sb_idx = classification["speaker_block_index"]
-                secondary_ids = classification["secondary_category_ids"]
-                
-                # Get primary for this block to filter out
-                block_primary = 0
-                for record in all_records_with_sb_index:
-                    if record.get("speaker_block_index") == sb_idx:
-                        block_primary = record.get("primary_classification", 0)
-                        break
-                
-                # Validate and filter secondary IDs
-                valid_secondary = []
-                for sid in secondary_ids:
-                    if sid in CATEGORY_REGISTRY and sid != block_primary:
-                        valid_secondary.append(sid)
-                    elif sid not in CATEGORY_REGISTRY:
-                        log_console(f"Invalid secondary category ID {sid} for SB{sb_idx}, skipping", "WARNING")
-                
-                # Apply to all records in this speaker block
-                for record in all_records_with_sb_index:
-                    if record.get("speaker_block_index") == sb_idx:
-                        record["secondary_classifications"] = valid_secondary
-        
-        # Track costs
-        if hasattr(response, 'usage') and response.usage:
-            cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
-            enhanced_error_logger.accumulate_costs({
-                "total_tokens": response.usage.total_tokens,
-                "cost": cost_info
-            }, pass_type="qa_secondary")
-        
-    except Exception as e:
-        error_msg = f"Q&A secondary classification failed for group {qa_group_id}: {e}"
-        log_error(error_msg, "qa_secondary_classification", {"qa_group": qa_group_id, "error": str(e)})
-        # Secondary classification failure is not critical - keep primary
-        for record in all_records_with_sb_index:
-            record["secondary_classifications"] = []
+    # Apply same classifications to all paragraphs in the speaker block
+    classification_names = [CATEGORY_REGISTRY[cid]["name"] for cid in classification_ids]
     
-    # ========== VALIDATION: Fix Non-Relevant primary with secondary categories ==========
-    # Check each record for invalid primary with secondary
-    for record in all_records_with_sb_index:
-        primary_id = record.get("primary_classification", 0)
-        secondary_ids = record.get("secondary_classifications", [])
-        
-        if primary_id == 0 and secondary_ids:
-            # Log the issue
-            sb_idx = record.get("speaker_block_index", "?")
-            log_console(f"WARNING: Q&A SB{sb_idx} has Non-Relevant primary but {len(secondary_ids)} secondary categories", "WARNING")
-            log_console(f"  Promoting first secondary to primary: {CATEGORY_REGISTRY[secondary_ids[0]]['name']}", "WARNING")
-            
-            # Promote first secondary to primary
-            record["primary_classification"] = secondary_ids[0]
-            record["secondary_classifications"] = secondary_ids[1:]
+    for record in sorted_records:
+        record["classification_ids"] = classification_ids
+        record["classification_names"] = classification_names
     
-    # Map IDs to names for output and keep IDs as well - SAME FORMAT AS MD SPEAKER BLOCKS
-    for record in all_records_with_sb_index:
-        primary_id = record.get("primary_classification", 0)
-        record["primary_category_id"] = primary_id
-        record["primary_category_name"] = CATEGORY_REGISTRY[primary_id]["name"]
-        
-        secondary_ids = record.get("secondary_classifications", [])
-        record["secondary_category_ids"] = secondary_ids
-        record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
-        
-        # Clean up temporary fields to match MD output
-        fields_to_remove = ["speaker_block_index", "primary_classification", "secondary_classifications"]
-        for field in fields_to_remove:
-            record.pop(field, None)
-    
-    return all_records_with_sb_index
-
-
-def process_speaker_block_two_pass(
-    speaker_block_records: List[Dict],
-    transcript_info: Dict[str, Any],
-    speaker_block_number: int,
-    total_speaker_blocks: int,
-    previous_blocks: List[Dict],
-    enhanced_error_logger: EnhancedErrorLogger
-) -> List[Dict]:
-    """Process a speaker block with two-pass classification."""
-    global llm_client, config
-    
-    # Index paragraphs
-    indexed_records = index_speaker_block_paragraphs(speaker_block_records)
-    
-    # Extract speaker and section info
-    first_record = indexed_records[0]
-    # Fix field name mismatch: Stage 3 uses 'speaker', not 'speaker_name'
-    speaker_name = first_record.get("speaker", first_record.get("speaker_name", "Unknown"))
-    speaker_role = ""  # Could be extracted from speaker name if formatted
-    section_name = first_record.get("section_name", "Unknown")
-    
-    log_console(f"Processing speaker block #{speaker_block_number} - {speaker_name} ({len(indexed_records)} paragraphs)")
-    
-    # ========== PASS 1: PRIMARY CLASSIFICATION ==========
-    try:
-        system_prompt = create_primary_classification_prompt(
-            # Use ticker as fallback for company_name since Stage 3 doesn't provide it
-            bank_name=transcript_info.get("company_name", transcript_info.get("ticker", "Unknown")),
-            fiscal_year=transcript_info.get("fiscal_year", 2024),
-            fiscal_quarter=transcript_info.get("fiscal_quarter", "Q1"),
-            section_type=section_name,
-            speaker_name=speaker_name,
-            speaker_role=speaker_role,
-            speaker_block_number=speaker_block_number,
-            total_speaker_blocks=total_speaker_blocks,
-            previous_blocks=previous_blocks,
-            current_block_paragraphs=indexed_records
-        )
-        
-        response = llm_client.chat.completions.create(
-            model=config["stage_06_llm_classification"]["llm_config"]["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Please classify each paragraph with its primary category."}
-            ],
-            tools=create_primary_classification_tools(),
-            tool_choice="required",
-            temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
-            max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
-        )
-        
-        # Parse primary classifications
-        if response.choices[0].message.tool_calls:
-            tool_call = response.choices[0].message.tool_calls[0]
-            result = json.loads(tool_call.function.arguments)
-            
-            # Apply primary classifications
-            for classification in result["classifications"]:
-                para_idx = classification["paragraph_index"]
-                primary_id = classification["primary_category_id"]
-                
-                # Validate category ID
-                if primary_id not in CATEGORY_REGISTRY:
-                    log_console(f"Invalid category ID {primary_id}, defaulting to 0", "WARNING")
-                    primary_id = 0
-                
-                # Find and update the record
-                for record in indexed_records:
-                    if record["paragraph_index"] == para_idx:
-                        record["primary_classification"] = primary_id
-                        break
-        
-        # Track costs
-        if hasattr(response, 'usage') and response.usage:
-            cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
-            enhanced_error_logger.accumulate_costs({
-                "total_tokens": response.usage.total_tokens,
-                "cost": cost_info
-            }, pass_type="primary")
-        
-    except Exception as e:
-        error_msg = f"Primary classification failed for speaker block: {e}"
-        log_error(error_msg, "primary_classification", {"speaker": speaker_name, "error": str(e)})
-        enhanced_error_logger.log_classification_error(
-            transcript_info.get("ticker", "unknown"),
-            "primary",
-            error_msg
-        )
-        
-        # Fallback to category 0 for all
-        log_console(f"Applying fallback category 0 to {len(indexed_records)} records due to classification error", "WARNING")
-        for record in indexed_records:
-            record["primary_classification"] = 0
-    
-    # ========== PASS 2: SECONDARY CLASSIFICATION ==========
-    try:
-        system_prompt = create_secondary_classification_prompt(
-            # Use ticker as fallback for company_name since Stage 3 doesn't provide it
-            bank_name=transcript_info.get("company_name", transcript_info.get("ticker", "Unknown")),
-            fiscal_year=transcript_info.get("fiscal_year", 2024),
-            fiscal_quarter=transcript_info.get("fiscal_quarter", "Q1"),
-            section_type=section_name,
-            speaker_name=speaker_name,
-            speaker_role=speaker_role,
-            speaker_block_number=speaker_block_number,
-            total_speaker_blocks=total_speaker_blocks,
-            previous_blocks=previous_blocks,
-            current_block_paragraphs=indexed_records
-        )
-        
-        response = llm_client.chat.completions.create(
-            model=config["stage_06_llm_classification"]["llm_config"]["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Please identify any secondary categories for each paragraph."}
-            ],
-            tools=create_secondary_classification_tools(),
-            tool_choice="required",
-            temperature=config["stage_06_llm_classification"]["llm_config"]["temperature"],
-            max_tokens=config["stage_06_llm_classification"]["llm_config"]["max_tokens"]
-        )
-        
-        # Parse secondary classifications
-        if response.choices[0].message.tool_calls:
-            tool_call = response.choices[0].message.tool_calls[0]
-            result = json.loads(tool_call.function.arguments)
-            
-            # Apply secondary classifications
-            for classification in result["classifications"]:
-                para_idx = classification["paragraph_index"]
-                secondary_ids = classification["secondary_category_ids"]
-                
-                # Validate and filter secondary IDs
-                valid_secondary_ids = []
-                for sec_id in secondary_ids:
-                    if sec_id in CATEGORY_REGISTRY:
-                        valid_secondary_ids.append(sec_id)
-                    else:
-                        log_console(f"Invalid secondary category ID {sec_id}, skipping", "WARNING")
-                
-                # Find and update the record
-                for record in indexed_records:
-                    if record["paragraph_index"] == para_idx:
-                        # Don't include primary in secondary
-                        primary = record.get("primary_classification", 0)
-                        filtered_secondary = [sid for sid in valid_secondary_ids if sid != primary]
-                        record["secondary_classifications"] = filtered_secondary
-                        break
-        
-        # Track costs
-        if hasattr(response, 'usage') and response.usage:
-            cost_info = calculate_token_cost(response.usage.prompt_tokens, response.usage.completion_tokens)
-            enhanced_error_logger.accumulate_costs({
-                "total_tokens": response.usage.total_tokens,
-                "cost": cost_info
-            }, pass_type="secondary")
-        
-    except Exception as e:
-        error_msg = f"Secondary classification failed for speaker block: {e}"
-        log_error(error_msg, "secondary_classification", {"speaker": speaker_name, "error": str(e)})
-        enhanced_error_logger.log_classification_error(
-            transcript_info.get("ticker", "unknown"),
-            "secondary",
-            error_msg
-        )
-        
-        # No secondary classifications on error
-        for record in indexed_records:
-            record["secondary_classifications"] = []
-    
-    # ========== VALIDATION: Fix Non-Relevant primary with secondary categories ==========
-    # If primary is 0 (Non-Relevant) but secondary categories exist, promote first secondary to primary
-    for record in indexed_records:
-        primary_id = record.get("primary_classification", 0)
-        secondary_ids = record.get("secondary_classifications", [])
-        
-        if primary_id == 0 and secondary_ids:
-            # Log the issue
-            log_console(f"WARNING: P{record['paragraph_index']} has Non-Relevant primary but {len(secondary_ids)} secondary categories", "WARNING")
-            log_console(f"  Promoting first secondary category to primary: {CATEGORY_REGISTRY[secondary_ids[0]]['name']}", "WARNING")
-            
-            # Promote first secondary to primary
-            record["primary_classification"] = secondary_ids[0]
-            # Remove the promoted category from secondary list
-            record["secondary_classifications"] = secondary_ids[1:]
-    
-    # Map IDs to names for output and keep IDs as well
-    for record in indexed_records:
-        primary_id = record.get("primary_classification", 0)
-        record["primary_category_id"] = primary_id
-        record["primary_category_name"] = CATEGORY_REGISTRY[primary_id]["name"]
-        
-        secondary_ids = record.get("secondary_classifications", [])
-        record["secondary_category_ids"] = secondary_ids
-        record["secondary_category_names"] = [CATEGORY_REGISTRY[sid]["name"] for sid in secondary_ids]
-        
-        # DON'T clean up paragraph_index yet - needed for previous_blocks context
-        # Clean up only the internal classification fields
-        fields_to_remove = ["primary_classification", "secondary_classifications"]
-        for field in fields_to_remove:
-            record.pop(field, None)
-    
-    return indexed_records
+    return sorted_records
 
 
 def process_transcript_v2(
@@ -1851,13 +1364,13 @@ def process_transcript_v2(
             total_md_blocks = len(md_speaker_blocks)
             
             for block_num, (block_id, block_records) in enumerate(md_speaker_blocks.items(), start=1):
-                # Process with two-pass classification
-                classified_block = process_speaker_block_two_pass(
+                # Process with single-pass classification
+                classified_block = process_speaker_block_single_pass(
                     block_records,
                     transcript_info,
                     block_num,
                     total_md_blocks,
-                    previous_md_blocks[-5:],  # Last 5 blocks for context
+                    previous_md_blocks[-2:],  # Last 2 blocks for context
                     enhanced_error_logger
                 )
                 
@@ -1881,12 +1394,11 @@ def process_transcript_v2(
             sorted_qa_records = sorted(qa_records, key=lambda x: x["paragraph_id"])
             
             # Process the entire Q&A conversation together
-            classified_conversation = process_qa_conversation_two_pass(
+            classified_conversation = process_qa_conversation_single_pass(
                 sorted_qa_records,
                 transcript_info,
                 qa_group_id,
                 len(transcript_data["qa_groups"]),
-                previous_qa_blocks[-1:] if previous_qa_blocks else [],
                 enhanced_error_logger
             )
             
@@ -1910,7 +1422,7 @@ def process_transcript_v2(
             
             for block_records in unpaired_speaker_blocks.values():
                 # Process as speaker blocks (fallback)
-                classified_block = process_speaker_block_two_pass(
+                classified_block = process_speaker_block_single_pass(
                     block_records,
                     transcript_info,
                     1,
@@ -1919,10 +1431,6 @@ def process_transcript_v2(
                     enhanced_error_logger
                 )
                 classified_records.extend(classified_block)
-        
-        # Final cleanup - remove paragraph_index from all records before returning
-        for record in classified_records:
-            record.pop("paragraph_index", None)
         
         return classified_records, True
         
@@ -1941,7 +1449,7 @@ def main():
     logger = setup_logging()
     log_console("=" * 60)
     log_console("Stage 6: LLM-Based Financial Content Classification")
-    log_console("Two-pass classification with sliding context windows")
+    log_console("Single-pass classification with all applicable categories")
     log_console("=" * 60)
     
     # Stage tracking
@@ -2145,7 +1653,7 @@ def main():
         
         stage_summary = {
             "status": "completed" if not failed_transcripts else "completed_with_errors",
-            "version": "2.0",
+            "version": "3.0",
             "start_time": start_time.isoformat(),
             "end_time": end_time.isoformat(),
             "processing_time_seconds": processing_time.total_seconds(),
@@ -2153,8 +1661,6 @@ def main():
             "transcripts_failed": len(failed_transcripts),
             "total_cost": enhanced_error_logger.total_cost,
             "total_tokens": enhanced_error_logger.total_tokens,
-            "primary_pass_tokens": enhanced_error_logger.primary_pass_tokens,
-            "secondary_pass_tokens": enhanced_error_logger.secondary_pass_tokens,
             "errors": {
                 "classification_errors": len(enhanced_error_logger.classification_errors),
                 "authentication_errors": len(enhanced_error_logger.authentication_errors),
@@ -2173,8 +1679,6 @@ def main():
         log_console(f"Transcripts failed: {stage_summary['transcripts_failed']}")
         log_console(f"Total LLM cost: ${stage_summary['total_cost']:.4f}")
         log_console(f"Total tokens used: {stage_summary['total_tokens']:,}")
-        log_console(f"Primary pass tokens: {stage_summary['primary_pass_tokens']:,}")
-        log_console(f"Secondary pass tokens: {stage_summary['secondary_pass_tokens']:,}")
         
         # Save logs
         save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
