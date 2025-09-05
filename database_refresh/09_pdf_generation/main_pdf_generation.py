@@ -490,47 +490,53 @@ class TranscriptPDF:
     def _group_content_by_structure(self) -> Dict[str, Any]:
         """Group content by sections, speakers, and Q&A blocks."""
         grouped = {
-            'Management Discussion': defaultdict(list),
-            'Q&A': defaultdict(lambda: defaultdict(list))
+            'Management Discussion': OrderedDict(),
+            'Q&A': OrderedDict()
         }
         
         for record in self.transcript_data['records']:
             section = record.get('section_name', '')
             
-            # Match exact section names from Stage 8
+            # Match exact section names from Stage 7
             if section == 'MANAGEMENT DISCUSSION SECTION':
-                # Use 'speaker' field, not 'speaker_id'
-                speaker = record.get('speaker', 'Unknown')
                 # Group by speaker_block_id to keep blocks together
-                block_id = record.get('speaker_block_id', speaker)
+                block_id = record.get('speaker_block_id', 0)
+                if block_id not in grouped['Management Discussion']:
+                    grouped['Management Discussion'][block_id] = []
                 grouped['Management Discussion'][block_id].append(record)
             
             elif section == 'Q&A':
-                # Use qa_group_id from Stage 5/8
-                qa_group_id = record.get('qa_group_id', 'Unknown')
-                speaker = record.get('speaker', 'Unknown')
-                grouped['Q&A'][qa_group_id][speaker].append(record)
+                # Use qa_group_id from Stage 5/7
+                qa_group_id = record.get('qa_group_id', 0)
+                if qa_group_id not in grouped['Q&A']:
+                    grouped['Q&A'][qa_group_id] = OrderedDict()
+                
+                # Within each Q&A group, organize by speaker block
+                speaker_block_id = record.get('speaker_block_id', 0)
+                if speaker_block_id not in grouped['Q&A'][qa_group_id]:
+                    grouped['Q&A'][qa_group_id][speaker_block_id] = []
+                grouped['Q&A'][qa_group_id][speaker_block_id].append(record)
         
         return grouped
     
-    def _create_speaker_block(self, speaker: str, paragraphs: List[Dict]) -> List:
+    def _create_speaker_block(self, block_id: int, paragraphs: List[Dict]) -> List:
         """Create a speaker block with paragraphs."""
         elements = []
         
-        # Get actual speaker name from first record (speaker field from Stage 3)
+        # Get actual speaker name from first record
         if paragraphs:
-            actual_speaker = paragraphs[0].get('speaker', speaker)
+            speaker = paragraphs[0].get('speaker', f'Speaker {block_id}')
         else:
-            actual_speaker = speaker
+            return elements
         
         # Speaker name
-        speaker_para = Paragraph(actual_speaker, self.styles['Speaker'])
+        speaker_para = Paragraph(speaker, self.styles['Speaker'])
         
-        # Collect all paragraph content for this speaker
+        # Collect all paragraph content for this speaker block
         content_paras = []
         for para_data in paragraphs:
-            # Use chunk_content if available (from Stage 8), otherwise paragraph_content
-            content = para_data.get('chunk_content', para_data.get('paragraph_content', '')).strip()
+            # Use paragraph_content from Stage 7
+            content = para_data.get('paragraph_content', '').strip()
             if content:
                 # Clean and escape content for reportlab
                 content = content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
@@ -550,7 +556,7 @@ class TranscriptPDF:
         
         return elements
     
-    def _create_md_section(self, content: Dict[str, List]) -> List:
+    def _create_md_section(self, content: Dict[int, List]) -> List:
         """Create Management Discussion section."""
         elements = []
         self.current_section = "Management Discussion"
@@ -559,16 +565,18 @@ class TranscriptPDF:
         elements.append(Paragraph("Management Discussion", self.styles['SectionHeader']))
         elements.append(Spacer(1, 0.2*inch))
         
-        # Process each speaker in order
-        for speaker_id, paragraphs in content.items():
-            speaker_elements = self._create_speaker_block(speaker_id, paragraphs)
-            elements.extend(speaker_elements)
-            elements.append(Spacer(1, 0.1*inch))
+        # Process each speaker block in order (sorted by block_id)
+        for block_id in sorted(content.keys()):
+            paragraphs = content[block_id]
+            if paragraphs:
+                speaker_elements = self._create_speaker_block(block_id, paragraphs)
+                elements.extend(speaker_elements)
+                elements.append(Spacer(1, 0.1*inch))
         
         elements.append(PageBreak())
         return elements
     
-    def _create_qa_section(self, content: Dict[str, Dict[str, List]]) -> List:
+    def _create_qa_section(self, content: Dict[int, Dict[int, List]]) -> List:
         """Create Q&A section."""
         elements = []
         self.current_section = "Q&A"
@@ -577,24 +585,26 @@ class TranscriptPDF:
         elements.append(Paragraph("Questions & Answers", self.styles['SectionHeader']))
         elements.append(Spacer(1, 0.2*inch))
         
-        # Process each Q&A block
-        for qa_id in sorted(content.keys()):
-            qa_block = content[qa_id]
+        # Process each Q&A group in order
+        for qa_group_id in sorted(content.keys()):
+            qa_group = content[qa_group_id]
             
-            # Q&A block header
-            qa_header = Paragraph(f"Q&A Block {qa_id}", self.styles['QAHeader'])
+            # Q&A group header (conversation number)
+            qa_header = Paragraph(f"Q&A Conversation {qa_group_id}", self.styles['QAHeader'])
             qa_elements = [qa_header]
             
-            # Process speakers within Q&A block
-            for speaker_id, paragraphs in qa_block.items():
-                speaker_elements = self._create_speaker_block(speaker_id, paragraphs)
-                qa_elements.extend(speaker_elements)
+            # Process speaker blocks within Q&A group
+            for block_id in sorted(qa_group.keys()):
+                paragraphs = qa_group[block_id]
+                if paragraphs:
+                    speaker_elements = self._create_speaker_block(block_id, paragraphs)
+                    qa_elements.extend(speaker_elements)
             
-            # Try to keep Q&A blocks together if reasonable size
-            if len(qa_elements) <= 8:
+            # Try to keep Q&A conversations together if reasonable size
+            if len(qa_elements) <= 10:
                 elements.append(KeepTogether(qa_elements))
             else:
-                # Keep header with first speaker
+                # Keep header with first speaker block
                 elements.append(KeepTogether(qa_elements[:3]))
                 elements.extend(qa_elements[3:])
             
@@ -701,39 +711,34 @@ def process_transcript_to_pdf(conn: SMBConnection, transcript_file: str,
         return False
 
 
-def process_stage_08_output(conn: SMBConnection, error_logger: EnhancedErrorLogger):
-    """Process Stage 8 output to generate PDFs."""
+def process_stage_07_output(conn: SMBConnection, error_logger: EnhancedErrorLogger):
+    """Process Stage 7 output to generate PDFs."""
     global config
     
     try:
-        # Download Stage 8 output
+        # Download Stage 7 output (JSON format with paragraph-level data)
         input_path = config.get('input_data_path', 
-                               'Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.csv')
+                               'Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json')
         
-        log_console("Downloading Stage 8 output from NAS...")
-        stage_08_content = nas_download_file(conn, input_path)
+        log_console("Downloading Stage 7 output from NAS...")
+        stage_07_content = nas_download_file(conn, input_path)
         
-        if not stage_08_content:
-            raise Exception("Failed to download Stage 8 output")
+        if not stage_07_content:
+            raise Exception("Failed to download Stage 7 output")
         
-        # Parse the data based on format
-        if input_path.endswith('.csv'):
-            # Parse CSV
-            import csv
-            from io import StringIO
-            
-            csv_reader = csv.DictReader(StringIO(stage_08_content.decode('utf-8')))
-            all_records = list(csv_reader)
-            
-            # Convert embedding strings back to lists if needed
-            for record in all_records:
-                if 'embedding' in record and isinstance(record['embedding'], str):
-                    record['embedding'] = json.loads(record['embedding'])
-        else:
-            # Parse JSON
-            all_records = json.loads(stage_08_content)
+        # Parse JSON data
+        try:
+            all_records = json.loads(stage_07_content.decode('utf-8'))
+        except json.JSONDecodeError:
+            # Handle potentially unclosed JSON array from Stage 7
+            content_str = stage_07_content.decode('utf-8').strip()
+            if content_str.endswith(','):
+                content_str = content_str[:-1] + ']'
+            elif not content_str.endswith(']'):
+                content_str = content_str + ']'
+            all_records = json.loads(content_str)
         
-        log_console(f"Loaded {len(all_records)} records from Stage 8")
+        log_console(f"Loaded {len(all_records)} records from Stage 7")
         
         # Group records by transcript
         transcripts = defaultdict(list)
@@ -842,8 +847,8 @@ def main():
         # Load configuration from NAS
         nas_load_config(conn)
         
-        # Process Stage 8 output to generate PDFs
-        process_stage_08_output(conn, error_logger)
+        # Process Stage 7 output to generate PDFs
+        process_stage_07_output(conn, error_logger)
         
         # Print summary
         summary = error_logger.get_summary()

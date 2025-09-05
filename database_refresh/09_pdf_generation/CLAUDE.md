@@ -1,12 +1,12 @@
 # Stage 09: PDF Generation
 
 ## Overview
-This stage generates professionally formatted PDF documents from the processed earnings transcript data (Stage 8 output with embeddings). Each transcript is converted into a structured PDF with intelligent layout, smart paragraph placement, and comprehensive headers/footers.
+This stage generates professionally formatted PDF documents from the processed earnings transcript data (Stage 7 paragraph-level output with summaries). Each transcript is converted into a structured PDF with intelligent layout, smart paragraph placement, and comprehensive headers/footers.
 
-**Input**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.csv` (or `.json`)
+**Input**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json`
 **Output**: `Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_09_pdfs/*.pdf`
 
-Architecture follows Stage 8 patterns with NAS operations, error logging, and batch processing.
+Architecture follows Stage 7/8 patterns with NAS operations, error logging, and batch processing.
 
 ## Key Features
 - **Professional Layout**: Clean, structured PDF with title page and section breaks

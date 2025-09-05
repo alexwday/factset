@@ -179,8 +179,8 @@ stage_08_embeddings_generation:
 
 # Stage 09 specific settings (PDF Generation)
 stage_09_pdf_generation:
-  description: "Generate PDF documents from Stage 8 embeddings data"
-  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.csv"
+  description: "Generate PDF documents from Stage 7 paragraph-level data"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json"
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true

@@ -224,7 +224,7 @@ python main_embeddings_generation.py
 
 ### Stage 9: PDF Generation
 **Purpose**: Generate professionally formatted PDF documents from processed transcripts  
-**Input**: Stage 8 embeddings data  
+**Input**: Stage 7 paragraph-level JSON data with summaries  
 **Output**: PDF documents with structured layout and formatting  
 **Key Features**:
 - Professional layout with title page and section breaks
