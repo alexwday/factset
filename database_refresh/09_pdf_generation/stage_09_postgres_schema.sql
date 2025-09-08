@@ -1,5 +1,5 @@
 -- Stage 09: PDF Generation PostgreSQL Schema
--- This stage generates PDF documents from Stage 8 embeddings data
+-- This stage generates PDF documents from Stage 7 summarized content
 -- PDFs are stored on NAS, this schema tracks generation metadata
 
 -- Create schema if not exists
@@ -243,7 +243,7 @@ ON earnings_transcripts.stage_09_pdf_structure(pdf_metadata_id, section_name);
 
 -- Comments
 COMMENT ON TABLE earnings_transcripts.stage_09_pdf_metadata IS 
-'Tracks PDF generation metadata for earnings transcripts from Stage 8 embeddings data';
+'Tracks PDF generation metadata for earnings transcripts from Stage 7 summarized content';
 
 COMMENT ON TABLE earnings_transcripts.stage_09_pdf_structure IS 
 'Stores PDF content structure and layout information for generated documents';

@@ -82,7 +82,7 @@ python main_pdf_generation.py
 The script will:
 1. Connect to NAS using environment variables
 2. Load configuration from NAS
-3. Download Stage 8 output (CSV or JSON)
+3. Download Stage 7 output (JSON)
 4. Group records by transcript
 5. Generate PDF for each transcript
 6. Upload PDFs to NAS
@@ -93,8 +93,8 @@ Configuration is loaded from NAS at runtime from `config.yaml`:
 
 ```yaml
 stage_09_pdf_generation:
-  description: "Generate PDF documents from Stage 8 embeddings data"
-  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.csv"
+  description: "Generate PDF documents from Stage 7 summarized content"
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json"
   output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
@@ -304,8 +304,8 @@ To validate PDF generation:
 import os
 from pathlib import Path
 
-# List Stage 8 transcripts
-stage8_files = set(...)  # Load from Stage 8 output
+# List Stage 7 transcripts
+stage7_files = set(...)  # Load from Stage 7 output
 
 # List generated PDFs
 pdf_files = set(...)  # Load from stage_09_pdfs directory

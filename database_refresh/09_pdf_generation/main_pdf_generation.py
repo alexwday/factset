@@ -1,9 +1,9 @@
 """
 Stage 9: PDF Generation
-Processes Stage 8 embeddings content to create formatted PDF documents for each transcript.
+Processes Stage 7 summarized content to create formatted PDF documents for each transcript.
 Self-contained standalone script that loads config from NAS at runtime.
 
-Architecture based on Stage 8 pattern with PDF generation logic.
+Architecture based on Stage 7/8 patterns with PDF generation logic.
 Creates professional PDFs with smart paragraph placement and section formatting.
 """
 
@@ -177,7 +177,7 @@ def nas_create_connection() -> Optional[SMBConnection]:
     try:
         log_console("Connecting to NAS...")
         
-        # Get credentials from environment (matching Stage 8 pattern)
+        # Get credentials from environment (matching Stage 7/8 patterns)
         nas_username = os.getenv("NAS_USERNAME")
         nas_password = os.getenv("NAS_PASSWORD")
         nas_server_name = os.getenv("NAS_SERVER_NAME")
@@ -188,7 +188,7 @@ def nas_create_connection() -> Optional[SMBConnection]:
             log_error("NAS credentials not found in environment", "authentication")
             return None
         
-        # Create SMB connection (matching Stage 8 exactly)
+        # Create SMB connection (matching Stage 7/8 patterns)
         conn = SMBConnection(
             username=nas_username,
             password=nas_password,
@@ -310,7 +310,7 @@ def nas_load_config(conn: SMBConnection) -> Dict[str, Any]:
     """Load configuration from NAS."""
     global config
     
-    # Use CONFIG_PATH environment variable like Stage 8
+    # Use CONFIG_PATH environment variable like Stage 7/8
     config_path = os.getenv("CONFIG_PATH", "Finance Data and Analytics/DSA/Earnings Call Transcripts/config.yaml")
     log_console("Loading configuration from NAS...")
     
@@ -324,7 +324,7 @@ def nas_load_config(conn: SMBConnection) -> Dict[str, Any]:
         # Extract Stage 9 specific config
         stage_config = config_data.get("stage_09_pdf_generation", {})
         
-        # Store the full config (following Stage 8 pattern)
+        # Store the full config (following Stage 7/8 patterns)
         config.update(config_data)
         
         log_console("Configuration loaded successfully")
