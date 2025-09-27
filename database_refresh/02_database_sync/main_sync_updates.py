@@ -706,24 +706,51 @@ def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str,
 
 
 def load_master_database(nas_conn: SMBConnection) -> Optional[Dict[str, Any]]:
-    """Load existing master database or return None if it doesn't exist."""
-    
+    """Load existing master database (CSV format) or return None if it doesn't exist."""
+
     db_path = config["stage_02_database_sync"]["master_database_path"]
-    
+
     if nas_file_exists(nas_conn, db_path):
         log_execution("Loading existing master database", {"database_path": db_path})
         try:
             db_data = nas_download_file(nas_conn, db_path)
             if db_data:
-                database = json.loads(db_data.decode("utf-8"))
-                log_execution("Master database loaded successfully", 
-                             {"records_count": len(database.get("files", []))})
+                # Parse CSV format (matching Stage 8 output format)
+                import csv
+                import io
+
+                csv_content = io.StringIO(db_data.decode("utf-8"))
+                reader = csv.DictReader(csv_content)
+
+                # Extract unique files with their modification dates
+                files_dict = {}
+                record_count = 0
+
+                for row in reader:
+                    record_count += 1
+                    # Stage 8 uses 'filename' field (just the filename, not full path)
+                    filename = row.get("filename", "")
+                    date_modified = row.get("date_last_modified", "")
+
+                    # Store only the latest modification date for each file
+                    # Note: We store by filename only since that's what Stage 8 provides
+                    if filename and (filename not in files_dict or date_modified > files_dict[filename].get("date_last_modified", "")):
+                        files_dict[filename] = {
+                            "filename": filename,
+                            "date_last_modified": date_modified
+                        }
+
+                # Convert to expected format
+                database = {
+                    "files": list(files_dict.values())
+                }
+
+                log_execution("Master database loaded successfully",
+                             {"total_records": record_count, "unique_files": len(database["files"])})
                 return database
-        except json.JSONDecodeError as e:
-            log_error(f"Database corruption detected: {e}", "database_load", 
-                     {"database_path": db_path, "error": str(e)})
+
         except Exception as e:
-            log_error(f"Error loading database: {e}", "database_load", 
+            log_error(f"Error loading database: {e}", "database_load",
                      {"database_path": db_path, "error": str(e)})
 
     # No existing database found
@@ -732,34 +759,43 @@ def load_master_database(nas_conn: SMBConnection) -> Optional[Dict[str, Any]]:
 
 
 def database_to_comparison_format(database: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Convert database to comparison format (file_path -> record)."""
+    """Convert database to comparison format (filename -> record)."""
     comparison_data = {}
-    
+
     if database is not None:
         for record in database.get("files", []):
-            file_path = record.get("file_path", "")
-            if file_path:
-                comparison_data[file_path] = record
-    
+            # Use filename as key since that's what the master CSV contains
+            filename = record.get("filename", record.get("file_path", ""))
+            if filename:
+                # Extract just the filename if it's a full path
+                if '/' in filename:
+                    filename = filename.split('/')[-1]
+                comparison_data[filename] = record
+
     return comparison_data
 
 
 def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory: Dict[str, Dict[str, Any]]) -> Tuple[List[str], List[str]]:
-    """Detect changes between NAS and database inventories."""
-    
+    """Detect changes between NAS and database inventories.
+
+    Note: NAS inventory uses full paths as keys, database inventory uses filenames only.
+    """
+
     files_to_process = []
     files_to_remove = []
 
     # If no existing database, all NAS files go to processing
     if not database_inventory:
         files_to_process = list(nas_inventory.keys())
-        log_execution("No existing database - all NAS files marked for processing", 
+        log_execution("No existing database - all NAS files marked for processing",
                      {"total_files": len(files_to_process)})
         return files_to_process, files_to_remove
 
     # Check for new and modified files
     for file_path, nas_record in nas_inventory.items():
-        db_record = database_inventory.get(file_path)
+        # Extract filename from full path for comparison with database
+        filename = file_path.split('/')[-1] if '/' in file_path else file_path
+        db_record = database_inventory.get(filename)
 
         if not db_record:
             # New file
@@ -777,16 +813,25 @@ def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory:
                 log_execution(f"Modified file found: {file_path}")
 
     # Check for deleted files (in database but not on NAS)
-    for file_path in database_inventory.keys():
-        if file_path not in nas_inventory:
-            files_to_remove.append(file_path)
-            log_execution(f"Deleted file found: {file_path}")
+    # Build a set of filenames currently on NAS
+    nas_filenames = set()
+    for file_path in nas_inventory.keys():
+        filename = file_path.split('/')[-1] if '/' in file_path else file_path
+        nas_filenames.add(filename)
+
+    # Check each database entry
+    for filename in database_inventory.keys():
+        if filename not in nas_filenames:
+            # File no longer exists on NAS - need to find its full path for removal queue
+            # Since we don't have the full path, we'll use the filename
+            files_to_remove.append(filename)
+            log_execution(f"Deleted file found: {filename}")
 
     log_execution("Delta detection complete", {
         "files_to_process": len(files_to_process),
         "files_to_remove": len(files_to_remove)
     })
-    
+
     return files_to_process, files_to_remove
 
 

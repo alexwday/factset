@@ -53,7 +53,8 @@ make lint  # If available
 ```
 Stage 0: Historical Download → Stage 1: Daily Sync → Stage 2: Database Sync →
 Stage 3: Content Extraction → Stage 4: Structure Validation → Stage 5: Q&A Pairing →
-Stage 6: LLM Classification → Stage 7: LLM Summarization → Stage 8: Embeddings Generation
+Stage 6: LLM Classification → Stage 7: LLM Summarization → Stage 8: Embeddings Generation →
+Stage 9: Master Consolidation & Archive
 ```
 
 ## 📁 PROJECT STRUCTURE
@@ -68,6 +69,7 @@ database_refresh/
 ├── 06_llm_classification/     # LLM-based financial content classification
 ├── 07_llm_summarization/      # LLM-based content summarization
 ├── 08_embeddings_generation/  # Vector embeddings for semantic search/RAG
+├── 09_master_consolidation/   # Master database update and archive management
 ├── config.yaml                # Shared configuration file (on NAS)
 └── CLAUDE.md                  # This file
 ```
@@ -91,7 +93,7 @@ python main_*.py
 ### Pipeline Operations
 ```bash
 # Run complete pipeline (sequential execution)
-for stage in 00_download_historical 01_download_daily 02_database_sync 03_extract_content 04_validate_structure 05_qa_pairing 06_llm_classification 07_llm_summarization 08_embeddings_generation; do
+for stage in 00_download_historical 01_download_daily 02_database_sync 03_extract_content 04_validate_structure 05_qa_pairing 06_llm_classification 07_llm_summarization 08_embeddings_generation 09_master_consolidation; do
     echo "Running Stage: $stage"
     cd database_refresh/$stage
     python main_*.py
@@ -203,6 +205,12 @@ import json                      # Data serialization
 - **Key Features**: Intelligent chunking, tiktoken with fallback, 3072-dimensional vectors
 - **Output**: Enhanced records with embeddings, token counts, and chunk information
 - **Critical Logic**: Text chunking for >1000 tokens, OAuth refresh per transcript, incremental saving
+
+### Stage 9: Master Consolidation (09_master_consolidation)
+- **Purpose**: Consolidate processed records into master database and archive refresh folder
+- **Key Features**: Incremental master updates, deletion support, archive creation, memory-efficient streaming
+- **Output**: Updated master_embeddings.csv and timestamped refresh archive
+- **Critical Logic**: Deduplication by file_path, streaming CSV processing, atomic updates
 
 ## ⚠️ KNOWN ISSUES
 - **Authentication**: OAuth tokens may expire during long processing runs (mitigated by per-transcript refresh)

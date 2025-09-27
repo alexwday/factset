@@ -54,7 +54,7 @@ stage_02_database_sync:
   description: "Transcript consolidation and master database management"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
-  master_database_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Database/master_database.json"
+  master_database_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Database/master_embeddings.csv"
   refresh_output_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
 
 # Stage 03 specific settings
@@ -177,23 +177,26 @@ stage_08_embeddings_generation:
     max_retries: 3
     token_endpoint: "https://auth.example.com/oauth/token"  # Same as Stage 07
 
-# Stage 09 specific settings (PDF Generation)
-stage_09_pdf_generation:
-  description: "Generate PDF documents from Stage 7 paragraph-level data"
-  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+# Stage 09 specific settings (Master Database Consolidation)
+stage_09_master_consolidation:
+  description: "Master database consolidation and archive"
+
+  # Input paths
+  stage_02_removal_queue: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_02_removal_queue.json"
+  stage_08_output_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings.csv"
+
+  # Output paths
+  master_database_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Database/master_embeddings.csv"
+  archive_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Archives"
+
+  # Operational paths
+  refresh_folder_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
-  dev_mode: true
-  dev_max_transcripts: 5
-  
-  # PDF generation configuration
-  pdf_config:
-    page_size: "letter"  # letter or A4
-    margins: 1.0  # inches
-    font_family: "Helvetica"
-    include_embeddings: false  # Don't include embeddings in PDF
-    include_summaries: false  # Don't include AI summaries
-    max_pages_per_pdf: 500  # Safety limit
+
+  # Processing configuration
+  chunk_size: 10000  # Process CSVs in chunks for memory efficiency
+  archive_enabled: true  # Create archive of refresh folder
+  delete_refresh_after_archive: false  # Safety: don't auto-delete
 
 # References to external configuration files
 # The monitored_institutions and financial_categories are now in separate files
