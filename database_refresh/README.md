@@ -4,17 +4,17 @@ A comprehensive multi-stage data processing pipeline for financial earnings tran
 
 ## Overview
 
-This pipeline processes financial earnings call transcripts through 8 sequential stages, from initial data acquisition to AI-enhanced analysis with vector embeddings for semantic search and retrieval-augmented generation (RAG) applications.
+This pipeline processes financial earnings call transcripts through 9 sequential stages, from initial data acquisition to AI-enhanced analysis with vector embeddings, culminating in master database consolidation and archival.
 
 ### Pipeline Architecture
 
 ```
-📥 Data Acquisition          🔄 Processing & Validation     🤖 AI Enhancement
-┌─────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐
-│ Stage 0: Historical │────▶│ Stage 2: Database Sync  │────▶│ Stage 5: Q&A Pairing   │
-│ Stage 1: Daily Sync │     │ Stage 3: Content Extract│     │ Stage 6: Classification │
-└─────────────────────┘     │ Stage 4: Structure Valid│     │ Stage 7: Summarization │
-                            └─────────────────────────┘     │ Stage 8: Embeddings    │
+📥 Data Acquisition          🔄 Processing & Validation     🤖 AI Enhancement           📦 Consolidation
+┌─────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐     ┌──────────────┐
+│ Stage 0: Historical │────▶│ Stage 2: Database Sync  │────▶│ Stage 5: Q&A Pairing   │────▶│ Stage 9:     │
+│ Stage 1: Daily Sync │     │ Stage 3: Content Extract│     │ Stage 6: Classification │     │ Master DB    │
+└─────────────────────┘     │ Stage 4: Structure Valid│     │ Stage 7: Summarization │     │ & Archive    │
+                            └─────────────────────────┘     │ Stage 8: Embeddings    │     └──────────────┘
                                                             └─────────────────────────┘
 ```
 
@@ -222,6 +222,21 @@ cd 08_embeddings_generation
 python main_embeddings_generation.py
 ```
 
+### Stage 9: Master Consolidation
+**Purpose**: Consolidate processed records into master database and create archives
+**Input**: Stage 8 embeddings and Stage 2 removal queue
+**Output**: Updated master database and timestamped refresh archive
+**Key Features**:
+- Incremental master database updates
+- Deletion support for outdated records
+- Memory-efficient streaming CSV processing
+- Deduplication by file_path as unique key
+- Archive creation with timestamp for audit trails
+
+```bash
+cd 09_master_consolidation
+python main_master_consolidation.py
+```
 
 ## Configuration
 
