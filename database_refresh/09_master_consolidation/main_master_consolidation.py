@@ -311,14 +311,15 @@ def process_master_csv_streaming(nas_conn: SMBConnection, removal_set: Set[str],
 
                 # Check if this record should be removed
                 # Stage 8 uses 'filename' field for the transcript filename (e.g., "AAPL_Q1_2024_Corrected_123_1.xml")
-                # Stage 2 removal queue uses full 'file_path' from NAS
-                # We need to check against the filename portion of the removal paths
+                # Stage 2 removal queue could have:
+                #   - Full paths for modified files (e.g., "Data/2024/Q1/Banks/AAPL/AAPL_Q1_2024_Corrected_123_1.xml")
+                #   - Just filenames for deleted files (e.g., "AAPL_Q1_2024_Corrected_123_1.xml")
                 filename = row.get("filename", "")
 
                 # Check if this filename matches any file in the removal set
                 should_remove = False
                 for removal_path in removal_set:
-                    # Extract just the filename from the full path
+                    # Extract just the filename from the path (handles both cases)
                     removal_filename = removal_path.split('/')[-1] if '/' in removal_path else removal_path
                     if filename == removal_filename:
                         should_remove = True
