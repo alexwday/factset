@@ -685,8 +685,10 @@ def scan_nas_for_all_transcripts(nas_conn: SMBConnection) -> Dict[str, Dict[str,
                                     institution_id = config["monitored_institutions"][ticker].get("id")
                         
                         # Create file record with earnings call flag and institution_id
+                        # FIX #5: Add filename for consistency across stages
                         file_record = {
                             "file_path": file_path,
+                            "filename": filename,  # Add filename for downstream consistency
                             "date_last_modified": modified_time.isoformat() if modified_time else datetime.now().isoformat(),
                             "is_earnings_call": is_earnings_call,
                             "institution_id": institution_id,
@@ -775,10 +777,219 @@ def database_to_comparison_format(database: Optional[Dict[str, Any]]) -> Dict[st
     return comparison_data
 
 
+def extract_transcript_key_and_version(file_path_or_name: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Extract base transcript key and version info from filename.
+
+    Returns:
+        Tuple of (base_key, version_info) where:
+        - base_key: ticker_quarter_year (e.g., 'JPM_Q1_2024')
+        - version_info: dict with version details
+    """
+    # Get just the filename
+    filename = file_path_or_name.split('/')[-1] if '/' in file_path_or_name else file_path_or_name
+
+    # Parse: TICKER_QUARTER_YEAR_TYPE_EVENTID_VERSIONID.xml
+    parts = filename.replace('.xml', '').split('_')
+
+    if len(parts) >= 6:
+        ticker = parts[0]
+        quarter = parts[1]
+        year = parts[2]
+        transcript_type = parts[3]
+        event_id = parts[4]
+        version_id = parts[5]
+
+        base_key = f"{ticker}_{quarter}_{year}"
+
+        # Version priority for comparison
+        type_priority = {
+            "Corrected": 4,
+            "Final": 3,
+            "Script": 2,
+            "Raw": 1
+        }
+
+        version_info = {
+            'version_id': int(version_id) if version_id.isdigit() else 0,
+            'type': transcript_type,
+            'priority': type_priority.get(transcript_type, 0),
+            'event_id': event_id,
+            'filename': filename
+        }
+
+        return base_key, version_info
+
+    return None, None
+
+
+def organize_by_transcript(inventory: Dict[str, Dict[str, Any]], is_nas: bool = True) -> Dict[str, List[Tuple[str, Dict[str, Any], Dict[str, Any]]]]:
+    """Organize inventory by base transcript key.
+
+    Args:
+        inventory: Either NAS inventory (file_path -> record) or database inventory (filename -> record)
+        is_nas: True if NAS inventory, False if database inventory
+
+    Returns:
+        Dict of base_key -> list of (identifier, record, version_info)
+    """
+    organized = {}
+
+    for identifier, record in inventory.items():
+        # Skip non-earnings calls if this is NAS inventory
+        if is_nas and not record.get("is_earnings_call", False):
+            continue
+
+        base_key, version_info = extract_transcript_key_and_version(identifier)
+
+        # FIX #1: Handle malformed filenames
+        if not base_key or not version_info:
+            log_execution(f"Skipping malformed filename: {identifier}")
+            continue
+
+        if base_key not in organized:
+            organized[base_key] = []
+        organized[base_key].append((identifier, record, version_info))
+
+    return organized
+
+
+def select_best_from_versions(versions: List[Tuple[str, Dict[str, Any], Dict[str, Any]]]) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+    """Select best version from a list of versions.
+
+    Args:
+        versions: List of (identifier, record, version_info) tuples
+
+    Returns:
+        Best (identifier, record, version_info) tuple
+    """
+    if not versions:
+        return None, None, None
+
+    # FIX #2: Warn if multiple events detected (unusual situation)
+    event_ids = set(v[2]['event_id'] for v in versions)
+    if len(event_ids) > 1:
+        log_console(f"⚠️ WARNING: Multiple event IDs {list(event_ids)} found for same quarter. Selecting best version across all events.", "WARNING")
+        log_execution("Multiple events detected for single quarter", {
+            "event_ids": list(event_ids),
+            "files": [v[2]['filename'] for v in versions],
+            "action": "Selecting single best version across all events"
+        })
+
+    # Sort by priority (type), then version_id, then modification date
+    sorted_versions = sorted(versions,
+                           key=lambda x: (x[2]['priority'],
+                                        x[2]['version_id'],
+                                        x[1].get('date_last_modified', '')),
+                           reverse=True)
+
+    return sorted_versions[0]
+
+
+def detect_changes_version_aware(nas_inventory: Dict[str, Dict[str, Any]], database_inventory: Dict[str, Dict[str, Any]]) -> Tuple[List[str], List[str]]:
+    """Version-aware change detection between NAS and database inventories.
+
+    This function groups files by base transcript (ticker_quarter_year) and handles
+    version management properly, ensuring old versions are removed when better versions exist.
+    """
+
+    files_to_process = []
+    files_to_remove = []
+
+    # If no existing database, all NAS files go to processing
+    if not database_inventory:
+        # Group by transcript and select best version for each
+        nas_transcripts = organize_by_transcript(nas_inventory, is_nas=True)
+        for base_key, versions in nas_transcripts.items():
+            best_path, best_record, _ = select_best_from_versions(versions)
+            if best_path:
+                files_to_process.append(best_path)
+
+        log_execution("No existing database - processing best version of each transcript",
+                     {"unique_transcripts": len(nas_transcripts),
+                      "files_to_process": len(files_to_process)})
+        return files_to_process, files_to_remove
+
+    # Organize both inventories by base transcript
+    nas_transcripts = organize_by_transcript(nas_inventory, is_nas=True)
+    db_transcripts = organize_by_transcript(database_inventory, is_nas=False)
+
+    # Get all unique base keys
+    all_base_keys = set(nas_transcripts.keys()) | set(db_transcripts.keys())
+
+    log_execution(f"Version-aware comparison starting", {
+        "nas_transcripts": len(nas_transcripts),
+        "db_transcripts": len(db_transcripts),
+        "total_unique_transcripts": len(all_base_keys)
+    })
+
+    # Process each transcript
+    for base_key in all_base_keys:
+        nas_versions = nas_transcripts.get(base_key, [])
+        db_versions = db_transcripts.get(base_key, [])
+
+        if not nas_versions:
+            # Transcript deleted from NAS - remove all versions from database
+            for filename, _, _ in db_versions:
+                files_to_remove.append(filename)
+            log_execution(f"Transcript deleted from NAS: {base_key}",
+                         {"versions_to_remove": len(db_versions)})
+
+        elif not db_versions:
+            # New transcript - process best version only
+            best_path, best_record, best_version = select_best_from_versions(nas_versions)
+            if best_path:
+                files_to_process.append(best_path)
+                log_execution(f"New transcript: {base_key}",
+                             {"selected_version": best_version['filename'],
+                              "available_versions": len(nas_versions)})
+
+        else:
+            # Transcript exists in both - compare best versions
+            best_nas_path, best_nas_record, best_nas_version = select_best_from_versions(nas_versions)
+            best_db_name, best_db_record, best_db_version = select_best_from_versions(db_versions)
+
+            needs_update = False
+            update_reason = ""
+
+            # Check if we need to update
+            if best_nas_version['filename'] != best_db_version['filename']:
+                # Different version
+                needs_update = True
+                update_reason = f"Version change: {best_db_version['filename']} -> {best_nas_version['filename']}"
+            elif best_nas_record['date_last_modified'] != best_db_record.get('date_last_modified', ''):
+                # Same version, different date
+                needs_update = True
+                update_reason = f"Date change for {best_nas_version['filename']}"
+
+            if needs_update:
+                # Process best NAS version
+                files_to_process.append(best_nas_path)
+
+                # Remove ALL database versions of this transcript
+                for filename, _, _ in db_versions:
+                    files_to_remove.append(filename)
+
+                log_execution(f"Transcript update: {base_key}", {
+                    "reason": update_reason,
+                    "processing": best_nas_version['filename'],
+                    "removing": [v[2]['filename'] for v in db_versions]
+                })
+
+    log_execution("Version-aware delta detection complete", {
+        "files_to_process": len(files_to_process),
+        "files_to_remove": len(files_to_remove),
+        "transcripts_analyzed": len(all_base_keys)
+    })
+
+    return files_to_process, files_to_remove
+
+
 def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory: Dict[str, Dict[str, Any]]) -> Tuple[List[str], List[str]]:
     """Detect changes between NAS and database inventories.
 
     Note: NAS inventory uses full paths as keys, database inventory uses filenames only.
+    THIS IS THE OLD VERSION - KEPT FOR BACKWARDS COMPATIBILITY.
+    USE detect_changes_version_aware() INSTEAD.
     """
 
     files_to_process = []
@@ -809,7 +1020,7 @@ def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory:
             if nas_modified != db_modified:
                 # Modified file - add to process and mark old version for removal
                 files_to_process.append(file_path)
-                files_to_remove.append(file_path)  # Remove old database entry
+                files_to_remove.append(file_path)  # Full path for modified files
                 log_execution(f"Modified file found: {file_path}")
 
     # Check for deleted files (in database but not on NAS)
@@ -822,9 +1033,9 @@ def detect_changes(nas_inventory: Dict[str, Dict[str, Any]], database_inventory:
     # Check each database entry
     for filename in database_inventory.keys():
         if filename not in nas_filenames:
-            # File no longer exists on NAS - need to find its full path for removal queue
-            # Since we don't have the full path, we'll use the filename
-            files_to_remove.append(filename)
+            # File no longer exists on NAS
+            # We only have the filename, not the full path (since it's deleted)
+            files_to_remove.append(filename)  # Just filename for deleted files
             log_execution(f"Deleted file found: {filename}")
 
     log_execution("Delta detection complete", {
@@ -902,13 +1113,111 @@ def select_best_version(versions: List[Tuple[str, Dict[str, Any]]]) -> Tuple[str
     return sorted_versions[0]
 
 
+def save_processing_queues_version_aware(nas_conn: SMBConnection, files_to_process: List[str], files_to_remove: List[str], nas_inventory: Dict[str, Dict[str, Any]]) -> bool:
+    """Save processing queues to NAS refresh folder - version-aware edition.
+
+    Since version selection is already done in detect_changes_version_aware,
+    this function just formats and saves the queues.
+    """
+
+    refresh_path = config["stage_02_database_sync"]["refresh_output_path"]
+    nas_create_directory_recursive(nas_conn, refresh_path)
+
+    success = True
+
+    # Create process records from files_to_process
+    # Version selection already done, just filter non-earnings calls
+    process_records = []
+    earnings_calls_count = 0
+    non_earnings_filtered = 0
+
+    for file_path in files_to_process:
+        nas_record = nas_inventory.get(file_path, {})
+
+        # Skip non-earnings calls
+        if not nas_record.get("is_earnings_call", False):
+            non_earnings_filtered += 1
+            continue
+
+        # Add to processing queue
+        # FIX #5: Include filename for consistency
+        record = {
+            "file_path": file_path,
+            "filename": nas_record.get("filename", file_path.split('/')[-1] if '/' in file_path else file_path),
+            "date_last_modified": nas_record.get("date_last_modified", datetime.now().isoformat()),
+            "institution_id": nas_record.get("institution_id"),
+            "ticker": nas_record.get("ticker")
+        }
+        process_records.append(record)
+        earnings_calls_count += 1
+
+    log_execution(f"Processing queue preparation complete", {
+        "total_files_to_process": len(files_to_process),
+        "earnings_calls_included": earnings_calls_count,
+        "non_earnings_filtered_out": non_earnings_filtered
+    })
+
+    # Save files to process as simple JSON records
+    process_path = nas_path_join(refresh_path, "stage_02_process_queue.json")
+    process_content = json.dumps(process_records, indent=2)
+    process_file_obj = io.BytesIO(process_content.encode("utf-8"))
+
+    if not nas_upload_file(nas_conn, process_file_obj, process_path):
+        log_error("Failed to save stage_02_process_queue.json", "queue_save", {"path": process_path})
+        success = False
+    else:
+        log_console(f"✅ Process queue saved: {earnings_calls_count} files")
+
+    # Convert files_to_remove to JSON records
+    remove_records = []
+    for file_identifier in files_to_remove:
+        # file_identifier could be full path or just filename from database
+        # FIX #5: Ensure we have both file_path and filename for consistency
+        if '/' in file_identifier:
+            # It's a full path
+            filename = file_identifier.split('/')[-1]
+            file_path = file_identifier
+        else:
+            # It's just a filename (from database)
+            filename = file_identifier
+            file_path = file_identifier  # Stage 9 will handle filename-only
+
+        record = {
+            "file_path": file_path,
+            "filename": filename,  # Always include filename for consistency
+            "date_last_modified": datetime.now().isoformat()
+        }
+        remove_records.append(record)
+
+    # Save files to remove as simple JSON records
+    remove_path = nas_path_join(refresh_path, "stage_02_removal_queue.json")
+    remove_content = json.dumps(remove_records, indent=2)
+    remove_file_obj = io.BytesIO(remove_content.encode("utf-8"))
+
+    if not nas_upload_file(nas_conn, remove_file_obj, remove_path):
+        log_error("Failed to save stage_02_removal_queue.json", "queue_save", {"path": remove_path})
+        success = False
+    else:
+        log_console(f"✅ Removal queue saved: {len(remove_records)} files")
+
+    if success:
+        log_execution("Processing queues saved successfully", {
+            "files_to_process": earnings_calls_count,
+            "files_to_remove": len(files_to_remove)
+        })
+
+    return success
+
+
 def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str], files_to_remove: List[str], nas_inventory: Dict[str, Dict[str, Any]], database_inventory: Dict[str, Dict[str, Any]]) -> bool:
     """Save processing queues to NAS refresh folder as simple JSON records.
-    
+
     IMPORTANT: Only earnings call transcripts are included in the processing queue.
     Non-earnings transcripts are stored in NAS but not processed by downstream stages.
+    THIS IS THE OLD VERSION - KEPT FOR BACKWARDS COMPATIBILITY.
+    USE save_processing_queues_version_aware() WITH detect_changes_version_aware() INSTEAD.
     """
-    
+
     refresh_path = config["stage_02_database_sync"]["refresh_output_path"]
     nas_create_directory_recursive(nas_conn, refresh_path)
 
@@ -917,48 +1226,48 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
     # Group files by base transcript (ticker_quarter_year) for version selection
     transcript_groups = {}
     duplicate_count = 0  # For backwards compatibility, though we now handle this differently
-    
+
     for file_path in files_to_process:
         nas_record = nas_inventory.get(file_path, {})
-        
+
         # Skip non-earnings calls early
         if not nas_record.get("is_earnings_call", False):
             continue
-            
+
         # Extract base transcript key from filename
         # Format: TICKER_QUARTER_YEAR_TYPE_EVENTID_VERSIONID.xml
         filename = file_path.split('/')[-1] if '/' in file_path else file_path
         parts = filename.replace('.xml', '').split('_')
-        
+
         if len(parts) >= 6:
             ticker = parts[0]
             quarter = parts[1]
             year = parts[2]
             base_key = f"{ticker}_{quarter}_{year}"
-            
+
             if base_key not in transcript_groups:
                 transcript_groups[base_key] = []
             transcript_groups[base_key].append((file_path, nas_record))
-    
+
     # Select best version for each transcript group
     process_records = []
     earnings_calls_count = 0
     non_earnings_filtered = len(files_to_process) - sum(len(v) for v in transcript_groups.values())
     version_selection_count = 0
     versions_dropped_count = 0
-    
+
     log_console(f"📊 Version selection: {len(transcript_groups)} unique transcripts from {len(files_to_process)} files")
-    
+
     # Track examples for logging
     version_selection_examples = []
-    
+
     for base_key, versions in transcript_groups.items():
         if len(versions) > 1:
             # Multiple versions - select the best one
             selected_path, selected_record = select_best_version(versions)
             version_selection_count += 1
             versions_dropped_count += len(versions) - 1
-            
+
             # Store example for logging (limit to first 5)
             if len(version_selection_examples) < 5:
                 version_selection_examples.append({
@@ -969,7 +1278,7 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
         else:
             # Single version - use it
             selected_path, selected_record = versions[0]
-        
+
         # Add selected version to processing queue
         record = {
             "file_path": selected_path,
@@ -1013,13 +1322,17 @@ def save_processing_queues(nas_conn: SMBConnection, files_to_process: List[str],
         log_error("Failed to save stage_02_process_queue.json", "queue_save", {"path": process_path})
         success = False
 
-    # Convert files_to_remove to JSON records  
+    # Convert files_to_remove to JSON records
     remove_records = []
     for file_path in files_to_remove:
         # Get the database record for this file to include date_last_modified
-        db_record = database_inventory.get(file_path, {})
+        # Note: file_path could be full path (modified files) or just filename (deleted files)
+        # Database inventory uses filename as key
+        lookup_key = file_path.split('/')[-1] if '/' in file_path else file_path
+        db_record = database_inventory.get(lookup_key, {})
+
         record = {
-            "file_path": file_path,
+            "file_path": file_path,  # Keep original (could be full path or filename)
             "date_last_modified": db_record.get("date_last_modified", datetime.now().isoformat())
         }
         remove_records.append(record)
@@ -1117,16 +1430,18 @@ def main() -> None:
         database_inventory = database_to_comparison_format(master_database)
         stage_summary["total_database_files"] = len(database_inventory) if database_inventory else 0
 
-        # Step 8: Delta detection
-        log_console("Step 8: Detecting changes between NAS and database...")
-        files_to_process, files_to_remove = detect_changes(nas_inventory, database_inventory)
-        
+        # Step 8: Delta detection (VERSION-AWARE)
+        log_console("Step 8: Detecting changes between NAS and database (version-aware)...")
+        # Use the new version-aware detection
+        files_to_process, files_to_remove = detect_changes_version_aware(nas_inventory, database_inventory)
+
         stage_summary["files_to_process"] = len(files_to_process)
         stage_summary["files_to_remove"] = len(files_to_remove)
 
-        # Step 9: Save processing queues
-        log_console("Step 9: Saving processing queues...")
-        if not save_processing_queues(nas_conn, files_to_process, files_to_remove, nas_inventory, database_inventory):
+        # Step 9: Save processing queues (VERSION-AWARE)
+        log_console("Step 9: Saving processing queues (version-aware)...")
+        # Use the new version-aware save function (no need for database_inventory now)
+        if not save_processing_queues_version_aware(nas_conn, files_to_process, files_to_remove, nas_inventory):
             stage_summary["status"] = "failed"
             log_console("Failed to save processing queues", "ERROR")
             return
