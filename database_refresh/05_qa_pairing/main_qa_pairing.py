@@ -694,6 +694,516 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
         return False
 
 
+def list_nas_directory(conn: SMBConnection, dir_path: str) -> List[str]:
+    """List all files in NAS directory."""
+    try:
+        shared_files = conn.listPath(os.getenv("NAS_SHARE_NAME"), dir_path)
+        return [f.filename for f in shared_files if not f.filename.startswith('.')]
+    except Exception as e:
+        log_error(f"Failed to list directory {dir_path}", "nas_list", {"error": str(e)})
+        return []
+
+
+def nas_rename_file(conn: SMBConnection, old_path: str, new_path: str) -> bool:
+    """Rename file on NAS (copy → delete pattern for SMB)."""
+    try:
+        content = nas_download_file(conn, old_path)
+        if not content:
+            return False
+        file_obj = io.BytesIO(content)
+        if not nas_upload_file(conn, file_obj, new_path):
+            return False
+        nas_delete_file(conn, old_path)
+        return True
+    except Exception as e:
+        log_error(f"Failed to rename file {old_path} → {new_path}", "nas_rename", {"error": str(e)})
+        return False
+
+
+def nas_delete_file(conn: SMBConnection, file_path: str) -> bool:
+    """Delete file from NAS."""
+    try:
+        conn.deleteFiles(os.getenv("NAS_SHARE_NAME"), file_path)
+        return True
+    except Exception as e:
+        log_error(f"Failed to delete file {file_path}", "nas_delete", {"error": str(e)})
+        return False
+
+
+def initialize_empty_manifest() -> Dict:
+    """Initialize a new empty manifest."""
+    return {
+        "version": "5.0.0",
+        "created_at": datetime.now().isoformat(),
+        "last_updated": datetime.now().isoformat(),
+        "total_transcripts": 0,
+        "completed_transcripts": 0,
+        "failed_transcripts": 0,
+        "consolidation_status": "not_started",
+        "transcripts": {}
+    }
+
+
+def load_manifest_with_recovery() -> Dict:
+    """Load manifest with crash recovery support."""
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        return initialize_empty_manifest()
+
+    try:
+        manifest_path = nas_path_join(
+            config["stage_05_qa_pairing"]["output_data_path"],
+            "manifest.json"
+        )
+        temp_path = nas_path_join(
+            config["stage_05_qa_pairing"]["output_data_path"],
+            "manifest.json.tmp"
+        )
+
+        manifest_content = nas_download_file(nas_conn, manifest_path)
+        if manifest_content:
+            try:
+                manifest = json.loads(manifest_content.decode('utf-8'))
+                nas_conn.close()
+                return manifest
+            except json.JSONDecodeError:
+                log_console("Main manifest corrupted, trying temp...", "WARNING")
+
+        temp_content = nas_download_file(nas_conn, temp_path)
+        if temp_content:
+            try:
+                manifest = json.loads(temp_content.decode('utf-8'))
+                log_console("Recovered from temp manifest", "WARNING")
+                nas_conn.close()
+                return manifest
+            except json.JSONDecodeError:
+                log_console("Temp manifest also corrupted", "WARNING")
+
+        log_console("No valid manifest found, initializing new one")
+        nas_conn.close()
+        return initialize_empty_manifest()
+
+    except Exception as e:
+        log_error(f"Failed to load manifest: {e}", "manifest_load")
+        if nas_conn:
+            nas_conn.close()
+        return initialize_empty_manifest()
+
+
+def update_manifest_atomic(transcript_id: str, updates: Dict) -> bool:
+    """Atomically update manifest using temp file pattern."""
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        log_error("Failed to connect to NAS for manifest update", "manifest_update")
+        return False
+
+    try:
+        manifest_path = nas_path_join(
+            config["stage_05_qa_pairing"]["output_data_path"],
+            "manifest.json"
+        )
+        temp_path = nas_path_join(
+            config["stage_05_qa_pairing"]["output_data_path"],
+            "manifest.json.tmp"
+        )
+
+        manifest_content = nas_download_file(nas_conn, manifest_path)
+        if manifest_content:
+            try:
+                manifest = json.loads(manifest_content.decode('utf-8'))
+            except json.JSONDecodeError:
+                manifest = initialize_empty_manifest()
+        else:
+            manifest = initialize_empty_manifest()
+
+        if transcript_id not in manifest["transcripts"]:
+            manifest["transcripts"][transcript_id] = {}
+
+        manifest["transcripts"][transcript_id].update(updates)
+        manifest["last_updated"] = datetime.now().isoformat()
+
+        manifest["total_transcripts"] = len(manifest["transcripts"])
+        manifest["completed_transcripts"] = sum(
+            1 for t in manifest["transcripts"].values() if t.get("status") == "completed"
+        )
+        manifest["failed_transcripts"] = sum(
+            1 for t in manifest["transcripts"].values() if t.get("status") == "failed"
+        )
+
+        temp_obj = io.BytesIO(json.dumps(manifest, indent=2).encode('utf-8'))
+        if not nas_upload_file(nas_conn, temp_obj, temp_path):
+            nas_conn.close()
+            return False
+
+        if nas_file_exists(nas_conn, manifest_path):
+            nas_delete_file(nas_conn, manifest_path)
+        nas_rename_file(nas_conn, temp_path, manifest_path)
+
+        nas_conn.close()
+        return True
+
+    except Exception as e:
+        log_error(f"Failed to update manifest: {e}", "manifest_update", {"error": str(e)})
+        if nas_conn:
+            nas_conn.close()
+        return False
+
+
+def create_json_from_records(records: List[Dict]) -> str:
+    """Create JSON content from records."""
+    return json.dumps(records, indent=2, default=str)
+
+
+def create_metadata_file(nas_conn: SMBConnection, transcript_id: str, json_path: str, record_count: int) -> Optional[Dict]:
+    """Create validation metadata after successful write."""
+    import hashlib
+
+    try:
+        json_content = nas_download_file(nas_conn, json_path)
+        if not json_content:
+            raise ValueError("Failed to download JSON for metadata creation")
+
+        metadata = {
+            "transcript_id": transcript_id,
+            "created_at": datetime.now().isoformat(),
+            "file_size_bytes": len(json_content),
+            "sha256_checksum": hashlib.sha256(json_content).hexdigest(),
+            "expected_records": record_count,
+            "stage_version": "5.0.0",
+            "processing_host": os.getenv("CLIENT_MACHINE_NAME")
+        }
+
+        meta_path = f"{json_path}.meta"
+        meta_content = json.dumps(metadata, indent=2)
+        meta_obj = io.BytesIO(meta_content.encode('utf-8'))
+
+        if not nas_upload_file(nas_conn, meta_obj, meta_path):
+            raise ValueError("Failed to upload metadata file")
+
+        return metadata
+
+    except Exception as e:
+        log_error(f"Failed to create metadata for {transcript_id}: {e}", "metadata_create")
+        return None
+
+
+def validate_json_integrity(nas_conn: SMBConnection, json_path: str, meta_path: str) -> bool:
+    """Validate JSON file against metadata."""
+    import hashlib
+
+    try:
+        meta_content = nas_download_file(nas_conn, meta_path)
+        if not meta_content:
+            return False
+
+        metadata = json.loads(meta_content.decode('utf-8'))
+        json_content = nas_download_file(nas_conn, json_path)
+        if not json_content:
+            return False
+
+        checks = {
+            "file_size": len(json_content) == metadata["file_size_bytes"],
+            "checksum": hashlib.sha256(json_content).hexdigest() == metadata["sha256_checksum"],
+        }
+
+        try:
+            records = json.loads(json_content.decode('utf-8'))
+            checks["valid_json"] = True
+            checks["record_count"] = len(records) == metadata["expected_records"]
+        except:
+            checks["valid_json"] = False
+            checks["record_count"] = False
+
+        return all(checks.values())
+
+    except Exception as e:
+        log_console(f"Validation error for {json_path}: {e}", "ERROR")
+        return False
+
+
+def cleanup_tmp_file(nas_conn: SMBConnection, transcript_id: str):
+    """Remove temporary file after crash or error."""
+    output_path = config["stage_05_qa_pairing"]["output_data_path"]
+    tmp_path = nas_path_join(output_path, "individual", f"{transcript_id}.json.tmp")
+    if nas_file_exists(nas_conn, tmp_path):
+        nas_delete_file(nas_conn, tmp_path)
+
+
+def quarantine_corrupt_file(nas_conn: SMBConnection, transcript_id: str):
+    """Move corrupted file to failed/ directory."""
+    output_path = config["stage_05_qa_pairing"]["output_data_path"]
+    json_path = nas_path_join(output_path, "individual", f"{transcript_id}.json")
+    meta_path = f"{json_path}.meta"
+    tmp_path = f"{json_path}.tmp"
+
+    failed_dir = nas_path_join(output_path, "failed")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if nas_file_exists(nas_conn, json_path):
+        nas_rename_file(nas_conn, json_path, nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.json.corrupt"))
+    if nas_file_exists(nas_conn, meta_path):
+        nas_rename_file(nas_conn, meta_path, nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.meta.corrupt"))
+    if nas_file_exists(nas_conn, tmp_path):
+        nas_rename_file(nas_conn, tmp_path, nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.tmp.corrupt"))
+
+
+def cleanup_individual_files(nas_conn: SMBConnection, file_list: List[str]):
+    """Delete individual files after successful consolidation."""
+    output_path = config["stage_05_qa_pairing"]["output_data_path"]
+    for json_filename in file_list:
+        json_path = nas_path_join(output_path, "individual", json_filename)
+        meta_path = f"{json_path}.meta"
+        nas_delete_file(nas_conn, json_path)
+        nas_delete_file(nas_conn, meta_path)
+    log_console(f"Cleaned up {len(file_list)} individual files")
+
+
+def process_and_save_transcript_resilient(
+    transcript_id: str,
+    transcript_records: List[Dict],
+    enhanced_error_logger: EnhancedErrorLogger,
+    max_retries: int = 3
+) -> bool:
+    """Crash-resilient transcript processing with error handling."""
+    retry_delay = 5
+
+    for attempt in range(max_retries):
+        nas_conn = None
+        try:
+            update_manifest_atomic(transcript_id, {
+                "status": "in_progress",
+                "started_at": datetime.now().isoformat(),
+                "attempt": attempt + 1
+            })
+
+            log_console(f"  Processing Q&A pairing for {transcript_id} (attempt {attempt + 1}/{max_retries})")
+            enhanced_records = process_transcript(transcript_records, transcript_id, enhanced_error_logger)
+
+            if not enhanced_records:
+                raise ValueError(f"No records generated for {transcript_id}")
+
+            json_content = create_json_from_records(enhanced_records)
+
+            nas_conn = get_nas_connection()
+            if not nas_conn:
+                raise RuntimeError("Failed to connect to NAS")
+
+            output_path = config["stage_05_qa_pairing"]["output_data_path"]
+            individual_path = nas_path_join(output_path, "individual", f"{transcript_id}.json")
+            temp_path = f"{individual_path}.tmp"
+
+            log_console(f"  Writing to temp file...")
+            temp_obj = io.BytesIO(json_content.encode('utf-8'))
+            if not nas_upload_file(nas_conn, temp_obj, temp_path):
+                raise IOError(f"Failed to upload temp file for {transcript_id}")
+
+            log_console(f"  Finalizing file...")
+            if not nas_rename_file(nas_conn, temp_path, individual_path):
+                raise IOError(f"Failed to rename temp file for {transcript_id}")
+
+            log_console(f"  Creating metadata...")
+            metadata = create_metadata_file(nas_conn, transcript_id, individual_path, len(enhanced_records))
+            if not metadata:
+                raise ValueError(f"Failed to create metadata for {transcript_id}")
+
+            log_console(f"  Validating file integrity...")
+            if not validate_json_integrity(nas_conn, individual_path, f"{individual_path}.meta"):
+                raise ValueError(f"Final validation failed for {transcript_id}")
+
+            update_manifest_atomic(transcript_id, {
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "record_count": len(enhanced_records),
+                "file_size_bytes": len(json_content),
+                "individual_file": individual_path,
+                "metadata_file": f"{individual_path}.meta"
+            })
+
+            log_console(f"✓ Successfully saved {transcript_id} ({len(enhanced_records)} records)")
+
+            if nas_conn:
+                nas_conn.close()
+
+            return True
+
+        except Exception as e:
+            log_console(f"Error processing {transcript_id} (attempt {attempt + 1}/{max_retries}): {e}", "WARNING")
+
+            if nas_conn:
+                try:
+                    cleanup_tmp_file(nas_conn, transcript_id)
+                except:
+                    pass
+                nas_conn.close()
+
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (2 ** attempt))
+                continue
+            else:
+                log_console(f"✗ Failed to process {transcript_id} after {max_retries} attempts", "ERROR")
+
+                nas_conn_cleanup = get_nas_connection()
+                if nas_conn_cleanup:
+                    try:
+                        quarantine_corrupt_file(nas_conn_cleanup, transcript_id)
+                    except:
+                        pass
+                    nas_conn_cleanup.close()
+
+                update_manifest_atomic(transcript_id, {
+                    "status": "failed",
+                    "error": str(e),
+                    "failed_at": datetime.now().isoformat(),
+                    "retry_count": max_retries
+                })
+
+                return False
+
+    return False
+
+
+def analyze_resume_state(all_transcripts: Dict[str, List[Dict]]) -> Tuple[List[str], List[str], List[str]]:
+    """Analyze which transcripts need processing based on manifest."""
+    manifest = load_manifest_with_recovery()
+
+    to_process = []
+    completed = []
+    failed_list = []
+
+    for transcript_id in all_transcripts.keys():
+        transcript_info = manifest.get("transcripts", {}).get(transcript_id, {})
+        status = transcript_info.get("status", "not_started")
+
+        if status == "completed":
+            nas_conn = get_nas_connection()
+            if nas_conn:
+                output_path = config["stage_05_qa_pairing"]["output_data_path"]
+                json_path = nas_path_join(output_path, "individual", f"{transcript_id}.json")
+                meta_path = f"{json_path}.meta"
+
+                if nas_file_exists(nas_conn, json_path) and validate_json_integrity(nas_conn, json_path, meta_path):
+                    completed.append(transcript_id)
+                    nas_conn.close()
+                else:
+                    log_console(f"  {transcript_id}: marked complete but file invalid - will reprocess", "WARNING")
+                    to_process.append(transcript_id)
+                    nas_conn.close()
+            else:
+                completed.append(transcript_id)
+
+        elif status == "failed":
+            failed_list.append(transcript_id)
+            retry_failed = config["stage_05_qa_pairing"].get("retry_failed_on_resume", False)
+            if retry_failed:
+                log_console(f"  {transcript_id}: previously failed - will retry", "WARNING")
+                to_process.append(transcript_id)
+
+        elif status == "in_progress":
+            log_console(f"  {transcript_id}: was in progress - will reprocess", "WARNING")
+            to_process.append(transcript_id)
+
+        else:
+            to_process.append(transcript_id)
+
+    return to_process, completed, failed_list
+
+
+def consolidate_individual_files() -> Optional[str]:
+    """Consolidate all individual transcript JSONs into master file."""
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        log_console("Failed to connect to NAS for consolidation", "ERROR")
+        return None
+
+    try:
+        output_path = config["stage_05_qa_pairing"]["output_data_path"]
+        individual_dir = nas_path_join(output_path, "individual")
+        consolidated_dir = nas_path_join(output_path, "consolidated")
+
+        log_console("Scanning for individual transcript files...")
+        all_files = list_nas_directory(nas_conn, individual_dir)
+        json_files = [f for f in all_files if f.endswith('.json') and not f.endswith('.tmp')]
+
+        log_console(f"Found {len(json_files)} individual JSON files to consolidate")
+
+        if len(json_files) == 0:
+            log_console("No files to consolidate", "WARNING")
+            nas_conn.close()
+            return None
+
+        valid_files = []
+        invalid_files = []
+
+        log_console("Validating individual files...")
+        for json_file in json_files:
+            json_path = nas_path_join(individual_dir, json_file)
+            meta_path = f"{json_path}.meta"
+
+            if validate_json_integrity(nas_conn, json_path, meta_path):
+                valid_files.append(json_file)
+            else:
+                invalid_files.append(json_file)
+                transcript_id = json_file.replace('.json', '')
+                quarantine_corrupt_file(nas_conn, transcript_id)
+
+        if invalid_files:
+            log_console(f"WARNING: {len(invalid_files)} files failed validation - quarantined", "WARNING")
+
+        log_console(f"Consolidating {len(valid_files)} validated files...")
+
+        temp_consolidated_path = nas_path_join(consolidated_dir, "stage_05_qa_paired.json.tmp")
+        final_consolidated_path = nas_path_join(consolidated_dir, "stage_05_qa_paired.json")
+
+        all_records = []
+
+        for i, json_file in enumerate(valid_files):
+            json_path = nas_path_join(individual_dir, json_file)
+            json_content = nas_download_file(nas_conn, json_path)
+
+            if not json_content:
+                log_console(f"ERROR: Could not download {json_file}", "ERROR")
+                continue
+
+            records = json.loads(json_content.decode('utf-8'))
+            all_records.extend(records)
+
+            if (i + 1) % 10 == 0 or (i + 1) == len(valid_files):
+                log_console(f"  Progress: {i + 1}/{len(valid_files)} files, {len(all_records)} records")
+
+        log_console("Uploading consolidated file...")
+        consolidated_content = json.dumps(all_records, indent=2, default=str)
+        temp_file_obj = io.BytesIO(consolidated_content.encode('utf-8'))
+
+        if not nas_upload_file(nas_conn, temp_file_obj, temp_consolidated_path):
+            raise RuntimeError("Failed to write consolidated temp file")
+
+        log_console("Finalizing consolidated file...")
+        if nas_file_exists(nas_conn, final_consolidated_path):
+            nas_delete_file(nas_conn, final_consolidated_path)
+        if not nas_rename_file(nas_conn, temp_consolidated_path, final_consolidated_path):
+            raise RuntimeError("Failed to finalize consolidated file")
+
+        log_console(f"✓ Consolidation complete: {len(all_records)} total records in {len(valid_files)} transcripts")
+
+        cleanup_enabled = config["stage_05_qa_pairing"].get("cleanup_after_consolidation", True)
+        if cleanup_enabled:
+            log_console("Cleaning up individual files...")
+            cleanup_individual_files(nas_conn, valid_files)
+            log_console("✓ Cleanup complete")
+        else:
+            log_console("Individual files preserved (cleanup disabled in config)")
+
+        nas_conn.close()
+        return final_consolidated_path
+
+    except Exception as e:
+        log_console(f"Consolidation failed: {e}", "ERROR")
+        log_error(f"Consolidation error: {e}", "consolidation_error")
+        if nas_conn:
+            nas_conn.close()
+        return None
+
+
 def nas_file_exists(conn: SMBConnection, file_path: str) -> bool:
     """Check if a file exists on the NAS."""
     try:
@@ -2196,151 +2706,128 @@ def main() -> None:
 
         stage_summary["total_transcripts_processed"] = len(transcripts)
 
-        # Step 10: Check for existing output and enable resume
-        log_console("Step 10: Checking for existing output (resume capability)...")
+        # Step 10: Initialize crash-resilient file system
+        log_console("Step 10: Initializing crash-resilient file system...")
         output_path = config["stage_05_qa_pairing"]["output_data_path"]
-        output_filename = "stage_05_qa_paired_content.json"
-        output_file_path = nas_path_join(output_path, output_filename)
-        
-        failed_filename = "stage_05_qa_pairing_failed_transcripts.json"
-        failed_file_path = nas_path_join(output_path, failed_filename)
-        
         nas_create_directory_recursive(nas_conn, output_path)
-        
-        # Check if resume is enabled (default: True)
-        enable_resume = config["stage_05_qa_pairing"].get("enable_resume", True)
-        completed_transcript_ids = set()
-        
-        if enable_resume:
-            # Load existing output to identify completed transcripts
-            completed_transcript_ids = load_existing_output(nas_conn, output_path)
-            
-            if completed_transcript_ids:
-                # Filter out already-processed transcripts
-                original_count = len(transcripts)
-                transcripts = {tid: records for tid, records in transcripts.items() 
-                              if tid not in completed_transcript_ids}
-                resumed_count = original_count - len(transcripts)
-                
-                if resumed_count > 0:
-                    log_console(f"RESUME MODE: Skipping {resumed_count} already-processed transcripts")
-                    log_console(f"Remaining transcripts to process: {len(transcripts)}")
-                    stage_summary["resumed_from_existing"] = True
-                    stage_summary["skipped_completed_transcripts"] = resumed_count
-                
-                if len(transcripts) == 0:
-                    log_console("All transcripts already processed. Nothing to do.")
-                    stage_summary["status"] = "completed_all_processed"
-                    return
-        
-        # Initialize or prepare output files
-        first_successful = True
-        first_failed = True
-        
-        try:
-            if not completed_transcript_ids:
-                # No existing output, initialize new files
-                log_console("Initializing new output files...")
-                
-                # Main output file
-                output_bytes = io.BytesIO(b"[\n")
-                if not nas_upload_file(nas_conn, output_bytes, output_file_path):
-                    log_console("Failed to initialize output file", "ERROR")
-                    stage_summary["status"] = "failed"
-                    return
-            else:
-                # Existing output found, will append to it
-                log_console("Will append to existing output file...")
-                first_successful = False  # Not the first entry anymore
-                
-            # Always initialize failed transcripts file fresh
-            failed_bytes = io.BytesIO(b"[\n")
-            if not nas_upload_file(nas_conn, failed_bytes, failed_file_path):
-                log_console("Failed to initialize failed transcripts file", "ERROR")
-                stage_summary["status"] = "failed"
-                return
-                
-        except Exception as e:
-            log_console(f"Failed to initialize output files: {e}", "ERROR")
-            stage_summary["status"] = "failed"
+
+        # Create subdirectories for crash-resilient system
+        individual_path = nas_path_join(output_path, "individual")
+        consolidated_path = nas_path_join(output_path, "consolidated")
+        failed_path = nas_path_join(output_path, "failed")
+
+        nas_create_directory_recursive(nas_conn, individual_path)
+        nas_create_directory_recursive(nas_conn, consolidated_path)
+        nas_create_directory_recursive(nas_conn, failed_path)
+
+        # Initialize manifest if it doesn't exist
+        manifest_path = nas_path_join(output_path, "manifest.json")
+        if not nas_file_exists(nas_conn, manifest_path):
+            log_console("Creating new manifest file...")
+            initialize_empty_manifest()
+        else:
+            log_console("Existing manifest found - resuming from previous state")
+
+        # Step 11: Analyze resume state
+        log_console("Step 11: Analyzing resume state...")
+        to_process_ids, completed_ids, failed_ids = analyze_resume_state(transcripts)
+
+        original_count = len(transcripts)
+        resumed_count = len(completed_ids)
+        failed_count = len(failed_ids)
+        to_process_count = len(to_process_ids)
+
+        if resumed_count > 0:
+            log_console(f"RESUME MODE: Found {resumed_count} completed, {failed_count} failed")
+            log_console(f"Remaining transcripts to process: {to_process_count}")
+            stage_summary["resumed_from_existing"] = True
+            stage_summary["skipped_completed_transcripts"] = resumed_count
+
+        if to_process_count == 0:
+            log_console("All transcripts already processed successfully. Nothing to do.")
+            stage_summary["status"] = "completed_all_processed"
+
+            # Still consolidate if needed
+            log_console("Consolidating existing individual files...")
+            consolidated_file_path = consolidate_individual_files()
+            if consolidated_file_path:
+                log_console(f"Consolidated output: {consolidated_file_path}")
             return
-        
-        # Step 11: Process each transcript
-        log_console("Step 11: Processing Q&A pairing...")
+
+        # Step 12: Process each transcript with crash-resilient saves
+        log_console(f"Step 12: Processing {to_process_count} transcripts with crash-resilient saves...")
         total_qa_groups_count = 0
         successful_transcripts = 0
-        failed_transcripts = 0
-        # first_successful already set above based on resume status
-        first_failed = True
+        failed_transcripts = failed_count  # Start with previously failed count
 
         # Add header for transcript processing
         log_console("")
         log_console("TRANSCRIPT PROCESSING:")
         log_console("-" * 120)
-        
-        for i, (transcript_id, transcript_records) in enumerate(transcripts.items(), 1):
+
+        for i, transcript_id in enumerate(to_process_ids, 1):
+            transcript_records = transcripts[transcript_id]
+
             # Extract company ticker for cleaner display
             ticker = transcript_id.split('_')[0] if '_' in transcript_id else transcript_id[:10]
-            
+
             # Process transcript
             enhanced_records, qa_groups_count, metrics = process_transcript_qa_pairing(
                 transcript_records, transcript_id, enhanced_error_logger
             )
-            
+
             # Build status line components
             status_symbol = "✓"
             status_color = ""
             save_success = False
-            
+
             try:
                 if metrics.get("errors"):
                     status_symbol = "✗"
                     status_color = "ERROR"
+                    failed_transcripts += 1
                 elif qa_groups_count > 0 or len(enhanced_records) > 0:
-                    # Try to append to main output file
-                    if append_records_to_output(nas_conn, output_file_path, enhanced_records, first_successful):
+                    # Use crash-resilient save
+                    save_success = process_and_save_transcript_resilient(
+                        transcript_id, enhanced_records, enhanced_error_logger
+                    )
+
+                    if save_success:
                         successful_transcripts += 1
                         total_qa_groups_count += qa_groups_count
-                        first_successful = False
-                        save_success = True
                     else:
-                        # If append fails, add to failed transcripts
-                        status_symbol = "⚠"
-                        status_color = "WARNING"
-                        if append_records_to_output(nas_conn, failed_file_path, transcript_records, first_failed):
-                            failed_transcripts += 1
-                            first_failed = False
+                        status_symbol = "✗"
+                        status_color = "ERROR"
+                        failed_transcripts += 1
                 else:
                     status_symbol = "○"
                     status_color = "WARNING"
-                    
+
             except Exception as e:
                 status_symbol = "✗"
                 status_color = "ERROR"
+                if not metrics.get("errors"):
+                    metrics["errors"] = []
                 metrics["errors"].append(f"SAVE_ERROR: {str(e)[:30]}")
                 log_error(f"Transcript save failed: {e}", "processing", {"transcript_id": transcript_id})
-                
-                # Try to save to failed file
-                if append_records_to_output(nas_conn, failed_file_path, transcript_records, first_failed):
-                    failed_transcripts += 1
-                    first_failed = False
-            
+                failed_transcripts += 1
+
             # Calculate progress percentage
-            progress_pct = (i / len(transcripts)) * 100
-            
+            progress_pct = (i / to_process_count) * 100
+
             # Format the single status line with all key metrics
             status_line = (
-                f"{status_symbol} [{i:3d}/{len(transcripts):3d}] {progress_pct:3.0f}% | {ticker:8s} | "
+                f"{status_symbol} [{i:3d}/{to_process_count:3d}] {progress_pct:3.0f}% | {ticker:8s} | "
                 f"QA: {qa_groups_count:3d} | "
                 f"Gaps: {metrics.get('unassigned_blocks', 0):4d} | "
                 f"${metrics.get('llm_cost', 0):.4f} | "
                 f"{metrics.get('processing_time', 0):5.1f}s"
             )
-            
+
             # Add error info if present
             if metrics.get("errors"):
                 status_line += f" | Errors: {', '.join(metrics['errors'])}"
-            
+
             # Log the single status line
             if status_color:
                 log_console(status_line, status_color)
@@ -2352,19 +2839,21 @@ def main() -> None:
         log_console(f"PROCESSING COMPLETE: {successful_transcripts} succeeded, {failed_transcripts} failed, "
                    f"Total QA Groups: {total_qa_groups_count}, Total Cost: ${enhanced_error_logger.total_cost:.4f}")
         log_console("")
-        
-        # Step 12: Close JSON arrays in output files
-        log_console("Step 12: Finalizing output files...")
-        
-        # Close main output file
-        if successful_transcripts > 0:
-            if not close_json_array(nas_conn, output_file_path):
-                log_console("Warning: Failed to properly close main output file", "WARNING")
-        
-        # Close failed transcripts file
-        if failed_transcripts > 0:
-            if not close_json_array(nas_conn, failed_file_path):
-                log_console("Warning: Failed to properly close failed transcripts file", "WARNING")
+
+        # Step 13: Consolidate individual files into master file
+        log_console("Step 13: Consolidating individual files into master output...")
+        consolidated_file_path = consolidate_individual_files()
+
+        if consolidated_file_path:
+            log_console(f"Successfully consolidated to: {consolidated_file_path}")
+
+            # Optional: Clean up individual files after successful consolidation
+            cleanup_enabled = config["stage_05_qa_pairing"].get("cleanup_individual_files", False)
+            if cleanup_enabled:
+                log_console("Cleaning up individual files...")
+                cleanup_individual_files()
+        else:
+            log_console("Warning: Consolidation failed - individual files preserved", "WARNING")
         
         # Update stage summary
         stage_summary["total_qa_groups_identified"] = total_qa_groups_count
@@ -2392,9 +2881,9 @@ def main() -> None:
         log_console("=" * 120)
         log_console("")
         log_console("SUMMARY:")
-        log_console(f"  • Transcripts Processed: {successful_transcripts}/{stage_summary['total_transcripts_processed']} succeeded")
+        log_console(f"  • Transcripts Processed: {successful_transcripts}/{to_process_count} succeeded")
         if stage_summary.get("resumed_from_existing"):
-            log_console(f"  • Resume Mode: Skipped {stage_summary.get('skipped_completed_transcripts', 0)} already completed")
+            log_console(f"  • Resume Mode: Skipped {resumed_count} already completed")
         log_console(f"  • Q&A Groups Created: {stage_summary['total_qa_groups_identified']}")
         log_console(f"  • Total Records: {stage_summary['total_records_processed']:,}")
         log_console("")
@@ -2413,10 +2902,10 @@ def main() -> None:
                     log_console(f"  • {error_type}: {count}")
         log_console("")
         log_console("OUTPUT FILES:")
-        if successful_transcripts > 0:
-            log_console(f"  • Main: {output_filename}")
+        if consolidated_file_path:
+            log_console(f"  • Consolidated: {consolidated_file_path}")
         if failed_transcripts > 0:
-            log_console(f"  • Failed: {failed_filename}")
+            log_console(f"  • Failed transcripts tracked in manifest.json")
         log_console("=" * 120)
 
     except Exception as e:
