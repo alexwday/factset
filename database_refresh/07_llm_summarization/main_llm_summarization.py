@@ -399,6 +399,523 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
         return False
 
 
+def list_nas_directory(conn: SMBConnection, dir_path: str) -> List[str]:
+    """List all files in NAS directory."""
+    try:
+        shared_files = conn.listPath(os.getenv("NAS_SHARE_NAME"), dir_path)
+        return [f.filename for f in shared_files if not f.filename.startswith('.')]
+    except Exception as e:
+        log_error(f"Failed to list directory {dir_path}", "nas_list", {"error": str(e)})
+        return []
+
+
+def nas_rename_file(conn: SMBConnection, old_path: str, new_path: str) -> bool:
+    """Rename file on NAS (copy → delete pattern for SMB)."""
+    try:
+        content = nas_download_file(conn, old_path)
+        if not content:
+            return False
+        file_obj = io.BytesIO(content)
+        if not nas_upload_file(conn, file_obj, new_path):
+            return False
+        nas_delete_file(conn, old_path)
+        return True
+    except Exception as e:
+        log_error(f"Failed to rename file {old_path} → {new_path}", "nas_rename", {"error": str(e)})
+        return False
+
+
+def nas_delete_file(conn: SMBConnection, file_path: str) -> bool:
+    """Delete file from NAS."""
+    try:
+        conn.deleteFiles(os.getenv("NAS_SHARE_NAME"), file_path)
+        return True
+    except Exception as e:
+        log_error(f"Failed to delete file {file_path}", "nas_delete", {"error": str(e)})
+        return False
+
+
+def initialize_empty_manifest() -> Dict:
+    """Initialize a new empty manifest."""
+    return {
+        "version": "7.0.0",
+        "created_at": datetime.now().isoformat(),
+        "last_updated": datetime.now().isoformat(),
+        "total_transcripts": 0,
+        "completed_transcripts": 0,
+        "failed_transcripts": 0,
+        "consolidation_status": "not_started",
+        "transcripts": {}
+    }
+
+
+def load_manifest_with_recovery() -> Dict:
+    """Load manifest with crash recovery support."""
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        return initialize_empty_manifest()
+
+    try:
+        manifest_path = nas_path_join(
+            config["stage_07_llm_summarization"]["output_data_path"],
+            "manifest.json"
+        )
+        temp_path = nas_path_join(
+            config["stage_07_llm_summarization"]["output_data_path"],
+            "manifest.json.tmp"
+        )
+
+        # Try to load main manifest
+        manifest_content = nas_download_file(nas_conn, manifest_path)
+        if manifest_content:
+            try:
+                manifest = json.loads(manifest_content.decode('utf-8'))
+                nas_conn.close()
+                return manifest
+            except json.JSONDecodeError:
+                log_console("Main manifest corrupted, trying temp...", "WARNING")
+
+        # Try temp manifest
+        temp_content = nas_download_file(nas_conn, temp_path)
+        if temp_content:
+            try:
+                manifest = json.loads(temp_content.decode('utf-8'))
+                log_console("Recovered from temp manifest", "WARNING")
+                nas_conn.close()
+                return manifest
+            except json.JSONDecodeError:
+                log_console("Temp manifest also corrupted", "WARNING")
+
+        log_console("No valid manifest found, initializing new one")
+        nas_conn.close()
+        return initialize_empty_manifest()
+
+    except Exception as e:
+        log_error(f"Failed to load manifest: {e}", "manifest_load")
+        if nas_conn:
+            nas_conn.close()
+        return initialize_empty_manifest()
+
+
+def update_manifest_atomic(transcript_id: str, updates: Dict) -> bool:
+    """Atomically update manifest using temp file pattern."""
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        log_error("Failed to connect to NAS for manifest update", "manifest_update")
+        return False
+
+    try:
+        manifest_path = nas_path_join(
+            config["stage_07_llm_summarization"]["output_data_path"],
+            "manifest.json"
+        )
+        temp_path = nas_path_join(
+            config["stage_07_llm_summarization"]["output_data_path"],
+            "manifest.json.tmp"
+        )
+
+        # Load current manifest
+        manifest_content = nas_download_file(nas_conn, manifest_path)
+        if manifest_content:
+            try:
+                manifest = json.loads(manifest_content.decode('utf-8'))
+            except json.JSONDecodeError:
+                manifest = initialize_empty_manifest()
+        else:
+            manifest = initialize_empty_manifest()
+
+        # Apply updates
+        if transcript_id not in manifest["transcripts"]:
+            manifest["transcripts"][transcript_id] = {}
+
+        manifest["transcripts"][transcript_id].update(updates)
+        manifest["last_updated"] = datetime.now().isoformat()
+
+        # Recalculate summary statistics
+        manifest["total_transcripts"] = len(manifest["transcripts"])
+        manifest["completed_transcripts"] = sum(
+            1 for t in manifest["transcripts"].values() if t.get("status") == "completed"
+        )
+        manifest["failed_transcripts"] = sum(
+            1 for t in manifest["transcripts"].values() if t.get("status") == "failed"
+        )
+
+        # Write to temp file
+        temp_obj = io.BytesIO(json.dumps(manifest, indent=2).encode('utf-8'))
+        if not nas_upload_file(nas_conn, temp_obj, temp_path):
+            nas_conn.close()
+            return False
+
+        # Atomic rename
+        if nas_file_exists(nas_conn, manifest_path):
+            nas_delete_file(nas_conn, manifest_path)
+        nas_rename_file(nas_conn, temp_path, manifest_path)
+
+        nas_conn.close()
+        return True
+
+    except Exception as e:
+        log_error(f"Failed to update manifest: {e}", "manifest_update", {"error": str(e)})
+        if nas_conn:
+            nas_conn.close()
+        return False
+
+
+def create_json_from_records(records: List[Dict]) -> str:
+    """Create JSON content from records."""
+    return json.dumps(records, indent=2, default=str)
+
+
+def create_metadata_file(nas_conn: SMBConnection, transcript_id: str, json_path: str, record_count: int) -> Optional[Dict]:
+    """Create validation metadata after successful write."""
+    import hashlib
+
+    try:
+        json_content = nas_download_file(nas_conn, json_path)
+        if not json_content:
+            raise ValueError("Failed to download JSON for metadata creation")
+
+        metadata = {
+            "transcript_id": transcript_id,
+            "created_at": datetime.now().isoformat(),
+            "file_size_bytes": len(json_content),
+            "sha256_checksum": hashlib.sha256(json_content).hexdigest(),
+            "expected_records": record_count,
+            "stage_version": "7.0.0",
+            "processing_host": os.getenv("CLIENT_MACHINE_NAME")
+        }
+
+        meta_path = f"{json_path}.meta"
+        meta_content = json.dumps(metadata, indent=2)
+        meta_obj = io.BytesIO(meta_content.encode('utf-8'))
+
+        if not nas_upload_file(nas_conn, meta_obj, meta_path):
+            raise ValueError("Failed to upload metadata file")
+
+        return metadata
+
+    except Exception as e:
+        log_error(f"Failed to create metadata for {transcript_id}: {e}", "metadata_create")
+        return None
+
+
+def validate_json_integrity(nas_conn: SMBConnection, json_path: str, meta_path: str) -> bool:
+    """Validate JSON file against metadata."""
+    import hashlib
+
+    try:
+        meta_content = nas_download_file(nas_conn, meta_path)
+        if not meta_content:
+            return False
+
+        metadata = json.loads(meta_content.decode('utf-8'))
+        json_content = nas_download_file(nas_conn, json_path)
+        if not json_content:
+            return False
+
+        checks = {
+            "file_size": len(json_content) == metadata["file_size_bytes"],
+            "checksum": hashlib.sha256(json_content).hexdigest() == metadata["sha256_checksum"],
+        }
+
+        try:
+            records = json.loads(json_content.decode('utf-8'))
+            checks["valid_json"] = True
+            checks["record_count"] = len(records) == metadata["expected_records"]
+        except:
+            checks["valid_json"] = False
+            checks["record_count"] = False
+
+        return all(checks.values())
+
+    except Exception as e:
+        log_console(f"Validation error for {json_path}: {e}", "ERROR")
+        return False
+
+
+def cleanup_tmp_file(nas_conn: SMBConnection, transcript_id: str):
+    """Remove temporary file after crash or error."""
+    output_path = config["stage_07_llm_summarization"]["output_data_path"]
+    tmp_path = nas_path_join(output_path, "individual", f"{transcript_id}.json.tmp")
+    if nas_file_exists(nas_conn, tmp_path):
+        nas_delete_file(nas_conn, tmp_path)
+
+
+def quarantine_corrupt_file(nas_conn: SMBConnection, transcript_id: str):
+    """Move corrupted file to failed/ directory."""
+    output_path = config["stage_07_llm_summarization"]["output_data_path"]
+    json_path = nas_path_join(output_path, "individual", f"{transcript_id}.json")
+    meta_path = f"{json_path}.meta"
+    tmp_path = f"{json_path}.tmp"
+
+    failed_dir = nas_path_join(output_path, "failed")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if nas_file_exists(nas_conn, json_path):
+        nas_rename_file(nas_conn, json_path, nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.json.corrupt"))
+    if nas_file_exists(nas_conn, meta_path):
+        nas_rename_file(nas_conn, meta_path, nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.meta.corrupt"))
+    if nas_file_exists(nas_conn, tmp_path):
+        nas_rename_file(nas_conn, tmp_path, nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.tmp.corrupt"))
+
+
+def cleanup_individual_files(nas_conn: SMBConnection, file_list: List[str]):
+    """Delete individual files after successful consolidation."""
+    output_path = config["stage_07_llm_summarization"]["output_data_path"]
+    for json_filename in file_list:
+        json_path = nas_path_join(output_path, "individual", json_filename)
+        meta_path = f"{json_path}.meta"
+        nas_delete_file(nas_conn, json_path)
+        nas_delete_file(nas_conn, meta_path)
+    log_console(f"Cleaned up {len(file_list)} individual files")
+
+
+def process_and_save_transcript_resilient(
+    transcript_id: str,
+    transcript_records: List[Dict],
+    enhanced_error_logger: EnhancedErrorLogger,
+    max_retries: int = 3
+) -> bool:
+    """Crash-resilient transcript processing with error handling."""
+    retry_delay = 5
+
+    for attempt in range(max_retries):
+        nas_conn = None
+        try:
+            update_manifest_atomic(transcript_id, {
+                "status": "in_progress",
+                "started_at": datetime.now().isoformat(),
+                "attempt": attempt + 1
+            })
+
+            log_console(f"  Processing summaries for {transcript_id} (attempt {attempt + 1}/{max_retries})")
+            enhanced_records = process_transcript(transcript_records, transcript_id, enhanced_error_logger)
+
+            if not enhanced_records:
+                raise ValueError(f"No records generated for {transcript_id}")
+
+            json_content = create_json_from_records(enhanced_records)
+
+            nas_conn = get_nas_connection()
+            if not nas_conn:
+                raise RuntimeError("Failed to connect to NAS")
+
+            output_path = config["stage_07_llm_summarization"]["output_data_path"]
+            individual_path = nas_path_join(output_path, "individual", f"{transcript_id}.json")
+            temp_path = f"{individual_path}.tmp"
+
+            log_console(f"  Writing to temp file...")
+            temp_obj = io.BytesIO(json_content.encode('utf-8'))
+            if not nas_upload_file(nas_conn, temp_obj, temp_path):
+                raise IOError(f"Failed to upload temp file for {transcript_id}")
+
+            log_console(f"  Finalizing file...")
+            if not nas_rename_file(nas_conn, temp_path, individual_path):
+                raise IOError(f"Failed to rename temp file for {transcript_id}")
+
+            log_console(f"  Creating metadata...")
+            metadata = create_metadata_file(nas_conn, transcript_id, individual_path, len(enhanced_records))
+            if not metadata:
+                raise ValueError(f"Failed to create metadata for {transcript_id}")
+
+            log_console(f"  Validating file integrity...")
+            if not validate_json_integrity(nas_conn, individual_path, f"{individual_path}.meta"):
+                raise ValueError(f"Final validation failed for {transcript_id}")
+
+            update_manifest_atomic(transcript_id, {
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "record_count": len(enhanced_records),
+                "file_size_bytes": len(json_content),
+                "individual_file": individual_path,
+                "metadata_file": f"{individual_path}.meta"
+            })
+
+            log_console(f"✓ Successfully saved {transcript_id} ({len(enhanced_records)} records)")
+
+            if nas_conn:
+                nas_conn.close()
+
+            return True
+
+        except Exception as e:
+            log_console(f"Error processing {transcript_id} (attempt {attempt + 1}/{max_retries}): {e}", "WARNING")
+
+            if nas_conn:
+                try:
+                    cleanup_tmp_file(nas_conn, transcript_id)
+                except:
+                    pass
+                nas_conn.close()
+
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (2 ** attempt))
+                continue
+            else:
+                log_console(f"✗ Failed to process {transcript_id} after {max_retries} attempts", "ERROR")
+
+                nas_conn_cleanup = get_nas_connection()
+                if nas_conn_cleanup:
+                    try:
+                        quarantine_corrupt_file(nas_conn_cleanup, transcript_id)
+                    except:
+                        pass
+                    nas_conn_cleanup.close()
+
+                update_manifest_atomic(transcript_id, {
+                    "status": "failed",
+                    "error": str(e),
+                    "failed_at": datetime.now().isoformat(),
+                    "retry_count": max_retries
+                })
+
+                return False
+
+    return False
+
+
+def analyze_resume_state(all_transcripts: Dict[str, List[Dict]]) -> Tuple[List[str], List[str], List[str]]:
+    """Analyze which transcripts need processing based on manifest."""
+    manifest = load_manifest_with_recovery()
+
+    to_process = []
+    completed = []
+    failed_list = []
+
+    for transcript_id in all_transcripts.keys():
+        transcript_info = manifest.get("transcripts", {}).get(transcript_id, {})
+        status = transcript_info.get("status", "not_started")
+
+        if status == "completed":
+            nas_conn = get_nas_connection()
+            if nas_conn:
+                output_path = config["stage_07_llm_summarization"]["output_data_path"]
+                json_path = nas_path_join(output_path, "individual", f"{transcript_id}.json")
+                meta_path = f"{json_path}.meta"
+
+                if nas_file_exists(nas_conn, json_path) and validate_json_integrity(nas_conn, json_path, meta_path):
+                    completed.append(transcript_id)
+                    nas_conn.close()
+                else:
+                    log_console(f"  {transcript_id}: marked complete but file invalid - will reprocess", "WARNING")
+                    to_process.append(transcript_id)
+                    nas_conn.close()
+            else:
+                completed.append(transcript_id)
+
+        elif status == "failed":
+            failed_list.append(transcript_id)
+            retry_failed = config["stage_07_llm_summarization"].get("retry_failed_on_resume", False)
+            if retry_failed:
+                log_console(f"  {transcript_id}: previously failed - will retry", "WARNING")
+                to_process.append(transcript_id)
+
+        elif status == "in_progress":
+            log_console(f"  {transcript_id}: was in progress - will reprocess", "WARNING")
+            to_process.append(transcript_id)
+
+        else:
+            to_process.append(transcript_id)
+
+    return to_process, completed, failed_list
+
+
+def consolidate_individual_files() -> Optional[str]:
+    """Consolidate all individual transcript JSONs into master file."""
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        log_console("Failed to connect to NAS for consolidation", "ERROR")
+        return None
+
+    try:
+        output_path = config["stage_07_llm_summarization"]["output_data_path"]
+        individual_dir = nas_path_join(output_path, "individual")
+        consolidated_dir = nas_path_join(output_path, "consolidated")
+
+        log_console("Scanning for individual transcript files...")
+        all_files = list_nas_directory(nas_conn, individual_dir)
+        json_files = [f for f in all_files if f.endswith('.json') and not f.endswith('.tmp')]
+
+        log_console(f"Found {len(json_files)} individual JSON files to consolidate")
+
+        if len(json_files) == 0:
+            log_console("No files to consolidate", "WARNING")
+            nas_conn.close()
+            return None
+
+        valid_files = []
+        invalid_files = []
+
+        log_console("Validating individual files...")
+        for json_file in json_files:
+            json_path = nas_path_join(individual_dir, json_file)
+            meta_path = f"{json_path}.meta"
+
+            if validate_json_integrity(nas_conn, json_path, meta_path):
+                valid_files.append(json_file)
+            else:
+                invalid_files.append(json_file)
+                transcript_id = json_file.replace('.json', '')
+                quarantine_corrupt_file(nas_conn, transcript_id)
+
+        if invalid_files:
+            log_console(f"WARNING: {len(invalid_files)} files failed validation - quarantined", "WARNING")
+
+        log_console(f"Consolidating {len(valid_files)} validated files...")
+
+        temp_consolidated_path = nas_path_join(consolidated_dir, "stage_07_summaries.json.tmp")
+        final_consolidated_path = nas_path_join(consolidated_dir, "stage_07_summaries.json")
+
+        all_records = []
+
+        for i, json_file in enumerate(valid_files):
+            json_path = nas_path_join(individual_dir, json_file)
+            json_content = nas_download_file(nas_conn, json_path)
+
+            if not json_content:
+                log_console(f"ERROR: Could not download {json_file}", "ERROR")
+                continue
+
+            records = json.loads(json_content.decode('utf-8'))
+            all_records.extend(records)
+
+            if (i + 1) % 10 == 0 or (i + 1) == len(valid_files):
+                log_console(f"  Progress: {i + 1}/{len(valid_files)} files, {len(all_records)} records")
+
+        log_console("Uploading consolidated file...")
+        consolidated_content = json.dumps(all_records, indent=2, default=str)
+        temp_file_obj = io.BytesIO(consolidated_content.encode('utf-8'))
+
+        if not nas_upload_file(nas_conn, temp_file_obj, temp_consolidated_path):
+            raise RuntimeError("Failed to write consolidated temp file")
+
+        log_console("Finalizing consolidated file...")
+        if nas_file_exists(nas_conn, final_consolidated_path):
+            nas_delete_file(nas_conn, final_consolidated_path)
+        if not nas_rename_file(nas_conn, temp_consolidated_path, final_consolidated_path):
+            raise RuntimeError("Failed to finalize consolidated file")
+
+        log_console(f"✓ Consolidation complete: {len(all_records)} total records in {len(valid_files)} transcripts")
+
+        cleanup_enabled = config["stage_07_llm_summarization"].get("cleanup_after_consolidation", True)
+        if cleanup_enabled:
+            log_console("Cleaning up individual files...")
+            cleanup_individual_files(nas_conn, valid_files)
+            log_console("✓ Cleanup complete")
+        else:
+            log_console("Individual files preserved (cleanup disabled in config)")
+
+        nas_conn.close()
+        return final_consolidated_path
+
+    except Exception as e:
+        log_console(f"Consolidation failed: {e}", "ERROR")
+        log_error(f"Consolidation error: {e}", "consolidation_error")
+        if nas_conn:
+            nas_conn.close()
+        return None
+
+
 def load_stage_config(nas_conn: SMBConnection) -> Dict:
     """Load and validate Stage 7 configuration from NAS."""
     try:
@@ -1405,127 +1922,144 @@ def main():
             transcripts = dict(transcript_items)
             log_console(f"Development mode: limited to {len(transcripts)} transcripts")
 
-        # Check for resume capability (default: enabled)
-        enable_resume = config["stage_07_llm_summarization"].get("enable_resume", True)
-        completed_transcript_ids = set()
-
-        if enable_resume:
-            # Load existing output to identify completed transcripts
-            output_path_base = config["stage_07_llm_summarization"]["output_data_path"]
-            completed_transcript_ids = load_existing_output(nas_conn, output_path_base)
-
-            if completed_transcript_ids:
-                # Filter out already-processed transcripts
-                original_count = len(transcripts)
-                transcripts = {tid: records for tid, records in transcripts.items()
-                              if tid not in completed_transcript_ids}
-                resumed_count = original_count - len(transcripts)
-
-                if resumed_count > 0:
-                    log_console(f"RESUME MODE: Skipping {resumed_count} already-processed transcripts")
-                    log_console(f"Remaining transcripts to process: {len(transcripts)}")
-
-                if len(transcripts) == 0:
-                    log_console("All transcripts already processed. Nothing to do.")
-                    # Close JSON array and exit
-                    output_path = nas_path_join(output_path_base, "stage_07_summarized_content.json")
-                    if not close_json_array(nas_conn, output_path):
-                        log_console("Warning: Failed to properly close existing output file", "WARNING")
-                    return
-
         # Initialize enhanced error logger
         enhanced_error_logger = EnhancedErrorLogger()
 
-        # Process each transcript
-        all_enhanced_records = []
-        failed_transcripts = []
+        # Analyze resume state
+        log_console("=" * 50)
+        log_console("Analyzing resume state...")
+        to_process_ids, completed_ids, failed_ids = analyze_resume_state(transcripts)
 
-        output_path = nas_path_join(
-            config["stage_07_llm_summarization"]["output_data_path"],
-            "stage_07_summarized_content.json"
-        )
+        log_console(f"Resume analysis:")
+        log_console(f"  To process: {len(to_process_ids)}")
+        log_console(f"  Already completed: {len(completed_ids)}")
+        log_console(f"  Previously failed: {len(failed_ids)}")
+        log_console("=" * 50)
+
+        # Filter transcripts to process
+        transcripts_to_process = {
+            tid: transcripts[tid] for tid in to_process_ids if tid in transcripts
+        }
+
+        if len(transcripts_to_process) == 0:
+            log_console("All transcripts already processed. Moving to consolidation...")
+        else:
+            log_console(f"Processing {len(transcripts_to_process)} transcripts...")
+
+        # Process each transcript with crash-resilient save
+        failed_transcripts = []
+        successful_count = 0
 
         start_time = datetime.now()
 
-        for i, (transcript_id, transcript_records) in enumerate(transcripts.items(), 1):
+        for i, (transcript_id, transcript_records) in enumerate(transcripts_to_process.items(), 1):
             transcript_start = datetime.now()
-            
+
             try:
-                log_console(f"Processing transcript {i}/{len(transcripts)}: {transcript_id}")
-                
+                log_console(f"\n[{i}/{len(transcripts_to_process)}] {transcript_id} ({len(transcript_records)} records)")
+
+                if not transcript_records:
+                    log_console(f"ERROR: Transcript {transcript_id} has no records!", "ERROR")
+                    failed_transcripts.append({
+                        "transcript": transcript_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "error": "No records found"
+                    })
+                    continue
+
                 # Refresh OAuth token per transcript
                 sample_record = transcript_records[0] if transcript_records else {}
                 refresh_oauth_token_for_transcript(sample_record)
-                
-                # Process transcript
-                enhanced_records = process_transcript(transcript_records, transcript_id, enhanced_error_logger)
 
-                # Save results incrementally
-                # First batch only if: first transcript AND no existing output
-                is_first_batch = (i == 1 and not completed_transcript_ids)
-                save_results_incrementally(enhanced_records, output_path, is_first_batch=is_first_batch)
-                
-                all_enhanced_records.extend(enhanced_records)
-                
+                # Process and save with resilient error handling
+                success = process_and_save_transcript_resilient(
+                    transcript_id,
+                    transcript_records,
+                    enhanced_error_logger
+                )
+
+                if success:
+                    successful_count += 1
+                else:
+                    failed_transcripts.append({
+                        "transcript": transcript_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "error": "Processing failed after retries"
+                    })
+
                 transcript_time = datetime.now() - transcript_start
-                log_console(f"Completed transcript {transcript_id} in {transcript_time}")
-                
+                log_console(f"  Time: {transcript_time}")
+
                 # Rate limiting
                 time.sleep(1)
-            
+
             except Exception as e:
                 transcript_time = datetime.now() - transcript_start
                 enhanced_error_logger.log_processing_error(transcript_id, f"Failed after {transcript_time}: {e}")
-                
+
                 failed_transcripts.append({
                     "transcript": transcript_id,
                     "timestamp": datetime.now().isoformat(),
-                    "reason": f"Processing failed - see error logs: {e}"
+                    "error": str(e),
+                    "processing_time": str(transcript_time)
                 })
-                
-                log_console(f"Failed transcript {transcript_id}: {e}", "ERROR")
-        
-        # Close JSON array
-        nas_conn_final = get_nas_connection()
-        if nas_conn_final:
-            close_json_array(nas_conn_final, output_path)
-            nas_conn_final.close()
-        
-        # Save failed transcripts
-        save_failed_transcripts(failed_transcripts, nas_conn)
+
+                log_console(f"✗ Failed to process transcript {transcript_id}: {e}", "ERROR")
+
+        # Save failed transcripts summary
+        if failed_transcripts:
+            save_failed_transcripts(failed_transcripts, nas_conn)
+
+        # Consolidate individual files
+        log_console("=" * 50)
+        log_console("Starting consolidation of individual files...")
+        log_console("=" * 50)
+
+        consolidated_path = consolidate_individual_files()
+
+        if consolidated_path:
+            log_console(f"✓ Consolidated file: {consolidated_path}")
+        else:
+            log_console("✗ Consolidation failed - individual files preserved", "WARNING")
         
         # Calculate final metrics
         end_time = datetime.now()
         execution_time = end_time - start_time
-        
-        # Calculate summary statistics
-        records_with_summaries = len([r for r in all_enhanced_records if r.get("block_summary")])
-        records_without_summaries = len(all_enhanced_records) - records_with_summaries
-        
+
         stage_summary = {
+            "stage": "07_llm_summarization",
+            "mode": "crash_resilient_individual_files",
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "total_time": str(execution_time),
             "total_transcripts": len(transcripts),
-            "successful_transcripts": len(transcripts) - len(failed_transcripts),
-            "failed_transcripts": len(failed_transcripts),
-            "total_records": len(all_enhanced_records),
-            "records_with_summaries": records_with_summaries,
-            "execution_time": str(execution_time),
+            "transcripts_to_process": len(transcripts_to_process),
+            "transcripts_completed": len(completed_ids) + successful_count,
+            "transcripts_skipped": len(completed_ids),
+            "transcripts_newly_processed": successful_count,
+            "transcripts_failed": len(failed_transcripts),
             "total_cost": enhanced_error_logger.total_cost,
             "total_tokens": enhanced_error_logger.total_tokens,
-            "resumed_from_existing": bool(completed_transcript_ids),
-            "skipped_completed_transcripts": len(completed_transcript_ids)
+            "summarization_errors": len(enhanced_error_logger.summarization_errors),
+            "processing_errors": len(enhanced_error_logger.processing_errors),
+            "output_format": "Individual JSON files with consolidation",
+            "consolidated_file": consolidated_path if consolidated_path else "consolidation_failed"
         }
-        
+
         # Final summary
-        log_console("="*60)
-        log_console("STAGE 7 SUMMARIZATION COMPLETE")
-        log_console("="*60)
-        log_console(f"Transcripts processed: {stage_summary['successful_transcripts']}/{stage_summary['total_transcripts']}")
-        log_console(f"Records with summaries: {records_with_summaries}/{stage_summary['total_records']}")
-        log_console(f"Records without summaries: {records_without_summaries}")
-        log_console(f"Total cost: ${stage_summary['total_cost']:.4f}")
-        log_console(f"Total tokens: {stage_summary['total_tokens']:,}")
-        log_console(f"Execution time: {stage_summary['execution_time']}")
-        log_console("="*60)
+        log_console("=" * 50)
+        log_console("STAGE 7 SUMMARY")
+        log_console("=" * 50)
+        log_console(f"Total time: {execution_time}")
+        log_console(f"Total transcripts: {len(transcripts)}")
+        log_console(f"  Already completed (skipped): {len(completed_ids)}")
+        log_console(f"  Newly processed: {successful_count}")
+        log_console(f"  Failed: {len(failed_transcripts)}")
+        log_console(f"Total cost: ${enhanced_error_logger.total_cost:.4f}")
+        log_console(f"Total tokens: {enhanced_error_logger.total_tokens:,}")
+        if consolidated_path:
+            log_console(f"Consolidated file: {consolidated_path}")
+        log_console("=" * 50)
         
         # Save logs
         save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
