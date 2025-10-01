@@ -366,18 +366,699 @@ def nas_upload_file(conn: SMBConnection, local_file_obj: io.BytesIO, nas_file_pa
     if not validate_nas_path(nas_file_path):
         log_error(f"Invalid NAS path: {nas_file_path}", "path_validation")
         return False
-    
+
     try:
         dir_path = "/".join(nas_file_path.split("/")[:-1])
         if dir_path and not nas_file_exists(conn, nas_file_path):
             nas_create_directory_recursive(conn, dir_path)
-        
+
         local_file_obj.seek(0)
         conn.storeFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, local_file_obj)
         return True
     except Exception as e:
         log_error(f"Failed to upload file to NAS: {nas_file_path}", "nas_upload", {"error": str(e)})
         return False
+
+
+def list_nas_directory(conn: SMBConnection, dir_path: str) -> List[str]:
+    """List all files in NAS directory."""
+    try:
+        shared_files = conn.listPath(os.getenv("NAS_SHARE_NAME"), dir_path)
+        return [f.filename for f in shared_files if not f.filename.startswith('.')]
+    except Exception as e:
+        log_error(f"Failed to list directory {dir_path}", "nas_list", {"error": str(e)})
+        return []
+
+
+def nas_rename_file(conn: SMBConnection, old_path: str, new_path: str) -> bool:
+    """
+    Rename file on NAS (atomic operation where supported).
+    SMB doesn't support true atomic rename, so we do: copy → delete.
+    """
+    try:
+        # Download file
+        content = nas_download_file(conn, old_path)
+        if not content:
+            return False
+
+        # Upload to new location
+        file_obj = io.BytesIO(content)
+        if not nas_upload_file(conn, file_obj, new_path):
+            return False
+
+        # Delete old file
+        nas_delete_file(conn, old_path)
+
+        return True
+    except Exception as e:
+        log_error(f"Failed to rename file {old_path} → {new_path}", "nas_rename", {"error": str(e)})
+        return False
+
+
+def nas_delete_file(conn: SMBConnection, file_path: str) -> bool:
+    """Delete file from NAS."""
+    try:
+        conn.deleteFiles(os.getenv("NAS_SHARE_NAME"), file_path)
+        return True
+    except Exception as e:
+        log_error(f"Failed to delete file {file_path}", "nas_delete", {"error": str(e)})
+        return False
+
+
+def load_manifest_with_recovery() -> Dict:
+    """Load manifest with crash recovery support."""
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        return initialize_empty_manifest()
+
+    try:
+        manifest_path = nas_path_join(
+            config["stage_08_embeddings_generation"]["output_data_path"],
+            "manifest.json"
+        )
+        temp_path = nas_path_join(
+            config["stage_08_embeddings_generation"]["output_data_path"],
+            "manifest.json.tmp"
+        )
+
+        # Try to load main manifest
+        manifest_content = nas_download_file(nas_conn, manifest_path)
+        if manifest_content:
+            try:
+                manifest = json.loads(manifest_content.decode('utf-8'))
+                nas_conn.close()
+                return manifest
+            except json.JSONDecodeError:
+                log_console("Main manifest corrupted, trying temp...", "WARNING")
+
+        # Try temp manifest
+        temp_content = nas_download_file(nas_conn, temp_path)
+        if temp_content:
+            try:
+                manifest = json.loads(temp_content.decode('utf-8'))
+                log_console("Recovered from temp manifest", "WARNING")
+                nas_conn.close()
+                return manifest
+            except json.JSONDecodeError:
+                log_console("Temp manifest also corrupted", "WARNING")
+
+        # Initialize new manifest
+        log_console("No valid manifest found, initializing new one")
+        nas_conn.close()
+        return initialize_empty_manifest()
+
+    except Exception as e:
+        log_error(f"Failed to load manifest: {e}", "manifest_load")
+        if nas_conn:
+            nas_conn.close()
+        return initialize_empty_manifest()
+
+
+def initialize_empty_manifest() -> Dict:
+    """Initialize a new empty manifest."""
+    return {
+        "version": "8.0.0",
+        "created_at": datetime.now().isoformat(),
+        "last_updated": datetime.now().isoformat(),
+        "total_transcripts": 0,
+        "completed_transcripts": 0,
+        "failed_transcripts": 0,
+        "consolidation_status": "not_started",
+        "transcripts": {}
+    }
+
+
+def update_manifest_atomic(transcript_id: str, updates: Dict) -> bool:
+    """Atomically update manifest using temp file pattern."""
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        log_error("Failed to connect to NAS for manifest update", "manifest_update")
+        return False
+
+    try:
+        manifest_path = nas_path_join(
+            config["stage_08_embeddings_generation"]["output_data_path"],
+            "manifest.json"
+        )
+        temp_path = nas_path_join(
+            config["stage_08_embeddings_generation"]["output_data_path"],
+            "manifest.json.tmp"
+        )
+
+        # Load current manifest
+        manifest_content = nas_download_file(nas_conn, manifest_path)
+        if manifest_content:
+            try:
+                manifest = json.loads(manifest_content.decode('utf-8'))
+            except json.JSONDecodeError:
+                manifest = initialize_empty_manifest()
+        else:
+            manifest = initialize_empty_manifest()
+
+        # Apply updates
+        if transcript_id not in manifest["transcripts"]:
+            manifest["transcripts"][transcript_id] = {}
+
+        manifest["transcripts"][transcript_id].update(updates)
+        manifest["last_updated"] = datetime.now().isoformat()
+
+        # Recalculate summary statistics
+        manifest["total_transcripts"] = len(manifest["transcripts"])
+        manifest["completed_transcripts"] = sum(
+            1 for t in manifest["transcripts"].values() if t.get("status") == "completed"
+        )
+        manifest["failed_transcripts"] = sum(
+            1 for t in manifest["transcripts"].values() if t.get("status") == "failed"
+        )
+
+        # Write to temp file
+        temp_obj = io.BytesIO(json.dumps(manifest, indent=2).encode('utf-8'))
+        if not nas_upload_file(nas_conn, temp_obj, temp_path):
+            nas_conn.close()
+            return False
+
+        # Atomic rename (SMB limitation: delete old → rename new)
+        if nas_file_exists(nas_conn, manifest_path):
+            nas_delete_file(nas_conn, manifest_path)
+        nas_rename_file(nas_conn, temp_path, manifest_path)
+
+        nas_conn.close()
+        return True
+
+    except Exception as e:
+        log_error(f"Failed to update manifest: {e}", "manifest_update", {"error": str(e)})
+        if nas_conn:
+            nas_conn.close()
+        return False
+
+
+def create_csv_from_records(records: List[Dict]) -> str:
+    """Create CSV content from records (matches Stage 8 format)."""
+    output = io.StringIO()
+
+    fieldnames = [
+        'file_path', 'filename', 'date_last_modified', 'title', 'transcript_type',
+        'event_id', 'version_id', 'fiscal_year', 'fiscal_quarter',
+        'institution_type', 'institution_id', 'ticker', 'company_name',
+        'section_name', 'speaker_block_id', 'qa_group_id',
+        'classification_ids', 'classification_names', 'block_summary',
+        'chunk_id', 'chunk_tokens', 'chunk_content', 'chunk_paragraph_ids',
+        'chunk_embedding'
+    ]
+
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for record in records:
+        # Map fields and convert lists to JSON strings
+        row = {}
+        row['file_path'] = record.get('file_path', '')
+        row['filename'] = record.get('filename', '')
+        row['date_last_modified'] = record.get('date_last_modified', '')
+        row['title'] = record.get('title', '')
+        row['transcript_type'] = record.get('transcript_type', '')
+        row['event_id'] = record.get('event_id', '')
+        row['version_id'] = record.get('version_id', '')
+        row['fiscal_year'] = record.get('fiscal_year', '')
+        row['fiscal_quarter'] = record.get('fiscal_quarter', '')
+        row['institution_type'] = record.get('institution_type', '')
+        row['institution_id'] = record.get('institution_id', '')
+        row['ticker'] = record.get('ticker', '')
+        row['company_name'] = record.get('company_name', '')
+        row['section_name'] = record.get('section_name', '')
+        row['speaker_block_id'] = record.get('speaker_block_id', '')
+        row['qa_group_id'] = record.get('qa_group_id', '')
+        row['classification_ids'] = record.get('classification_ids', [])
+        row['classification_names'] = record.get('classification_names', [])
+        row['block_summary'] = record.get('block_summary', '')
+        row['chunk_id'] = record.get('chunk_id', 0)
+        row['chunk_tokens'] = record.get('chunk_tokens', 0)
+        row['chunk_content'] = record.get('chunk_text', '')
+        row['chunk_paragraph_ids'] = record.get('chunk_paragraph_ids', record.get('block_paragraph_ids', []))
+        row['chunk_embedding'] = record.get('embedding', [])
+
+        # Convert lists to JSON strings for CSV storage
+        if isinstance(row['chunk_embedding'], list):
+            row['chunk_embedding'] = json.dumps(row['chunk_embedding'])
+        if isinstance(row['chunk_paragraph_ids'], list):
+            row['chunk_paragraph_ids'] = json.dumps(row['chunk_paragraph_ids'])
+        if isinstance(row['classification_ids'], list):
+            row['classification_ids'] = json.dumps(row['classification_ids'])
+        if isinstance(row['classification_names'], list):
+            row['classification_names'] = json.dumps(row['classification_names'])
+
+        writer.writerow(row)
+
+    return output.getvalue()
+
+
+def create_metadata_file(nas_conn: SMBConnection, transcript_id: str, csv_path: str, record_count: int) -> Dict:
+    """Create validation metadata after successful write."""
+    import hashlib
+
+    try:
+        # Download CSV to calculate checksum
+        csv_content = nas_download_file(nas_conn, csv_path)
+        if not csv_content:
+            raise ValueError("Failed to download CSV for metadata creation")
+
+        metadata = {
+            "transcript_id": transcript_id,
+            "created_at": datetime.now().isoformat(),
+            "file_size_bytes": len(csv_content),
+            "line_count": csv_content.decode('utf-8').count('\n'),
+            "sha256_checksum": hashlib.sha256(csv_content).hexdigest(),
+            "expected_records": record_count,
+            "stage_version": "8.0.0",
+            "processing_host": os.getenv("CLIENT_MACHINE_NAME")
+        }
+
+        # Write metadata atomically
+        meta_path = f"{csv_path}.meta"
+        meta_content = json.dumps(metadata, indent=2)
+        meta_obj = io.BytesIO(meta_content.encode('utf-8'))
+
+        if not nas_upload_file(nas_conn, meta_obj, meta_path):
+            raise ValueError("Failed to upload metadata file")
+
+        return metadata
+
+    except Exception as e:
+        log_error(f"Failed to create metadata for {transcript_id}: {e}", "metadata_create")
+        return None
+
+
+def validate_csv_integrity(nas_conn: SMBConnection, csv_path: str, meta_path: str) -> bool:
+    """Validate CSV file against metadata."""
+    import hashlib
+
+    try:
+        # Load metadata
+        meta_content = nas_download_file(nas_conn, meta_path)
+        if not meta_content:
+            log_console(f"Missing metadata for {csv_path}", "ERROR")
+            return False
+
+        metadata = json.loads(meta_content.decode('utf-8'))
+
+        # Download CSV
+        csv_content = nas_download_file(nas_conn, csv_path)
+        if not csv_content:
+            log_console(f"Missing CSV file {csv_path}", "ERROR")
+            return False
+
+        # Validation checks
+        checks = {
+            "file_size": len(csv_content) == metadata["file_size_bytes"],
+            "line_count": csv_content.decode('utf-8').count('\n') == metadata["line_count"],
+            "checksum": hashlib.sha256(csv_content).hexdigest() == metadata["sha256_checksum"],
+        }
+
+        # Parse CSV and count records
+        csv_reader = csv.DictReader(io.StringIO(csv_content.decode('utf-8')))
+        actual_records = sum(1 for _ in csv_reader)
+        checks["record_count"] = actual_records == metadata["expected_records"]
+
+        # Check CSV structure
+        csv_reader = csv.DictReader(io.StringIO(csv_content.decode('utf-8')))
+        first_row = next(csv_reader, None)
+        if first_row:
+            required_fields = ['chunk_embedding', 'chunk_content', 'chunk_tokens']
+            checks["required_fields"] = all(f in first_row for f in required_fields)
+
+            # Validate embedding is valid JSON array
+            try:
+                embedding = json.loads(first_row['chunk_embedding'])
+                checks["embedding_valid"] = isinstance(embedding, list) and len(embedding) == 3072
+            except:
+                checks["embedding_valid"] = False
+        else:
+            checks["required_fields"] = False
+            checks["embedding_valid"] = False
+
+        # All checks must pass
+        if all(checks.values()):
+            return True
+        else:
+            failed_checks = [k for k, v in checks.items() if not v]
+            log_console(f"Validation failed for {csv_path}: {failed_checks}", "ERROR")
+            return False
+
+    except Exception as e:
+        log_console(f"Validation error for {csv_path}: {e}", "ERROR")
+        return False
+
+
+def cleanup_tmp_file(nas_conn: SMBConnection, transcript_id: str):
+    """Remove temporary file after crash or error."""
+    output_path = config["stage_08_embeddings_generation"]["output_data_path"]
+    tmp_path = nas_path_join(output_path, "individual", f"{transcript_id}.csv.tmp")
+
+    if nas_file_exists(nas_conn, tmp_path):
+        nas_delete_file(nas_conn, tmp_path)
+        log_console(f"Cleaned up temp file: {tmp_path}")
+
+
+def quarantine_corrupt_file(nas_conn: SMBConnection, transcript_id: str):
+    """Move corrupted file to failed/ directory for investigation."""
+    output_path = config["stage_08_embeddings_generation"]["output_data_path"]
+    csv_path = nas_path_join(output_path, "individual", f"{transcript_id}.csv")
+    meta_path = f"{csv_path}.meta"
+    tmp_path = f"{csv_path}.tmp"
+
+    failed_dir = nas_path_join(output_path, "failed")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Move CSV if exists
+    if nas_file_exists(nas_conn, csv_path):
+        failed_csv = nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.csv.corrupt")
+        nas_rename_file(nas_conn, csv_path, failed_csv)
+
+    # Move metadata if exists
+    if nas_file_exists(nas_conn, meta_path):
+        failed_meta = nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.meta.corrupt")
+        nas_rename_file(nas_conn, meta_path, failed_meta)
+
+    # Move temp if exists
+    if nas_file_exists(nas_conn, tmp_path):
+        failed_tmp = nas_path_join(failed_dir, f"{transcript_id}_{timestamp}.tmp.corrupt")
+        nas_rename_file(nas_conn, tmp_path, failed_tmp)
+
+    log_console(f"Quarantined corrupted files for {transcript_id}")
+
+
+def cleanup_individual_files(nas_conn: SMBConnection, file_list: List[str]):
+    """Delete individual files after successful consolidation."""
+    output_path = config["stage_08_embeddings_generation"]["output_data_path"]
+
+    for csv_filename in file_list:
+        csv_path = nas_path_join(output_path, "individual", csv_filename)
+        meta_path = f"{csv_path}.meta"
+
+        nas_delete_file(nas_conn, csv_path)
+        nas_delete_file(nas_conn, meta_path)
+
+    log_console(f"Cleaned up {len(file_list)} individual files")
+
+
+def process_and_save_transcript_resilient(
+    transcript_id: str,
+    transcript_records: List[Dict],
+    enhanced_error_logger: EnhancedErrorLogger,
+    max_retries: int = 3
+) -> bool:
+    """
+    Crash-resilient transcript processing with comprehensive error handling.
+    Processes transcript and saves to individual CSV file with validation.
+    """
+    retry_delay = 5  # seconds
+
+    for attempt in range(max_retries):
+        nas_conn = None
+        try:
+            # Mark as in-progress in manifest
+            update_manifest_atomic(transcript_id, {
+                "status": "in_progress",
+                "started_at": datetime.now().isoformat(),
+                "attempt": attempt + 1
+            })
+
+            # Process transcript (embeddings generation)
+            log_console(f"  Processing embeddings for {transcript_id} (attempt {attempt + 1}/{max_retries})")
+            enhanced_records = process_transcript(transcript_records, transcript_id, enhanced_error_logger)
+
+            if not enhanced_records:
+                raise ValueError(f"No records generated for {transcript_id}")
+
+            # Create CSV content
+            csv_content = create_csv_from_records(enhanced_records)
+
+            # Get NAS connection
+            nas_conn = get_nas_connection()
+            if not nas_conn:
+                raise RuntimeError("Failed to connect to NAS")
+
+            # Define paths
+            output_path = config["stage_08_embeddings_generation"]["output_data_path"]
+            individual_path = nas_path_join(output_path, "individual", f"{transcript_id}.csv")
+            temp_path = f"{individual_path}.tmp"
+
+            # Write CSV to temp file
+            log_console(f"  Writing to temp file...")
+            temp_obj = io.BytesIO(csv_content.encode('utf-8'))
+            if not nas_upload_file(nas_conn, temp_obj, temp_path):
+                raise IOError(f"Failed to upload temp file for {transcript_id}")
+
+            # Atomic rename: .tmp → .csv
+            log_console(f"  Finalizing file...")
+            if not nas_rename_file(nas_conn, temp_path, individual_path):
+                raise IOError(f"Failed to rename temp file for {transcript_id}")
+
+            # Create metadata file
+            log_console(f"  Creating metadata...")
+            metadata = create_metadata_file(nas_conn, transcript_id, individual_path, len(enhanced_records))
+            if not metadata:
+                raise ValueError(f"Failed to create metadata for {transcript_id}")
+
+            # Final validation
+            log_console(f"  Validating file integrity...")
+            if not validate_csv_integrity(nas_conn, individual_path, f"{individual_path}.meta"):
+                raise ValueError(f"Final validation failed for {transcript_id}")
+
+            # Update manifest as completed
+            update_manifest_atomic(transcript_id, {
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "record_count": len(enhanced_records),
+                "file_size_bytes": len(csv_content),
+                "individual_file": individual_path,
+                "metadata_file": f"{individual_path}.meta"
+            })
+
+            log_console(f"✓ Successfully saved {transcript_id} ({len(enhanced_records)} records)")
+
+            if nas_conn:
+                nas_conn.close()
+
+            return True
+
+        except Exception as e:
+            log_console(f"Error processing {transcript_id} (attempt {attempt + 1}/{max_retries}): {e}", "WARNING")
+
+            if nas_conn:
+                # Cleanup temp file on error
+                try:
+                    cleanup_tmp_file(nas_conn, transcript_id)
+                except:
+                    pass
+                nas_conn.close()
+
+            if attempt < max_retries - 1:
+                # Retry with exponential backoff
+                time.sleep(retry_delay * (2 ** attempt))
+                continue
+            else:
+                # Max retries exceeded - mark as failed
+                log_console(f"✗ Failed to process {transcript_id} after {max_retries} attempts", "ERROR")
+
+                # Quarantine any corrupted files
+                nas_conn_cleanup = get_nas_connection()
+                if nas_conn_cleanup:
+                    try:
+                        quarantine_corrupt_file(nas_conn_cleanup, transcript_id)
+                    except:
+                        pass
+                    nas_conn_cleanup.close()
+
+                # Update manifest as failed
+                update_manifest_atomic(transcript_id, {
+                    "status": "failed",
+                    "error": str(e),
+                    "failed_at": datetime.now().isoformat(),
+                    "retry_count": max_retries
+                })
+
+                return False
+
+    return False
+
+
+def analyze_resume_state(all_transcripts: Dict[str, List[Dict]]) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Analyze which transcripts need processing based on manifest.
+    Returns (to_process, completed, failed) transcript IDs.
+    """
+    manifest = load_manifest_with_recovery()
+
+    to_process = []
+    completed = []
+    failed_list = []
+
+    for transcript_id in all_transcripts.keys():
+        transcript_info = manifest.get("transcripts", {}).get(transcript_id, {})
+        status = transcript_info.get("status", "not_started")
+
+        if status == "completed":
+            # Verify the file actually exists and is valid
+            nas_conn = get_nas_connection()
+            if nas_conn:
+                output_path = config["stage_08_embeddings_generation"]["output_data_path"]
+                csv_path = nas_path_join(output_path, "individual", f"{transcript_id}.csv")
+                meta_path = f"{csv_path}.meta"
+
+                if nas_file_exists(nas_conn, csv_path) and validate_csv_integrity(nas_conn, csv_path, meta_path):
+                    completed.append(transcript_id)
+                    nas_conn.close()
+                else:
+                    # File missing or invalid, need to reprocess
+                    log_console(f"  {transcript_id}: marked complete but file invalid - will reprocess", "WARNING")
+                    to_process.append(transcript_id)
+                    nas_conn.close()
+            else:
+                # Can't verify, assume complete
+                completed.append(transcript_id)
+
+        elif status == "failed":
+            # Add to failed list, can be reprocessed if desired
+            failed_list.append(transcript_id)
+            # Optionally reprocess failed transcripts
+            retry_failed = config["stage_08_embeddings_generation"].get("retry_failed_on_resume", False)
+            if retry_failed:
+                log_console(f"  {transcript_id}: previously failed - will retry", "WARNING")
+                to_process.append(transcript_id)
+
+        elif status == "in_progress":
+            # Crashed during processing, need to reprocess
+            log_console(f"  {transcript_id}: was in progress - will reprocess", "WARNING")
+            to_process.append(transcript_id)
+
+        else:
+            # Not started or unknown status
+            to_process.append(transcript_id)
+
+    return to_process, completed, failed_list
+
+
+def consolidate_individual_files() -> Optional[str]:
+    """
+    Consolidate all individual transcript CSVs into master file.
+    Handles crashes during consolidation with atomic temp file pattern.
+    """
+    nas_conn = get_nas_connection()
+    if not nas_conn:
+        log_console("Failed to connect to NAS for consolidation", "ERROR")
+        return None
+
+    try:
+        output_path = config["stage_08_embeddings_generation"]["output_data_path"]
+        individual_dir = nas_path_join(output_path, "individual")
+        consolidated_dir = nas_path_join(output_path, "consolidated")
+
+        # List all individual CSV files
+        log_console("Scanning for individual transcript files...")
+        all_files = list_nas_directory(nas_conn, individual_dir)
+        csv_files = [f for f in all_files if f.endswith('.csv') and not f.endswith('.tmp')]
+
+        log_console(f"Found {len(csv_files)} individual CSV files to consolidate")
+
+        if len(csv_files) == 0:
+            log_console("No files to consolidate", "WARNING")
+            nas_conn.close()
+            return None
+
+        # Validate all files before consolidation
+        valid_files = []
+        invalid_files = []
+
+        log_console("Validating individual files...")
+        for csv_file in csv_files:
+            csv_path = nas_path_join(individual_dir, csv_file)
+            meta_path = f"{csv_path}.meta"
+
+            if validate_csv_integrity(nas_conn, csv_path, meta_path):
+                valid_files.append(csv_file)
+            else:
+                invalid_files.append(csv_file)
+                # Quarantine invalid file
+                transcript_id = csv_file.replace('.csv', '')
+                quarantine_corrupt_file(nas_conn, transcript_id)
+
+        if invalid_files:
+            log_console(f"WARNING: {len(invalid_files)} files failed validation - quarantined", "WARNING")
+
+        log_console(f"Consolidating {len(valid_files)} validated files...")
+
+        # Create consolidated file with atomic temp pattern
+        temp_consolidated_path = nas_path_join(consolidated_dir, "stage_08_embeddings.csv.tmp")
+        final_consolidated_path = nas_path_join(consolidated_dir, "stage_08_embeddings.csv")
+
+        # Build consolidated CSV in memory
+        output = io.StringIO()
+        writer = None
+        total_records = 0
+
+        for i, csv_file in enumerate(valid_files):
+            csv_path = nas_path_join(individual_dir, csv_file)
+            csv_content = nas_download_file(nas_conn, csv_path)
+
+            if not csv_content:
+                log_console(f"ERROR: Could not download {csv_file}", "ERROR")
+                continue
+
+            reader = csv.DictReader(io.StringIO(csv_content.decode('utf-8')))
+
+            # Initialize writer with first file's fieldnames
+            if writer is None:
+                fieldnames = reader.fieldnames
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
+                writer.writeheader()
+
+            # Write all rows from this file
+            file_records = 0
+            for row in reader:
+                writer.writerow(row)
+                file_records += 1
+                total_records += 1
+
+            if (i + 1) % 10 == 0 or (i + 1) == len(valid_files):
+                log_console(f"  Progress: {i + 1}/{len(valid_files)} files, {total_records} records")
+
+        # Upload consolidated file atomically
+        log_console("Uploading consolidated file...")
+        consolidated_content = output.getvalue()
+        temp_file_obj = io.BytesIO(consolidated_content.encode('utf-8'))
+
+        # Write to .tmp first
+        if not nas_upload_file(nas_conn, temp_file_obj, temp_consolidated_path):
+            raise RuntimeError("Failed to write consolidated temp file")
+
+        # Atomic rename: .tmp → final
+        log_console("Finalizing consolidated file...")
+        if nas_file_exists(nas_conn, final_consolidated_path):
+            nas_delete_file(nas_conn, final_consolidated_path)
+        if not nas_rename_file(nas_conn, temp_consolidated_path, final_consolidated_path):
+            raise RuntimeError("Failed to finalize consolidated file")
+
+        log_console(f"✓ Consolidation complete: {total_records} total records in {len(valid_files)} transcripts")
+
+        # Optional: Cleanup individual files
+        cleanup_enabled = config["stage_08_embeddings_generation"].get("cleanup_after_consolidation", True)
+        if cleanup_enabled:
+            log_console("Cleaning up individual files...")
+            cleanup_individual_files(nas_conn, valid_files)
+            log_console("✓ Cleanup complete")
+        else:
+            log_console("Individual files preserved (cleanup disabled in config)")
+
+        nas_conn.close()
+        return final_consolidated_path
+
+    except Exception as e:
+        log_console(f"Consolidation failed: {e}", "ERROR")
+        log_error(f"Consolidation error: {e}", "consolidation_error")
+        if nas_conn:
+            nas_conn.close()
+        return None
 
 
 def load_stage_config(nas_conn: SMBConnection) -> Dict:
@@ -1478,89 +2159,120 @@ def main():
         # Initialize enhanced error logger
         enhanced_error_logger = EnhancedErrorLogger()
         enhanced_error_logger.using_fallback_tokenizer = (tokenizer is None)
-        
-        # Process each transcript
-        all_enhanced_records = []
+
+        # Analyze resume state
+        log_console("=" * 50)
+        log_console("Analyzing resume state...")
+        to_process_ids, completed_ids, failed_ids = analyze_resume_state(transcripts)
+
+        log_console(f"Resume analysis:")
+        log_console(f"  To process: {len(to_process_ids)}")
+        log_console(f"  Already completed: {len(completed_ids)}")
+        log_console(f"  Previously failed: {len(failed_ids)}")
+        log_console("=" * 50)
+
+        # Filter transcripts to process
+        transcripts_to_process = {
+            tid: transcripts[tid] for tid in to_process_ids if tid in transcripts
+        }
+
+        if len(transcripts_to_process) == 0:
+            log_console("All transcripts already processed. Moving to consolidation...")
+        else:
+            log_console(f"Processing {len(transcripts_to_process)} transcripts...")
+
+        # Process each transcript with crash-resilient save
         failed_transcripts = []
-        
-        # Use CSV format for better handling of large datasets with embeddings
-        use_csv_format = config["stage_08_embeddings_generation"].get("use_csv_output", True)
-        file_extension = "csv" if use_csv_format else "json"
-        output_path = nas_path_join(
-            config["stage_08_embeddings_generation"]["output_data_path"],
-            f"stage_08_embeddings.{file_extension}"
-        )
-        log_console(f"Output format: {file_extension.upper()}")
-        
-        for i, (transcript_id, transcript_records) in enumerate(transcripts.items(), 1):
+        successful_count = 0
+
+        for i, (transcript_id, transcript_records) in enumerate(transcripts_to_process.items(), 1):
             transcript_start = datetime.now()
-            
+
             try:
-                log_console(f"Processing transcript {i}/{len(transcripts)}: {transcript_id} with {len(transcript_records)} records")
-                
-                # Debug: Check if records are empty
+                log_console(f"\n[{i}/{len(transcripts_to_process)}] {transcript_id} ({len(transcript_records)} records)")
+
+                # Check if records are empty
                 if not transcript_records:
                     log_console(f"ERROR: Transcript {transcript_id} has no records!", "ERROR")
+                    failed_transcripts.append({
+                        "transcript": transcript_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "error": "No records found"
+                    })
                     continue
-                
+
                 # Refresh OAuth token per transcript
                 sample_record = transcript_records[0] if transcript_records else {}
                 refresh_oauth_token_for_transcript(sample_record)
-                
-                # Process transcript
-                enhanced_records = process_transcript(transcript_records, transcript_id, enhanced_error_logger)
-                
-                # Save results incrementally
-                if use_csv_format:
-                    save_results_incrementally_csv(enhanced_records, output_path, is_first_batch=(i == 1))
+
+                # Process and save with resilient error handling
+                success = process_and_save_transcript_resilient(
+                    transcript_id,
+                    transcript_records,
+                    enhanced_error_logger
+                )
+
+                if success:
+                    successful_count += 1
                 else:
-                    save_results_incrementally(enhanced_records, output_path, is_first_batch=(i == 1))
-                
-                all_enhanced_records.extend(enhanced_records)
-                
+                    failed_transcripts.append({
+                        "transcript": transcript_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "error": "Processing failed after retries"
+                    })
+
                 transcript_time = datetime.now() - transcript_start
-                log_console(f"Completed transcript {transcript_id} in {transcript_time}")
-                
+                log_console(f"  Time: {transcript_time}")
+
                 # Rate limiting
                 time.sleep(1)
-            
+
             except Exception as e:
                 transcript_time = datetime.now() - transcript_start
                 enhanced_error_logger.log_processing_error(transcript_id, f"Failed after {transcript_time}: {e}")
-                
+
                 failed_transcripts.append({
                     "transcript": transcript_id,
                     "timestamp": datetime.now().isoformat(),
                     "error": str(e),
                     "processing_time": str(transcript_time)
                 })
-                
-                log_console(f"Failed to process transcript {transcript_id}: {e}", "ERROR")
-        
-        # Close JSON array (only if using JSON format)
-        if not use_csv_format:
-            nas_conn_final = get_nas_connection()
-            if nas_conn_final:
-                close_json_array(nas_conn_final, output_path)
-                nas_conn_final.close()
-        
-        # Save failed transcripts
-        save_failed_transcripts(failed_transcripts, nas_conn)
+
+                log_console(f"✗ Failed to process transcript {transcript_id}: {e}", "ERROR")
+
+        # Save failed transcripts summary
+        if failed_transcripts:
+            save_failed_transcripts(failed_transcripts, nas_conn)
+
+        # Consolidate individual files
+        log_console("=" * 50)
+        log_console("Starting consolidation of individual files...")
+        log_console("=" * 50)
+
+        consolidated_path = consolidate_individual_files()
+
+        if consolidated_path:
+            log_console(f"✓ Consolidated file: {consolidated_path}")
+        else:
+            log_console("✗ Consolidation failed - individual files preserved", "WARNING")
         
         # Calculate final statistics
         end_time = datetime.now()
         total_time = end_time - start_time
-        
+
         stage_summary = {
             "stage": "08_embeddings_generation",
+            "mode": "crash_resilient_individual_files",
             "start_time": start_time.isoformat(),
             "end_time": end_time.isoformat(),
             "total_time": str(total_time),
-            "transcripts_processed": len(transcripts),
-            "successful_transcripts": len(transcripts) - len(failed_transcripts),
-            "failed_transcripts": len(failed_transcripts),
+            "total_transcripts": len(transcripts),
+            "transcripts_to_process": len(transcripts_to_process),
+            "transcripts_completed": len(completed_ids) + successful_count,
+            "transcripts_skipped": len(completed_ids),
+            "transcripts_newly_processed": successful_count,
+            "transcripts_failed": len(failed_transcripts),
             "total_input_records": len(stage7_data),
-            "total_output_records": len(all_enhanced_records),
             "total_embeddings": enhanced_error_logger.total_embeddings,
             "total_chunks": enhanced_error_logger.total_chunks,
             "embedding_errors": len(enhanced_error_logger.embedding_errors),
@@ -1568,18 +2280,26 @@ def main():
             "processing_errors": len(enhanced_error_logger.processing_errors),
             "tokenizer_method": "fallback_estimation" if enhanced_error_logger.using_fallback_tokenizer else "tiktoken",
             "tokenizer_warning": "Token counts are approximate" if enhanced_error_logger.using_fallback_tokenizer else "Accurate token counts",
-            "output_format": "CSV" if use_csv_format else "JSON"
+            "output_format": "Individual CSV files with consolidation",
+            "consolidated_file": consolidated_path if consolidated_path else "consolidation_failed"
         }
-        
+
         # Save logs
         save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
-        
+
         # Print summary
         log_console("=" * 50)
-        log_console(f"Stage 8 completed in {total_time}")
-        log_console(f"Transcripts: {len(transcripts)} total, {len(failed_transcripts)} failed")
-        log_console(f"Records: {len(stage7_data)} input → {len(all_enhanced_records)} output")
+        log_console("STAGE 8 SUMMARY")
+        log_console("=" * 50)
+        log_console(f"Total time: {total_time}")
+        log_console(f"Total transcripts: {len(transcripts)}")
+        log_console(f"  Already completed (skipped): {len(completed_ids)}")
+        log_console(f"  Newly processed: {successful_count}")
+        log_console(f"  Failed: {len(failed_transcripts)}")
         log_console(f"Embeddings generated: {enhanced_error_logger.total_embeddings}")
+        log_console(f"Total chunks created: {enhanced_error_logger.total_chunks}")
+        if consolidated_path:
+            log_console(f"Consolidated file: {consolidated_path}")
         log_console("=" * 50)
         
         # Close NAS connection
