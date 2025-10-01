@@ -328,14 +328,12 @@ def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes
     if not validate_nas_path(nas_file_path):
         log_error(f"Invalid NAS path: {nas_file_path}", "path_validation")
         return None
-    
+
     try:
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            conn.retrieveFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, temp_file)
-            temp_file.seek(0)
-            content = temp_file.read()
-            os.unlink(temp_file.name)
-            return content
+        file_obj = io.BytesIO()
+        conn.retrieveFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, file_obj)
+        file_obj.seek(0)
+        return file_obj.read()
     except Exception as e:
         log_error(f"Failed to download file from NAS: {nas_file_path}", "nas_download", {"error": str(e)})
         return None
@@ -963,7 +961,6 @@ def consolidate_individual_files() -> Optional[str]:
 
         if len(csv_files) == 0:
             log_console("No files to consolidate", "WARNING")
-            nas_conn.close()
             return None
 
         # Validate all files before consolidation
@@ -1050,15 +1047,19 @@ def consolidate_individual_files() -> Optional[str]:
         else:
             log_console("Individual files preserved (cleanup disabled in config)")
 
-        nas_conn.close()
         return final_consolidated_path
 
     except Exception as e:
         log_console(f"Consolidation failed: {e}", "ERROR")
         log_error(f"Consolidation error: {e}", "consolidation_error")
-        if nas_conn:
-            nas_conn.close()
         return None
+    finally:
+        # Always close NAS connection
+        if nas_conn:
+            try:
+                nas_conn.close()
+            except Exception:
+                pass
 
 
 def load_stage_config(nas_conn: SMBConnection) -> Dict:
