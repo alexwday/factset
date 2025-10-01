@@ -688,6 +688,66 @@ def sanitize_url_for_logging(url: str) -> str:
         return "URL_SANITIZATION_ERROR"
 
 
+def load_existing_output(nas_conn: SMBConnection, output_path: str) -> set:
+    """
+    Load existing output file and extract completed transcript IDs.
+    Returns a set of transcript IDs (filenames) that have already been processed.
+    Adapted from Stage 5/6 pattern for Stage 7 resume capability.
+    """
+    try:
+        output_filename = "stage_07_summarized_content.json"
+        output_file_path = nas_path_join(output_path, output_filename)
+
+        # Check if file exists
+        if not nas_file_exists(nas_conn, output_file_path):
+            log_execution("No existing output file found, starting fresh")
+            return set()
+
+        # Download existing file
+        log_console("Loading existing output file for resume...")
+        existing_content = nas_download_file(nas_conn, output_file_path)
+        if existing_content is None:
+            log_execution("Could not load existing output file, starting fresh")
+            return set()
+
+        # Parse JSON content
+        try:
+            # Handle incomplete JSON arrays (missing closing bracket)
+            content_str = existing_content.decode('utf-8').strip()
+            if content_str and not content_str.endswith(']'):
+                content_str += ']'  # Add closing bracket for parsing
+
+            if not content_str or content_str == '[\n]' or content_str == '[]':
+                log_execution("Existing output file is empty, starting fresh")
+                return set()
+
+            records = json.loads(content_str)
+
+            # Extract unique transcript IDs (filenames)
+            completed_ids = set()
+            for record in records:
+                # Stage 7 uses filename as transcript key
+                filename = record.get('filename', '')
+                if filename:
+                    completed_ids.add(filename)
+
+            # Get unique count
+            unique_completed = len(completed_ids)
+            log_console(f"Found {unique_completed} completed transcripts in existing output")
+            log_execution(f"Loaded existing output with {len(records)} records from {unique_completed} transcripts")
+
+            return completed_ids
+
+        except json.JSONDecodeError as e:
+            log_error(f"Failed to parse existing output file: {e}", "resume_load", {"error": str(e)})
+            log_console("WARNING: Could not parse existing output, starting fresh", "WARNING")
+            return set()
+
+    except Exception as e:
+        log_error(f"Error loading existing output: {e}", "resume_load", {"error": str(e)})
+        return set()
+
+
 def load_stage6_data(nas_conn: SMBConnection) -> List[Dict]:
     """Load Stage 6 classified content data from NAS."""
     try:
@@ -1344,21 +1404,49 @@ def main():
             transcript_items = list(transcripts.items())[:max_transcripts]
             transcripts = dict(transcript_items)
             log_console(f"Development mode: limited to {len(transcripts)} transcripts")
-        
+
+        # Check for resume capability (default: enabled)
+        enable_resume = config["stage_07_llm_summarization"].get("enable_resume", True)
+        completed_transcript_ids = set()
+
+        if enable_resume:
+            # Load existing output to identify completed transcripts
+            output_path_base = config["stage_07_llm_summarization"]["output_data_path"]
+            completed_transcript_ids = load_existing_output(nas_conn, output_path_base)
+
+            if completed_transcript_ids:
+                # Filter out already-processed transcripts
+                original_count = len(transcripts)
+                transcripts = {tid: records for tid, records in transcripts.items()
+                              if tid not in completed_transcript_ids}
+                resumed_count = original_count - len(transcripts)
+
+                if resumed_count > 0:
+                    log_console(f"RESUME MODE: Skipping {resumed_count} already-processed transcripts")
+                    log_console(f"Remaining transcripts to process: {len(transcripts)}")
+
+                if len(transcripts) == 0:
+                    log_console("All transcripts already processed. Nothing to do.")
+                    # Close JSON array and exit
+                    output_path = nas_path_join(output_path_base, "stage_07_summarized_content.json")
+                    if not close_json_array(nas_conn, output_path):
+                        log_console("Warning: Failed to properly close existing output file", "WARNING")
+                    return
+
         # Initialize enhanced error logger
         enhanced_error_logger = EnhancedErrorLogger()
-        
+
         # Process each transcript
         all_enhanced_records = []
         failed_transcripts = []
-        
+
         output_path = nas_path_join(
             config["stage_07_llm_summarization"]["output_data_path"],
             "stage_07_summarized_content.json"
         )
-        
+
         start_time = datetime.now()
-        
+
         for i, (transcript_id, transcript_records) in enumerate(transcripts.items(), 1):
             transcript_start = datetime.now()
             
@@ -1371,9 +1459,11 @@ def main():
                 
                 # Process transcript
                 enhanced_records = process_transcript(transcript_records, transcript_id, enhanced_error_logger)
-                
+
                 # Save results incrementally
-                save_results_incrementally(enhanced_records, output_path, is_first_batch=(i == 1))
+                # First batch only if: first transcript AND no existing output
+                is_first_batch = (i == 1 and not completed_transcript_ids)
+                save_results_incrementally(enhanced_records, output_path, is_first_batch=is_first_batch)
                 
                 all_enhanced_records.extend(enhanced_records)
                 
@@ -1420,7 +1510,9 @@ def main():
             "records_with_summaries": records_with_summaries,
             "execution_time": str(execution_time),
             "total_cost": enhanced_error_logger.total_cost,
-            "total_tokens": enhanced_error_logger.total_tokens
+            "total_tokens": enhanced_error_logger.total_tokens,
+            "resumed_from_existing": bool(completed_transcript_ids),
+            "skipped_completed_transcripts": len(completed_transcript_ids)
         }
         
         # Final summary
@@ -1437,17 +1529,45 @@ def main():
         
         # Save logs
         save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
-        
+
         # Cleanup
         if ssl_cert_path and os.path.exists(ssl_cert_path):
             os.unlink(ssl_cert_path)
-        
+
         nas_conn.close()
-        
+
     except Exception as e:
-        log_console(f"Stage 7 failed: {e}", "ERROR")
-        log_error(f"Stage 7 execution failed: {e}", "main_execution", {"error": str(e)})
+        error_msg = f"Stage 7 execution failed: {e}"
+        log_error(error_msg, "stage_execution", {"error": str(e)})
+        log_console(error_msg, "ERROR")
+
+        # Save whatever logs we have
+        try:
+            if 'nas_conn' in locals() and nas_conn:
+                if 'enhanced_error_logger' not in locals():
+                    enhanced_error_logger = EnhancedErrorLogger()
+                stage_summary = {
+                    "status": "failed",
+                    "error": str(e),
+                    "processing_time_seconds": (datetime.now() - start_time).total_seconds() if 'start_time' in locals() else 0,
+                    "resumed_from_existing": bool(completed_transcript_ids) if 'completed_transcript_ids' in locals() else False,
+                    "skipped_completed_transcripts": len(completed_transcript_ids) if 'completed_transcript_ids' in locals() else 0
+                }
+                save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
+                nas_conn.close()
+        except:
+            pass
+
         raise
+
+    finally:
+        # Cleanup SSL certificate in all cases
+        if 'ssl_cert_path' in locals() and ssl_cert_path and os.path.exists(ssl_cert_path):
+            try:
+                os.unlink(ssl_cert_path)
+                log_console("SSL certificate cleaned up")
+            except:
+                pass
 
 
 if __name__ == "__main__":
