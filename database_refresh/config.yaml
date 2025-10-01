@@ -82,7 +82,7 @@ stage_04_validate_structure:
 stage_05_qa_pairing:
   description: "Sliding window Q&A boundary detection and analyst session pairing"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_04_validated_content.json"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_05_qa_pairing"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 2
@@ -104,7 +104,7 @@ stage_05_qa_pairing:
 stage_06_llm_classification:
   description: "LLM-based financial content classification"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_05_qa_paired_content.json"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_06_llm_classification"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 2
@@ -133,7 +133,7 @@ stage_06_llm_classification:
 stage_07_llm_summarization:
   description: "LLM-based content summarization"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_06_classified_content.json"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_llm_summarization"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 2
@@ -153,7 +153,7 @@ stage_07_llm_summarization:
 stage_08_embeddings_generation:
   description: "Generate vector embeddings from Stage 7 summarized content"
   input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_07_summarized_content.json"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh"
+  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Refresh/stage_08_embeddings_generation"
   output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
   dev_mode: true
   dev_max_transcripts: 10
