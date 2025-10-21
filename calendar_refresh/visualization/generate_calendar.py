@@ -302,10 +302,6 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
             min-width: 220px;
         }}
 
-        .filter-group select[multiple] {{
-            min-height: 120px;
-        }}
-
         .filter-group select:focus {{
             outline: none;
             border-color: #2563eb;
@@ -489,15 +485,17 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
 
         <div class="filters">
             <div class="filter-group">
-                <label for="institutionTypeFilter">Institution Type (Ctrl/Cmd+Click for multiple)</label>
-                <select id="institutionTypeFilter" multiple>
+                <label for="institutionTypeFilter">Institution Type</label>
+                <select id="institutionTypeFilter">
+                    <option value="">All Institution Types</option>
                     {'\n'.join(f'<option value="{inst_type}">{inst_type.replace("_", " ")}</option>' for inst_type in institution_types)}
                 </select>
             </div>
 
             <div class="filter-group">
-                <label for="eventTypeFilter">Event Type (Ctrl/Cmd+Click for multiple)</label>
-                <select id="eventTypeFilter" multiple>
+                <label for="eventTypeFilter">Event Type</label>
+                <select id="eventTypeFilter">
+                    <option value="">All Event Types</option>
                     {'\n'.join(f'<option value="{evt_type}">{evt_type}</option>' for evt_type in event_types)}
                 </select>
             </div>
@@ -594,7 +592,7 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
                 headerToolbar: {{
                     left: 'prev,next today',
                     center: 'title',
-                    right: 'dayGridMonth,timeGridWeek,listMonth'
+                    right: 'dayGridMonth,listMonth'
                 }},
                 events: currentEvents,
                 eventClick: function(info) {{
@@ -614,19 +612,9 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
             const institutionSelect = document.getElementById('institutionTypeFilter');
             const eventSelect = document.getElementById('eventTypeFilter');
 
-            // Default institution types: US_Banks and Canadian_Banks
-            Array.from(institutionSelect.options).forEach(option => {{
-                if (option.value === 'US_Banks' || option.value === 'Canadian_Banks') {{
-                    option.selected = true;
-                }}
-            }});
-
-            // Default event type: Earnings (groups all earnings-related events)
-            Array.from(eventSelect.options).forEach(option => {{
-                if (option.value === 'Earnings') {{
-                    option.selected = true;
-                }}
-            }});
+            // Default: Show all
+            institutionSelect.value = '';
+            eventSelect.value = '';
 
             // Apply initial filters
             applyFilters();
@@ -636,36 +624,27 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
             eventSelect.addEventListener('change', applyFilters);
         }});
 
-        function getSelectedValues(selectElement) {{
-            return Array.from(selectElement.selectedOptions).map(option => option.value);
-        }}
-
         function applyFilters() {{
             const institutionSelect = document.getElementById('institutionTypeFilter');
             const eventSelect = document.getElementById('eventTypeFilter');
 
-            const selectedInstitutions = getSelectedValues(institutionSelect);
-            const selectedEvents = getSelectedValues(eventSelect);
+            const selectedInstitution = institutionSelect.value;
+            const selectedEvent = eventSelect.value;
 
             currentEvents = allEvents.filter(event => {{
-                const matchesInstitution = selectedInstitutions.length === 0 ||
-                                         selectedInstitutions.includes(event.institutionType);
+                // Institution filter
+                const matchesInstitution = !selectedInstitution || event.institutionType === selectedInstitution;
 
-                // For event type matching, handle "Earnings" group
+                // Event type filter - handle "Earnings" group
                 let matchesEvent;
-                if (selectedEvents.length === 0) {{
+                if (!selectedEvent) {{
                     matchesEvent = true;
+                }} else if (selectedEvent === 'Earnings') {{
+                    // "Earnings" filter matches any earnings-related type
+                    matchesEvent = EARNINGS_TYPES.includes(event.eventType);
                 }} else {{
-                    // Check if event matches any selected filter
-                    matchesEvent = selectedEvents.some(selectedType => {{
-                        if (selectedType === 'Earnings') {{
-                            // "Earnings" filter matches any earnings-related type
-                            return EARNINGS_TYPES.includes(event.eventType);
-                        }} else {{
-                            // Other filters match exactly
-                            return event.eventType === selectedType;
-                        }}
-                    }});
+                    // Other filters match exactly
+                    matchesEvent = event.eventType === selectedEvent;
                 }}
 
                 return matchesInstitution && matchesEvent;
@@ -679,9 +658,9 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
             const institutionSelect = document.getElementById('institutionTypeFilter');
             const eventSelect = document.getElementById('eventTypeFilter');
 
-            // Deselect all options
-            Array.from(institutionSelect.options).forEach(option => option.selected = false);
-            Array.from(eventSelect.options).forEach(option => option.selected = false);
+            // Reset to "All" options
+            institutionSelect.value = '';
+            eventSelect.value = '';
 
             applyFilters();
         }}
