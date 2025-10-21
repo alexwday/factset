@@ -226,41 +226,44 @@ This way both can run without changing environment variables!
 
 ## PostgreSQL Integration
 
-Load the CSV into PostgreSQL for querying and historical tracking:
+Load the CSV into PostgreSQL for querying and historical tracking.
+
+**Note**: The CSV is already deduplicated during the refresh process, so you can query the table directly without any views.
 
 ### 1. Create Database and Schema
 ```bash
 # Create database
-createdb calendar_events
+createdb aegis_calendar
 
 # Load schema
-psql -d calendar_events -f postgres_schema.sql
+psql -d aegis_calendar -f postgres_schema.sql
 ```
 
 ### 2. Load CSV Data
 ```bash
 # Clear and reload (replace strategy)
-psql -d calendar_events -c "SELECT clear_calendar_events();"
+psql -d aegis_calendar -c "DELETE FROM aegis_calendar_events;"
 
-psql -d calendar_events -c "\copy calendar_events (
+psql -d aegis_calendar -c "\copy aegis_calendar_events (
     event_id, ticker, institution_name, institution_id, institution_type,
     event_type, event_date_time_utc, event_date_time_local, event_date,
-    event_time_local, event_headline, webcast_status, webcast_url,
-    dial_in_info, fiscal_year, fiscal_quarter, data_fetched_timestamp
+    event_time_local, event_headline, webcast_link, contact_info,
+    fiscal_year, fiscal_period, data_fetched_timestamp
 ) FROM 'master_calendar_events.csv' WITH (FORMAT csv, HEADER true)"
 ```
 
 ### 3. Query Examples
 ```sql
 -- Upcoming events in next 30 days
-SELECT * FROM upcoming_events_30d;
-
--- Events by institution type
-SELECT * FROM events_by_institution_type;
+SELECT ticker, institution_name, event_type, event_headline, event_date, event_time_local
+FROM aegis_calendar_events
+WHERE event_date_time_utc > CURRENT_TIMESTAMP
+  AND event_date_time_utc <= CURRENT_TIMESTAMP + INTERVAL '30 days'
+ORDER BY event_date_time_utc;
 
 -- Canadian bank earnings this quarter
 SELECT ticker, institution_name, event_type, event_headline, event_date, event_time_local
-FROM calendar_events
+FROM aegis_calendar_events
 WHERE institution_type = 'Canadian_Banks'
   AND event_type IN ('Earnings', 'ConfirmedEarningsRelease')
   AND event_date_time_utc > CURRENT_TIMESTAMP
@@ -268,36 +271,24 @@ ORDER BY event_date_time_utc;
 
 -- All event types for a specific institution
 SELECT event_type, event_headline, event_date, event_time_local
-FROM calendar_events
+FROM aegis_calendar_events
 WHERE ticker = 'RY-CA'
   AND event_date_time_utc > CURRENT_TIMESTAMP
 ORDER BY event_date_time_utc;
 
 -- Count events by type
 SELECT event_type, COUNT(*) as event_count
-FROM calendar_events
+FROM aegis_calendar_events
 WHERE event_date_time_utc > CURRENT_TIMESTAMP
 GROUP BY event_type
 ORDER BY event_count DESC;
 
 -- Upcoming dividends
 SELECT ticker, institution_name, event_headline, event_date
-FROM calendar_events
+FROM aegis_calendar_events
 WHERE event_type = 'Dividend'
   AND event_date_time_utc > CURRENT_TIMESTAMP
 ORDER BY event_date_time_utc;
-
--- Calculate days until event
-SELECT
-    ticker,
-    event_type,
-    event_headline,
-    event_date,
-    EXTRACT(DAY FROM (event_date_time_utc - CURRENT_TIMESTAMP))::INTEGER as days_until
-FROM calendar_events
-WHERE event_date_time_utc > CURRENT_TIMESTAMP
-ORDER BY event_date_time_utc
-LIMIT 10;
 ```
 
 ## Dependencies
