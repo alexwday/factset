@@ -38,8 +38,7 @@ calendar_refresh:
   date_range:
     past_months: 6      # Look back 6 months
     future_months: 6    # Look ahead 6 months
-  event_types:
-    - "Earnings"
+  # event_types: []     # Optional filter - if omitted, captures ALL event types (default)
   master_database_path: "path/to/master_calendar_events.csv"
   output_logs_path: "path/to/logs"
 ```
@@ -115,7 +114,7 @@ CALENDAR_CONFIG_PATH=path/to/calendar_config.yaml  # On NAS
 16. fiscal_quarter
 17. data_fetched_timestamp
 
-**Size:** ~300-500 rows (for 91 institutions over 12-month window)
+**Size:** ~500-1000+ rows (for 91 institutions over 12-month window, all event types)
 
 **Update Strategy:** Complete replacement each run
 
@@ -182,8 +181,8 @@ Only created if errors occur during execution.
 8. QUERY API
    - Single batch call: get_company_event()
    - Request all 91 tickers in one call
-   - Event type: "Earnings"
-   - Returns list of events
+   - Event types: ALL (no filter applied)
+   - Returns list of events across all types
 
 9. TRANSFORM TO CSV
    - For each event:
@@ -218,7 +217,7 @@ CompanyEventRequest(
             symbols=[all 91 tickers],
             type="Tickers"
         ),
-        event_types=["Earnings"]
+        # No event_types filter - captures ALL event types
     )
 )
 ```
@@ -318,14 +317,14 @@ Creates CSV in memory, uploads to NAS, replaces existing file.
 
 ### Success Indicators
 - ✅ Execution log created
-- ✅ Event count 300-500 (typical range)
+- ✅ Event count 500-1000+ (typical range for all event types)
 - ✅ No error log created
 - ✅ Runtime < 90 seconds
 
 ### Alert Conditions
 - 🚨 No execution log (script didn't run)
-- 🚨 Event count < 200 (possible API issue)
-- 🚨 Event count > 700 (unexpected data volume)
+- 🚨 Event count < 300 (possible API issue or data problem)
+- 🚨 Event count > 1500 (unexpected data volume)
 - 🚨 Error log created
 - 🚨 Runtime > 120 seconds (performance issue)
 
@@ -362,7 +361,7 @@ python main_calendar_refresh.py
 
 ### Validation Checks
 1. Master CSV created on NAS
-2. Row count reasonable (300-500)
+2. Row count reasonable (500-1000+)
 3. All 17 columns present
 4. Dates in expected range (±6 months)
 5. Execution log shows success

@@ -5,7 +5,7 @@
 - **Script**: Single-file `main_calendar_refresh.py`
 - **Stack**: Python 3.11+, FactSet Calendar Events API, SMB/NAS, CSV
 - **Architecture**: Replace strategy - fresh data each run, no incremental updates
-- **Focus**: Maintain current snapshot of earnings events for monitored institutions
+- **Focus**: Maintain current snapshot of calendar events (all types) for monitored institutions
 
 ## 🚨 CRITICAL RULES
 - ALWAYS replace master CSV with fresh data (no delta detection)
@@ -107,10 +107,10 @@ python main_calendar_refresh.py
 # Step 10: Saving master CSV to NAS...
 # REFRESH COMPLETE
 # Institutions Monitored: 91
-# Events Found: 350
-# Events Saved: 350
-# Upcoming Events: 200
-# Past Events: 150
+# Events Found: 850
+# Events Saved: 850
+# Upcoming Events: 500
+# Past Events: 350
 ```
 
 ### Scheduling (Daily Execution)
@@ -174,7 +174,7 @@ company_event_request = CompanyEventRequest(
             symbols=monitored_tickers,  # List of all 91 tickers
             type="Tickers",
         ),
-        event_types=["Earnings"],
+        # NOTE: No event_types filter - captures ALL event types
     ),
 )
 response = api_instance.get_company_event(company_event_request)
@@ -310,7 +310,7 @@ Day 3: Run script → 352 events saved (0 removed, 4 new upcoming)
 
 ### Monitoring
 - Check execution logs for success/failure status
-- Monitor event counts (should be ~300-500 for 91 institutions)
+- Monitor event counts (should be ~500-1000+ for 91 institutions, all event types)
 - Alert if event count drops significantly (API issue?)
 
 ## 📊 DATA HANDLING
@@ -398,14 +398,15 @@ FROM 'master_calendar_events.csv' WITH (FORMAT csv, HEADER true)"
 - **Monthly**: Validate data quality (spot check events)
 
 ### Expected Event Counts
-- **Per Institution**: 2-4 events (quarterly + annual earnings)
-- **Total (91 institutions)**: 300-500 events in 12-month window
-- **Deviation**: ±50 events is normal (reporting cycles vary)
+- **Per Institution**: 5-10+ events across all event types (earnings, dividends, conferences, etc.)
+- **Total (91 institutions)**: 500-1000+ events in 12-month window
+- **Deviation**: ±100 events is normal (varies by event type and season)
+- **By Type**: Earnings/Dividends most frequent, conferences/meetings seasonal
 
 ### Alerts to Configure
 - Execution log not created (script failed to run)
-- Event count < 200 (possible API issue)
-- Event count > 700 (possible API returning extra data)
+- Event count < 300 (possible API issue or data problem)
+- Event count > 1500 (possible API returning unexpected volume)
 - Error log created (errors occurred during run)
 
 ### Maintenance Tasks
