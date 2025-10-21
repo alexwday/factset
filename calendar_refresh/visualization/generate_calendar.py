@@ -612,9 +612,9 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
             const institutionSelect = document.getElementById('institutionTypeFilter');
             const eventSelect = document.getElementById('eventTypeFilter');
 
-            // Default: Show all
-            institutionSelect.value = '';
-            eventSelect.value = '';
+            // Default: All institutions + Earnings (shows Canadian & US bank earnings)
+            institutionSelect.value = '';  // All institution types
+            eventSelect.value = 'Earnings';  // Earnings only
 
             // Apply initial filters
             applyFilters();
