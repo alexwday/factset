@@ -125,6 +125,34 @@ def get_unique_values(events, field):
     return sorted(list(values))
 
 
+def get_grouped_event_types(events):
+    """
+    Get unique event types, grouping earnings-related types into one.
+    Returns list of display names for the filter dropdown.
+    """
+    # Earnings types that should be grouped together
+    earnings_types = {'Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease'}
+
+    # Collect all unique event types from the data
+    all_types = set()
+    has_earnings = False
+
+    for event in events:
+        event_type = event.get('event_type', '')
+        if event_type in earnings_types:
+            has_earnings = True
+        elif event_type:
+            all_types.add(event_type)
+
+    # Build the final list for display
+    result = []
+    if has_earnings:
+        result.append('Earnings')  # Single option for all earnings types
+
+    result.extend(sorted(all_types))
+    return result
+
+
 def generate_ics_content(event):
     """Generate iCalendar (.ics) content for an event."""
     # Parse the datetime
@@ -536,6 +564,9 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
         // ICS data for downloads
         const icsData = {json.dumps(ics_data, indent=8)};
 
+        // Earnings type grouping - maps "Earnings" filter to actual event types
+        const EARNINGS_TYPES = ['Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease'];
+
         let calendar;
         let currentEvents = [...allEvents];
 
@@ -575,11 +606,9 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
                 }}
             }});
 
-            // Default event types: Earnings-related events
+            // Default event type: Earnings (groups all earnings-related events)
             Array.from(eventSelect.options).forEach(option => {{
-                if (option.value === 'Earnings' ||
-                    option.value === 'ConfirmedEarningsRelease' ||
-                    option.value === 'ProjectedEarningsRelease') {{
+                if (option.value === 'Earnings') {{
                     option.selected = true;
                 }}
             }});
@@ -606,8 +635,24 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
             currentEvents = allEvents.filter(event => {{
                 const matchesInstitution = selectedInstitutions.length === 0 ||
                                          selectedInstitutions.includes(event.institutionType);
-                const matchesEvent = selectedEvents.length === 0 ||
-                                   selectedEvents.includes(event.eventType);
+
+                // For event type matching, handle "Earnings" group
+                let matchesEvent;
+                if (selectedEvents.length === 0) {{
+                    matchesEvent = true;
+                }} else {{
+                    // Check if event matches any selected filter
+                    matchesEvent = selectedEvents.some(selectedType => {{
+                        if (selectedType === 'Earnings') {{
+                            // "Earnings" filter matches any earnings-related type
+                            return EARNINGS_TYPES.includes(event.eventType);
+                        }} else {{
+                            // Other filters match exactly
+                            return event.eventType === selectedType;
+                        }}
+                    }});
+                }}
+
                 return matchesInstitution && matchesEvent;
             }});
 
@@ -762,9 +807,9 @@ def main():
 
     print("📊 Extracting filter options...")
     institution_types = get_unique_values(csv_events, 'institution_type')
-    event_types = get_unique_values(csv_events, 'event_type')
+    event_types = get_grouped_event_types(csv_events)  # Groups earnings types together
     print(f"   - {len(institution_types)} institution types")
-    print(f"   - {len(event_types)} event types")
+    print(f"   - {len(event_types)} event type groups (Earnings types grouped)")
 
     print("🎨 Generating HTML calendar...")
     html_content = generate_html(calendar_events, institution_types, event_types, csv_events)
