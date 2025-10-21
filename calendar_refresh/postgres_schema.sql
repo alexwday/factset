@@ -40,20 +40,7 @@ CREATE TABLE aegis_calendar_events (
     data_fetched_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
 
     -- Constraints
-    CONSTRAINT unique_event UNIQUE (ticker, event_id),
-    CONSTRAINT valid_event_type CHECK (event_type IN (
-        'Earnings',
-        'ConfirmedEarningsRelease',
-        'ProjectedEarningsRelease',
-        'Dividend',
-        'Conference',
-        'ShareholdersMeeting',
-        'SalesRevenueCall',
-        'SalesRevenueMeeting',
-        'SalesRevenueRelease',
-        'AnalystsInvestorsMeeting',
-        'SpecialSituation'
-    ))
+    CONSTRAINT unique_event UNIQUE (ticker, event_id)
 );
 
 -- =====================================================
