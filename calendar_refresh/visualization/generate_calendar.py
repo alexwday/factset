@@ -292,20 +292,84 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
             color: #374151;
         }}
 
-        .filter-group select {{
+        .multiselect-dropdown {{
+            position: relative;
+            min-width: 220px;
+        }}
+
+        .multiselect-button {{
             padding: 8px 12px;
             border: 1px solid #d1d5db;
             border-radius: 6px;
             font-size: 14px;
             background: white;
             cursor: pointer;
-            min-width: 220px;
+            width: 100%;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }}
 
-        .filter-group select:focus {{
+        .multiselect-button:hover {{
+            border-color: #9ca3af;
+        }}
+
+        .multiselect-button:focus {{
             outline: none;
             border-color: #2563eb;
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }}
+
+        .multiselect-arrow {{
+            margin-left: 8px;
+            transition: transform 0.2s;
+        }}
+
+        .multiselect-dropdown.open .multiselect-arrow {{
+            transform: rotate(180deg);
+        }}
+
+        .multiselect-options {{
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin-top: 4px;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }}
+
+        .multiselect-dropdown.open .multiselect-options {{
+            display: block;
+        }}
+
+        .multiselect-option {{
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+
+        .multiselect-option:hover {{
+            background: #f3f4f6;
+        }}
+
+        .multiselect-option input[type="checkbox"] {{
+            cursor: pointer;
+        }}
+
+        .multiselect-option label {{
+            cursor: pointer;
+            flex: 1;
+            margin: 0;
         }}
 
         .reset-btn {{
@@ -485,19 +549,37 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
 
         <div class="filters">
             <div class="filter-group">
-                <label for="institutionTypeFilter">Institution Type</label>
-                <select id="institutionTypeFilter">
-                    <option value="">All Institution Types</option>
-                    {'\n'.join(f'<option value="{inst_type}">{inst_type.replace("_", " ")}</option>' for inst_type in institution_types)}
-                </select>
+                <label>Institution Type</label>
+                <div class="multiselect-dropdown" id="institutionTypeDropdown">
+                    <button class="multiselect-button" type="button">
+                        <span id="institutionTypeLabel">Select Institution Types</span>
+                        <span class="multiselect-arrow">▼</span>
+                    </button>
+                    <div class="multiselect-options" id="institutionTypeOptions">
+                        {'\n'.join(f'''
+                        <div class="multiselect-option">
+                            <input type="checkbox" id="inst_{inst_type}" value="{inst_type}">
+                            <label for="inst_{inst_type}">{inst_type.replace("_", " ")}</label>
+                        </div>''' for inst_type in institution_types)}
+                    </div>
+                </div>
             </div>
 
             <div class="filter-group">
-                <label for="eventTypeFilter">Event Type</label>
-                <select id="eventTypeFilter">
-                    <option value="">All Event Types</option>
-                    {'\n'.join(f'<option value="{evt_type}">{evt_type}</option>' for evt_type in event_types)}
-                </select>
+                <label>Event Type</label>
+                <div class="multiselect-dropdown" id="eventTypeDropdown">
+                    <button class="multiselect-button" type="button">
+                        <span id="eventTypeLabel">Select Event Types</span>
+                        <span class="multiselect-arrow">▼</span>
+                    </button>
+                    <div class="multiselect-options" id="eventTypeOptions">
+                        {'\n'.join(f'''
+                        <div class="multiselect-option">
+                            <input type="checkbox" id="evt_{evt_type}" value="{evt_type}">
+                            <label for="evt_{evt_type}">{evt_type}</label>
+                        </div>''' for evt_type in event_types)}
+                    </div>
+                </div>
             </div>
 
             <button class="reset-btn" onclick="resetFilters()">Reset All Filters</button>
@@ -608,43 +690,122 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
 
             calendar.render();
 
-            // Set default filter selections
-            const institutionSelect = document.getElementById('institutionTypeFilter');
-            const eventSelect = document.getElementById('eventTypeFilter');
+            // Setup multiselect dropdowns
+            setupMultiselect();
 
-            // Default: All institutions + Earnings (shows Canadian & US bank earnings)
-            institutionSelect.value = '';  // All institution types
-            eventSelect.value = 'Earnings';  // Earnings only
-
-            // Apply initial filters
+            // Set default selections: Canadian_Banks, US_Banks, Earnings
+            setCheckbox('inst_Canadian_Banks', true);
+            setCheckbox('inst_US_Banks', true);
+            setCheckbox('evt_Earnings', true);
+            updateDropdownLabels();
             applyFilters();
-
-            // Attach filter listeners
-            institutionSelect.addEventListener('change', applyFilters);
-            eventSelect.addEventListener('change', applyFilters);
         }});
 
-        function applyFilters() {{
-            const institutionSelect = document.getElementById('institutionTypeFilter');
-            const eventSelect = document.getElementById('eventTypeFilter');
+        function setupMultiselect() {{
+            // Institution Type dropdown
+            const instDropdown = document.getElementById('institutionTypeDropdown');
+            const instButton = instDropdown.querySelector('.multiselect-button');
+            const instOptions = document.getElementById('institutionTypeOptions');
 
-            const selectedInstitution = institutionSelect.value;
-            const selectedEvent = eventSelect.value;
+            instButton.addEventListener('click', (e) => {{
+                e.stopPropagation();
+                instDropdown.classList.toggle('open');
+                document.getElementById('eventTypeDropdown').classList.remove('open');
+            }});
+
+            instOptions.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {{
+                checkbox.addEventListener('change', () => {{
+                    updateDropdownLabels();
+                    applyFilters();
+                }});
+            }});
+
+            // Event Type dropdown
+            const evtDropdown = document.getElementById('eventTypeDropdown');
+            const evtButton = evtDropdown.querySelector('.multiselect-button');
+            const evtOptions = document.getElementById('eventTypeOptions');
+
+            evtButton.addEventListener('click', (e) => {{
+                e.stopPropagation();
+                evtDropdown.classList.toggle('open');
+                document.getElementById('institutionTypeDropdown').classList.remove('open');
+            }});
+
+            evtOptions.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {{
+                checkbox.addEventListener('change', () => {{
+                    updateDropdownLabels();
+                    applyFilters();
+                }});
+            }});
+
+            // Close dropdowns when clicking outside
+            document.addEventListener('click', () => {{
+                document.getElementById('institutionTypeDropdown').classList.remove('open');
+                document.getElementById('eventTypeDropdown').classList.remove('open');
+            }});
+
+            // Prevent dropdown from closing when clicking inside options
+            instOptions.addEventListener('click', (e) => e.stopPropagation());
+            evtOptions.addEventListener('click', (e) => e.stopPropagation());
+        }}
+
+        function setCheckbox(id, checked) {{
+            const checkbox = document.getElementById(id);
+            if (checkbox) checkbox.checked = checked;
+        }}
+
+        function updateDropdownLabels() {{
+            // Update institution type label
+            const instCheckboxes = document.querySelectorAll('#institutionTypeOptions input[type="checkbox"]:checked');
+            const instLabel = document.getElementById('institutionTypeLabel');
+            if (instCheckboxes.length === 0) {{
+                instLabel.textContent = 'Select Institution Types';
+            }} else if (instCheckboxes.length === 1) {{
+                instLabel.textContent = instCheckboxes[0].nextElementSibling.textContent;
+            }} else {{
+                instLabel.textContent = `${{instCheckboxes.length}} selected`;
+            }}
+
+            // Update event type label
+            const evtCheckboxes = document.querySelectorAll('#eventTypeOptions input[type="checkbox"]:checked');
+            const evtLabel = document.getElementById('eventTypeLabel');
+            if (evtCheckboxes.length === 0) {{
+                evtLabel.textContent = 'Select Event Types';
+            }} else if (evtCheckboxes.length === 1) {{
+                evtLabel.textContent = evtCheckboxes[0].nextElementSibling.textContent;
+            }} else {{
+                evtLabel.textContent = `${{evtCheckboxes.length}} selected`;
+            }}
+        }}
+
+        function applyFilters() {{
+            // Get selected institution types
+            const selectedInstitutions = Array.from(
+                document.querySelectorAll('#institutionTypeOptions input[type="checkbox"]:checked')
+            ).map(cb => cb.value);
+
+            // Get selected event types
+            const selectedEvents = Array.from(
+                document.querySelectorAll('#eventTypeOptions input[type="checkbox"]:checked')
+            ).map(cb => cb.value);
 
             currentEvents = allEvents.filter(event => {{
                 // Institution filter
-                const matchesInstitution = !selectedInstitution || event.institutionType === selectedInstitution;
+                const matchesInstitution = selectedInstitutions.length === 0 ||
+                                         selectedInstitutions.includes(event.institutionType);
 
                 // Event type filter - handle "Earnings" group
                 let matchesEvent;
-                if (!selectedEvent) {{
+                if (selectedEvents.length === 0) {{
                     matchesEvent = true;
-                }} else if (selectedEvent === 'Earnings') {{
-                    // "Earnings" filter matches any earnings-related type
-                    matchesEvent = EARNINGS_TYPES.includes(event.eventType);
                 }} else {{
-                    // Other filters match exactly
-                    matchesEvent = event.eventType === selectedEvent;
+                    matchesEvent = selectedEvents.some(selectedType => {{
+                        if (selectedType === 'Earnings') {{
+                            return EARNINGS_TYPES.includes(event.eventType);
+                        }} else {{
+                            return event.eventType === selectedType;
+                        }}
+                    }});
                 }}
 
                 return matchesInstitution && matchesEvent;
@@ -655,13 +816,11 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
         }}
 
         function resetFilters() {{
-            const institutionSelect = document.getElementById('institutionTypeFilter');
-            const eventSelect = document.getElementById('eventTypeFilter');
+            // Uncheck all checkboxes
+            document.querySelectorAll('#institutionTypeOptions input[type="checkbox"]').forEach(cb => cb.checked = false);
+            document.querySelectorAll('#eventTypeOptions input[type="checkbox"]').forEach(cb => cb.checked = false);
 
-            // Reset to "All" options
-            institutionSelect.value = '';
-            eventSelect.value = '';
-
+            updateDropdownLabels();
             applyFilters();
         }}
 
