@@ -47,21 +47,32 @@ CREATE TABLE calendar_events (
     event_date DATE NOT NULL,
     event_time_local VARCHAR(20),  -- Format: "HH:MM EST" or "HH:MM EDT"
 
-    -- Webcast Information
-    webcast_status VARCHAR(50),
-    webcast_url TEXT,
-    dial_in_info TEXT,
+    -- Webcast and Contact Information
+    webcast_link TEXT,            -- Webcast URL from API
+    contact_info TEXT,            -- Combined contact information (name, phone, email)
 
     -- Parsed Event Metadata
     fiscal_year VARCHAR(10),      -- Can be empty string in CSV
-    fiscal_quarter VARCHAR(10),   -- Can be empty string in CSV
+    fiscal_period VARCHAR(10),    -- Can be empty string in CSV (Q1, Q2, Q3, Q4)
 
     -- Audit Field
     data_fetched_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
 
     -- Constraints
     CONSTRAINT unique_event UNIQUE (ticker, event_id),
-    CONSTRAINT valid_event_type CHECK (event_type IN ('Earnings', 'Conference', 'Meeting', 'Other'))
+    CONSTRAINT valid_event_type CHECK (event_type IN (
+        'Earnings',
+        'ConfirmedEarningsRelease',
+        'ProjectedEarningsRelease',
+        'Dividend',
+        'Conference',
+        'ShareholdersMeeting',
+        'SalesRevenueCall',
+        'SalesRevenueMeeting',
+        'SalesRevenueRelease',
+        'AnalystsInvestorsMeeting',
+        'SpecialSituation'
+    ))
 );
 
 -- Add comments for documentation
@@ -90,7 +101,7 @@ CREATE INDEX idx_calendar_events_institution_type ON calendar_events(institution
 CREATE INDEX idx_calendar_events_ticker ON calendar_events(ticker);
 
 -- Filter by fiscal period (when available)
-CREATE INDEX idx_calendar_events_fiscal_period ON calendar_events(fiscal_year, fiscal_quarter)
+CREATE INDEX idx_calendar_events_fiscal_period ON calendar_events(fiscal_year, fiscal_period)
 WHERE fiscal_year IS NOT NULL AND fiscal_year != '';
 
 -- Full text search on headlines
@@ -124,15 +135,16 @@ SELECT
     ticker,
     institution_name,
     institution_type,
+    event_type,
     event_headline,
     event_date_time_local,
     event_date,
     event_time_local,
     EXTRACT(DAY FROM (event_date_time_utc - CURRENT_TIMESTAMP))::INTEGER as days_until_event_now,
-    webcast_status,
-    webcast_url,
+    webcast_link,
+    contact_info,
     fiscal_year,
-    fiscal_quarter
+    fiscal_period
 FROM calendar_events
 WHERE event_date_time_utc > CURRENT_TIMESTAMP
   AND event_date_time_utc <= CURRENT_TIMESTAMP + INTERVAL '30 days'
@@ -159,20 +171,21 @@ COMMENT ON VIEW events_by_institution_type IS 'Summary statistics of events grou
 CREATE VIEW quarterly_earnings_calendar AS
 SELECT
     fiscal_year,
-    fiscal_quarter,
+    fiscal_period,
     institution_type,
+    event_type,
     COUNT(*) as event_count,
     MIN(event_date_time_utc) as earliest_event,
     MAX(event_date_time_utc) as latest_event,
     COUNT(*) FILTER (WHERE event_date_time_utc > CURRENT_TIMESTAMP) as upcoming_count
 FROM calendar_events
-WHERE event_type = 'Earnings'
+WHERE event_type IN ('Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease')
   AND fiscal_year IS NOT NULL
   AND fiscal_year != ''
-  AND fiscal_quarter IS NOT NULL
-  AND fiscal_quarter != ''
-GROUP BY fiscal_year, fiscal_quarter, institution_type
-ORDER BY fiscal_year DESC, fiscal_quarter DESC, institution_type;
+  AND fiscal_period IS NOT NULL
+  AND fiscal_period != ''
+GROUP BY fiscal_year, fiscal_period, institution_type, event_type
+ORDER BY fiscal_year DESC, fiscal_period DESC, institution_type, event_type;
 
 COMMENT ON VIEW quarterly_earnings_calendar IS 'Earnings events grouped by fiscal period and institution type';
 
@@ -195,14 +208,14 @@ BEGIN
     INSERT INTO calendar_events_archive (
         id, event_id, ticker, institution_name, institution_id, institution_type,
         event_type, event_headline, event_date_time_utc, event_date_time_local,
-        event_date, event_time_local, webcast_status, webcast_url, dial_in_info,
-        fiscal_year, fiscal_quarter, data_fetched_timestamp, archived_reason
+        event_date, event_time_local, webcast_link, contact_info,
+        fiscal_year, fiscal_period, data_fetched_timestamp, archived_reason
     )
     SELECT
         id, event_id, ticker, institution_name, institution_id, institution_type,
         event_type, event_headline, event_date_time_utc, event_date_time_local,
-        event_date, event_time_local, webcast_status, webcast_url, dial_in_info,
-        fiscal_year, fiscal_quarter, data_fetched_timestamp, 'retention_policy'
+        event_date, event_time_local, webcast_link, contact_info,
+        fiscal_year, fiscal_period, data_fetched_timestamp, 'retention_policy'
     FROM moved_events;
 
     GET DIAGNOSTICS archived_count = ROW_COUNT;
@@ -242,19 +255,27 @@ COMMENT ON FUNCTION clear_calendar_events() IS 'Delete all events from calendar_
 COPY calendar_events (
     event_id, ticker, institution_name, institution_id, institution_type,
     event_type, event_date_time_utc, event_date_time_local, event_date,
-    event_time_local, event_headline, webcast_status, webcast_url,
-    dial_in_info, fiscal_year, fiscal_quarter, data_fetched_timestamp
+    event_time_local, event_headline, webcast_link, contact_info,
+    fiscal_year, fiscal_period, data_fetched_timestamp
 )
 FROM '/path/to/master_calendar_events.csv'
 WITH (FORMAT csv, HEADER true);
 
 -- Option 2: Clear and reload (replace strategy)
 SELECT clear_calendar_events();  -- Returns count of deleted rows
-COPY calendar_events (...) FROM '/path/to/master_calendar_events.csv' WITH (FORMAT csv, HEADER true);
+
+COPY calendar_events (
+    event_id, ticker, institution_name, institution_id, institution_type,
+    event_type, event_date_time_utc, event_date_time_local, event_date,
+    event_time_local, event_headline, webcast_link, contact_info,
+    fiscal_year, fiscal_period, data_fetched_timestamp
+)
+FROM '/path/to/master_calendar_events.csv'
+WITH (FORMAT csv, HEADER true);
 
 -- Option 3: Using psql \copy (works from client machine)
 -- Run from command line:
--- psql -d calendar_events -c "\copy calendar_events (event_id, ticker, ...) FROM 'master_calendar_events.csv' WITH (FORMAT csv, HEADER true)"
+\copy calendar_events (event_id, ticker, institution_name, institution_id, institution_type, event_type, event_date_time_utc, event_date_time_local, event_date, event_time_local, event_headline, webcast_link, contact_info, fiscal_year, fiscal_period, data_fetched_timestamp) FROM 'master_calendar_events.csv' WITH (FORMAT csv, HEADER true)
 
 
 -- ===== SAMPLE QUERIES =====
@@ -263,13 +284,16 @@ COPY calendar_events (...) FROM '/path/to/master_calendar_events.csv' WITH (FORM
 SELECT
     ticker,
     institution_name,
+    event_type,
     event_headline,
     event_date,
     event_time_local,
-    webcast_url
+    webcast_link,
+    fiscal_year,
+    fiscal_period
 FROM calendar_events
 WHERE institution_type = 'Canadian_Banks'
-  AND event_type = 'Earnings'
+  AND event_type IN ('Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease')
   AND event_date_time_utc > CURRENT_TIMESTAMP
 ORDER BY event_date_time_utc;
 
@@ -277,9 +301,11 @@ ORDER BY event_date_time_utc;
 SELECT
     ticker,
     institution_name,
+    event_type,
     event_headline,
     event_date,
-    days_until_event
+    event_time_local,
+    EXTRACT(DAY FROM (event_date_time_utc - CURRENT_TIMESTAMP))::INTEGER as days_until_event
 FROM calendar_events
 WHERE event_date BETWEEN '2025-11-01' AND '2025-11-30'
 ORDER BY event_date_time_utc;
@@ -323,12 +349,14 @@ SELECT archive_old_calendar_events(365);
 -- Get quarterly distribution of events
 SELECT
     fiscal_year,
-    fiscal_quarter,
+    fiscal_period,
+    event_type,
     COUNT(*) as event_count
 FROM calendar_events
 WHERE fiscal_year IS NOT NULL AND fiscal_year != ''
-GROUP BY fiscal_year, fiscal_quarter
-ORDER BY fiscal_year DESC, fiscal_quarter DESC;
+  AND fiscal_period IS NOT NULL AND fiscal_period != ''
+GROUP BY fiscal_year, fiscal_period, event_type
+ORDER BY fiscal_year DESC, fiscal_period DESC, event_type;
 */
 
 -- =====================================================
