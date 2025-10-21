@@ -322,48 +322,64 @@ def query_calendar_events(
         log_console(f"  First 5 Tickers: {monitored_tickers[:5]}")
         log_console(f"  Event Types: ['Earnings']")
 
-        # Build the request object for all monitored tickers
-        company_event_request = CompanyEventRequest(
-            data=CompanyEventRequestData(
-                date_time=CompanyEventRequestDataDateTime(
-                    start=start_datetime,
-                    end=end_datetime,
+        # Batch tickers to avoid overwhelming the API (test with smaller batches first)
+        BATCH_SIZE = 10  # Start small to test
+        ticker_batches = [monitored_tickers[i:i + BATCH_SIZE] for i in range(0, len(monitored_tickers), BATCH_SIZE)]
+
+        log_console(f"Splitting {len(monitored_tickers)} tickers into {len(ticker_batches)} batches of {BATCH_SIZE}")
+
+        all_events = []
+
+        for batch_num, ticker_batch in enumerate(ticker_batches, 1):
+            log_console(f"Processing batch {batch_num}/{len(ticker_batches)} ({len(ticker_batch)} tickers)...")
+
+            # Build the request object for this batch of tickers
+            company_event_request = CompanyEventRequest(
+                data=CompanyEventRequestData(
+                    date_time=CompanyEventRequestDataDateTime(
+                        start=start_datetime,
+                        end=end_datetime,
+                    ),
+                    universe=CompanyEventRequestDataUniverse(
+                        symbols=ticker_batch,
+                        type="Tickers",
+                    ),
+                    event_types=["Earnings"],
                 ),
-                universe=CompanyEventRequestDataUniverse(
-                    symbols=monitored_tickers,
-                    type="Tickers",
-                ),
-                event_types=["Earnings"],
-            ),
+            )
+
+            # Make the API call for this batch
+            try:
+                response = api_instance.get_company_event(company_event_request)
+
+                if response and hasattr(response, "data") and response.data:
+                    batch_events = [event.to_dict() for event in response.data]
+                    log_console(f"  Found {len(batch_events)} events in batch {batch_num}")
+
+                    for event in batch_events:
+                        ticker = event.get("ticker", "Unknown")
+                        if ticker in ticker_batch:
+                            all_events.append(event)
+
+                else:
+                    log_console(f"  No events found in batch {batch_num}", "WARNING")
+
+            except Exception as e:
+                log_console(f"  ERROR in batch {batch_num}: {str(e)}", "ERROR")
+                # Continue with next batch even if this one fails
+                continue
+
+        # Summary
+        log_console(f"Total events found across all batches: {len(all_events)}")
+        log_execution(
+            "API query completed successfully",
+            {"total_events": len(all_events), "institutions_queried": len(monitored_tickers), "batches": len(ticker_batches)},
         )
 
-        log_console(f"Checking events for {len(monitored_tickers)} institutions...")
-
-        # Make the API call
-        response = api_instance.get_company_event(company_event_request)
-
-        events = []
-        if response and hasattr(response, "data") and response.data:
-            raw_events = [event.to_dict() for event in response.data]
-            log_console(f"Found {len(raw_events)} total events")
-
-            for event in raw_events:
-                ticker = event.get("ticker", "Unknown")
-                if ticker in monitored_tickers:
-                    events.append(event)
-
-            log_execution(
-                "API query completed successfully",
-                {"total_events": len(events), "institutions_queried": len(monitored_tickers)},
-            )
-        else:
-            log_console("No events found for the specified date range", "WARNING")
-            log_execution("API query returned no events")
-
-        return events
+        return all_events
 
     except Exception as e:
-        log_console(f"ERROR: API request failed", "ERROR")
+        log_console(f"ERROR: Fatal error in API query setup", "ERROR")
         log_console(f"  Error Type: {type(e).__name__}", "ERROR")
         log_console(f"  Error Message: {str(e)}", "ERROR")
 
