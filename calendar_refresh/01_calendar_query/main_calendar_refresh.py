@@ -314,6 +314,14 @@ def query_calendar_events(
         start_datetime = dateutil_parser(f"{start_date}T00:00:00Z")
         end_datetime = dateutil_parser(f"{end_date}T23:59:59Z")
 
+        # Debug: Log the request parameters
+        log_console(f"API Request Parameters:")
+        log_console(f"  Start DateTime: {start_datetime}")
+        log_console(f"  End DateTime: {end_datetime}")
+        log_console(f"  Number of Tickers: {len(monitored_tickers)}")
+        log_console(f"  First 5 Tickers: {monitored_tickers[:5]}")
+        log_console(f"  Event Types: ['Earnings']")
+
         # Build the request object for all monitored tickers
         company_event_request = CompanyEventRequest(
             data=CompanyEventRequestData(
@@ -355,6 +363,16 @@ def query_calendar_events(
         return events
 
     except Exception as e:
+        log_console(f"ERROR: API request failed", "ERROR")
+        log_console(f"  Error Type: {type(e).__name__}", "ERROR")
+        log_console(f"  Error Message: {str(e)}", "ERROR")
+
+        # Try to extract more details from the exception
+        if hasattr(e, 'body'):
+            log_console(f"  API Response Body: {e.body}", "ERROR")
+        if hasattr(e, 'status'):
+            log_console(f"  HTTP Status: {e.status}", "ERROR")
+
         log_error(f"Error querying calendar events: {e}", "api_query")
         return []
 
