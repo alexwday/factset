@@ -64,7 +64,7 @@ NAS_SERVER_NAME=nas_server
 NAS_SHARE_NAME=share_name
 NAS_PORT=445
 CLIENT_MACHINE_NAME=your_machine
-CONFIG_PATH=path/to/config.yaml  # On NAS
+CONFIG_PATH=path/to/calendar_config.yaml  # On NAS (different from database_refresh!)
 ```
 
 ## Inputs

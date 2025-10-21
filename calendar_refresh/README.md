@@ -24,7 +24,7 @@ calendar_refresh/
 ├── 01_calendar_query/           # Main stage (single script ETL)
 │   ├── main_calendar_refresh.py # Query API → Generate CSV
 │   └── CLAUDE.md                # Stage documentation
-├── config.yaml                  # Configuration (stored on NAS)
+├── calendar_config.yaml         # Configuration (stored on NAS)
 ├── monitored_institutions.yaml  # 91 institutions list (copy from database_refresh)
 ├── postgres_schema.sql          # PostgreSQL schema (optional)
 ├── CLAUDE.md                    # Overall documentation
@@ -82,12 +82,17 @@ This script:
 ## Configuration
 
 Configuration is split across **two files on NAS** (not stored locally):
-1. **config.yaml**: Calendar refresh settings
-2. **monitored_institutions.yaml**: List of 91 financial institutions
+1. **calendar_config.yaml**: Calendar refresh settings
+2. **monitored_institutions.yaml**: List of 91 financial institutions (shared with database_refresh)
 
-The path to config.yaml is specified in your `.env` file's `CONFIG_PATH` variable. The monitored_institutions.yaml file should be in the same directory.
+**Important**: The calendar_refresh script uses a **different config file** than database_refresh:
+- database_refresh: Uses `config.yaml` (existing)
+- calendar_refresh: Uses `calendar_config.yaml` (new file, different name)
+- Both can live in the same `Inputs/Config/` folder on NAS
 
-### What's in config.yaml (on NAS)
+The path to calendar_config.yaml is specified in your `.env` file's `CONFIG_PATH` variable **when running calendar_refresh**. The monitored_institutions.yaml file should be in the same directory.
+
+### What's in calendar_config.yaml (on NAS)
 
 **Section 1: Calendar Refresh Settings**
 ```yaml
@@ -123,7 +128,38 @@ BMO-CA: {id: 2, name: "Bank of Montreal", type: "Canadian_Banks", ...}
 # ... all 91 institutions across 12 categories
 ```
 
-**To set up**: Copy `database_refresh/monitored_institutions.yaml` to the same NAS directory as your `config.yaml`. The script will automatically find and load it.
+**To set up**: Copy `database_refresh/monitored_institutions.yaml` to the same NAS directory as your `calendar_config.yaml`. The script will automatically find and load it.
+
+### Setting CONFIG_PATH for Calendar Refresh
+
+Since both database_refresh and calendar_refresh use the `CONFIG_PATH` environment variable but point to **different files**, you have two options:
+
+**Option 1: Modify CONFIG_PATH before running calendar_refresh**
+```bash
+# For database_refresh (existing)
+export CONFIG_PATH="Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/config.yaml"
+python database_refresh/00_download_historical/main.py
+
+# For calendar_refresh (new - change CONFIG_PATH temporarily)
+export CONFIG_PATH="Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/calendar_config.yaml"
+python calendar_refresh/01_calendar_query/main_calendar_refresh.py
+```
+
+**Option 2: Use a wrapper script that sets CONFIG_PATH**
+```bash
+# Create run_calendar_refresh.sh
+#!/bin/bash
+export CONFIG_PATH="Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/calendar_config.yaml"
+python calendar_refresh/01_calendar_query/main_calendar_refresh.py
+```
+
+**Recommended NAS folder structure**:
+```
+/Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/
+├── config.yaml                    # database_refresh config (existing)
+├── calendar_config.yaml           # calendar_refresh config (NEW)
+└── monitored_institutions.yaml    # Shared by both (copy from database_refresh)
+```
 
 ## Scheduling
 
@@ -227,7 +263,7 @@ NAS_PORT=445
 CLIENT_MACHINE_NAME=your_machine_name
 
 # Configuration (from .env)
-CONFIG_PATH=path/to/calendar_config.yaml  # Path on NAS
+CONFIG_PATH=path/to/calendar_config.yaml  # Path on NAS (different from database_refresh!)
 ```
 
 **Note:** The script uses `load_dotenv()` which searches up the directory tree, so it will find the `.env` file in the `factset/` root folder. **No need to copy the .env file!**
@@ -290,7 +326,7 @@ factset/                         # Root directory
     ├── 01_calendar_query/       # Main stage
     │   ├── main_calendar_refresh.py  # ETL script
     │   └── CLAUDE.md            # Stage documentation
-    ├── config.yaml              # Configuration (on NAS)
+    ├── calendar_config.yaml     # Configuration (on NAS)
     ├── monitored_institutions.yaml  # 91 institutions (copy from database_refresh)
     ├── postgres_schema.sql      # PostgreSQL schema (optional)
     ├── CLAUDE.md                # Overall documentation
