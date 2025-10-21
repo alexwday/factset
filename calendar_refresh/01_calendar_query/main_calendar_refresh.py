@@ -308,35 +308,41 @@ def query_calendar_events(
 ) -> List[Dict[str, Any]]:
     """Query FactSet Calendar Events API for all monitored institutions."""
     try:
-        log_console(f"Querying events from {start_date} to {end_date}")
+        # FactSet API has a 90-day maximum date range limit
+        # Split the overall date range into 90-day chunks
+        MAX_DAYS_PER_QUERY = 89  # Use 89 to be safe
 
-        # Convert dates to datetime objects for API
-        start_datetime = dateutil_parser(f"{start_date}T00:00:00Z")
-        end_datetime = dateutil_parser(f"{end_date}T23:59:59Z")
+        date_ranges = []
+        current_start = start_date
+
+        while current_start < end_date:
+            current_end = min(current_start + timedelta(days=MAX_DAYS_PER_QUERY), end_date)
+            date_ranges.append((current_start, current_end))
+            current_start = current_end + timedelta(days=1)
+
+        log_console(f"Total date range: {start_date} to {end_date}")
+        log_console(f"Split into {len(date_ranges)} date chunks (max 90 days each):")
+        for i, (chunk_start, chunk_end) in enumerate(date_ranges, 1):
+            days = (chunk_end - chunk_start).days + 1
+            log_console(f"  Chunk {i}: {chunk_start} to {chunk_end} ({days} days)")
 
         # Debug: Log the request parameters
         log_console(f"API Request Parameters:")
-        log_console(f"  Start DateTime: {start_datetime}")
-        log_console(f"  End DateTime: {end_datetime}")
         log_console(f"  Number of Tickers: {len(monitored_tickers)}")
         log_console(f"  First 5 Tickers: {monitored_tickers[:5]}")
         log_console(f"  Event Types: ['Earnings']")
 
-        # Query one ticker at a time to avoid API parameter errors
-        BATCH_SIZE = 1  # Query individually
-        ticker_batches = [monitored_tickers[i:i + BATCH_SIZE] for i in range(0, len(monitored_tickers), BATCH_SIZE)]
-
-        log_console(f"Querying {len(monitored_tickers)} tickers individually (one at a time)...")
-
         all_events = []
-        failed_tickers = []
-        success_tickers = []
 
-        for batch_num, ticker_batch in enumerate(ticker_batches, 1):
-            ticker = ticker_batch[0]  # Single ticker since BATCH_SIZE = 1
-            log_console(f"[{batch_num}/{len(ticker_batches)}] Querying {ticker}...")
+        # Query all tickers for each date range chunk
+        for range_num, (chunk_start, chunk_end) in enumerate(date_ranges, 1):
+            log_console(f"\n[Date Range {range_num}/{len(date_ranges)}] Querying {chunk_start} to {chunk_end}...")
 
-            # Build the request object for this batch of tickers
+            # Convert dates to datetime objects for API
+            start_datetime = dateutil_parser(f"{chunk_start}T00:00:00Z")
+            end_datetime = dateutil_parser(f"{chunk_end}T23:59:59Z")
+
+            # Build the request object for ALL tickers in this date range
             company_event_request = CompanyEventRequest(
                 data=CompanyEventRequestData(
                     date_time=CompanyEventRequestDataDateTime(
@@ -344,61 +350,50 @@ def query_calendar_events(
                         end=end_datetime,
                     ),
                     universe=CompanyEventRequestDataUniverse(
-                        symbols=ticker_batch,
+                        symbols=monitored_tickers,
                         type="Tickers",
                     ),
                     event_types=["Earnings"],
                 ),
             )
 
-            # Make the API call for this batch
+            # Make the API call for this date range
             try:
                 response = api_instance.get_company_event(company_event_request)
 
                 if response and hasattr(response, "data") and response.data:
-                    batch_events = [event.to_dict() for event in response.data]
-                    if batch_events:
-                        log_console(f"  ✓ {ticker}: {len(batch_events)} events")
-                    else:
-                        log_console(f"  - {ticker}: No events")
+                    range_events = [event.to_dict() for event in response.data]
+                    log_console(f"  ✓ Found {len(range_events)} events in this date range")
 
-                    for event in batch_events:
+                    for event in range_events:
                         event_ticker = event.get("ticker", "Unknown")
-                        if event_ticker in ticker_batch:
+                        if event_ticker in monitored_tickers:
                             all_events.append(event)
 
-                    success_tickers.append(ticker)
-
                 else:
-                    log_console(f"  - {ticker}: No events")
-                    success_tickers.append(ticker)
+                    log_console(f"  - No events found in this date range")
 
             except Exception as e:
-                log_console(f"  ✗ {ticker} FAILED: {str(e)}", "ERROR")
-                failed_tickers.append(ticker)
+                log_console(f"  ✗ FAILED for date range: {str(e)}", "ERROR")
 
                 # Show detailed error for first failure only
-                if len(failed_tickers) == 1:
+                if range_num == 1:
                     log_console(f"    Detailed error info:", "ERROR")
                     if hasattr(e, 'body'):
                         log_console(f"    API Response: {e.body}", "ERROR")
                     if hasattr(e, 'status'):
                         log_console(f"    HTTP Status: {e.status}", "ERROR")
 
-                # Continue with next ticker even if this one fails
+                # Continue with next date range even if this one fails
                 continue
 
         # Summary
         log_console("=" * 60)
         log_console(f"QUERY SUMMARY:")
-        log_console(f"  Total Tickers Queried: {len(monitored_tickers)}")
-        log_console(f"  Successful: {len(success_tickers)}")
-        log_console(f"  Failed: {len(failed_tickers)}")
+        log_console(f"  Total Date Range: {start_date} to {end_date}")
+        log_console(f"  Date Chunks Queried: {len(date_ranges)}")
+        log_console(f"  Tickers Monitored: {len(monitored_tickers)}")
         log_console(f"  Total Events Found: {len(all_events)}")
-
-        if failed_tickers:
-            log_console(f"  Failed Tickers: {', '.join(failed_tickers[:10])}" + (" ..." if len(failed_tickers) > 10 else ""), "WARNING")
-
         log_console("=" * 60)
 
         log_execution(
@@ -406,9 +401,9 @@ def query_calendar_events(
             {
                 "total_events": len(all_events),
                 "institutions_queried": len(monitored_tickers),
-                "successful": len(success_tickers),
-                "failed": len(failed_tickers),
-                "failed_tickers": failed_tickers if failed_tickers else None
+                "date_ranges_queried": len(date_ranges),
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
             },
         )
 
