@@ -128,45 +128,68 @@ def setup_ssl_certificate(nas_conn, ssl_cert_path):
         print(f"✗ Error downloading SSL certificate: {e}")
         return None
 
-def test_event_type(api_instance, event_type, monitored_tickers, start_date, end_date):
-    """Test a specific event type and return count of events found."""
+def query_all_event_types(api_instance, monitored_tickers, start_date, end_date):
+    """Query API WITHOUT event type filter to see what's available."""
     try:
-        # Convert dates to datetime objects for API
-        start_datetime = dateutil_parser(f"{start_date}T00:00:00Z")
-        end_datetime = dateutil_parser(f"{end_date}T23:59:59Z")
+        # FactSet API has a 90-day maximum date range limit
+        # Split the overall date range into 90-day chunks
+        MAX_DAYS_PER_QUERY = 89  # Use 89 to be safe
 
-        # Build the request object
-        company_event_request = CompanyEventRequest(
-            data=CompanyEventRequestData(
-                date_time=CompanyEventRequestDataDateTime(
-                    start=start_datetime,
-                    end=end_datetime,
+        date_ranges = []
+        current_start = start_date
+
+        while current_start < end_date:
+            current_end = min(current_start + timedelta(days=MAX_DAYS_PER_QUERY), end_date)
+            date_ranges.append((current_start, current_end))
+            current_start = current_end + timedelta(days=1)
+
+        print(f"  Date range split into {len(date_ranges)} chunks (max 90 days each)")
+
+        all_events = []
+
+        # Query all tickers for each date range chunk
+        for range_num, (chunk_start, chunk_end) in enumerate(date_ranges, 1):
+            print(f"  [{range_num}/{len(date_ranges)}] Querying {chunk_start} to {chunk_end}...", end=" ")
+
+            # Convert dates to datetime objects for API
+            start_datetime = dateutil_parser(f"{chunk_start}T00:00:00Z")
+            end_datetime = dateutil_parser(f"{chunk_end}T23:59:59Z")
+
+            # Build the request object WITHOUT event_types filter
+            company_event_request = CompanyEventRequest(
+                data=CompanyEventRequestData(
+                    date_time=CompanyEventRequestDataDateTime(
+                        start=start_datetime,
+                        end=end_datetime,
+                    ),
+                    universe=CompanyEventRequestDataUniverse(
+                        symbols=monitored_tickers,
+                        type="Tickers",
+                    ),
+                    # NOTE: No event_types parameter - get everything!
                 ),
-                universe=CompanyEventRequestDataUniverse(
-                    symbols=monitored_tickers,
-                    type="Tickers",
-                ),
-                event_types=[event_type],
-            ),
-        )
+            )
 
-        # Make the API call
-        response = api_instance.get_company_event(company_event_request)
+            # Make the API call for this date range
+            try:
+                response = api_instance.get_company_event(company_event_request)
 
-        if response and hasattr(response, "data") and response.data:
-            return len(response.data)
-        else:
-            return 0
+                if response and hasattr(response, "data") and response.data:
+                    range_events = [event.to_dict() for event in response.data]
+                    print(f"Found {len(range_events)} events")
+                    all_events.extend(range_events)
+                else:
+                    print("No events")
+
+            except Exception as e:
+                print(f"ERROR: {str(e)[:80]}")
+                continue
+
+        return all_events
 
     except Exception as e:
-        error_msg = str(e)
-        # Extract just the key error message
-        if "Bad Request" in error_msg:
-            return f"ERROR: Bad Request - {event_type} may not be a valid event type"
-        elif "Invalid" in error_msg:
-            return f"ERROR: Invalid - {event_type} not recognized"
-        else:
-            return f"ERROR: {error_msg[:100]}"
+        print(f"✗ Fatal error in query: {e}")
+        return []
 
 def main():
     """Main execution function."""
@@ -230,64 +253,50 @@ def main():
         end_date = today + timedelta(days=future_months * 30)
         print(f"✓ Date range: {start_date} to {end_date}")
 
-        # Test various event types
-        print("\n7. Testing Event Types...")
+        # Query all events without event type filter
+        print("\n7. Querying ALL Event Types (no filter)...")
         print("=" * 70)
-
-        # Common event types to test
-        event_types_to_test = [
-            "Earnings",           # We know this works
-            "Guidance",
-            "Sales",
-            "Shareholder/Analyst Call",
-            "Analyst Meeting",
-            "Conference Call",
-            "Company Conference Presentations",
-            "Shareholder Meeting",
-            "Annual Meeting",
-            "M&A",
-            "Merger",
-            "Acquisition",
-            "Dividend",
-            "Stock Split",
-            "Special Situation",
-            "Product Announcement",
-            "Clinical Trial",
-            "Board Meeting",
-            "Investor Day",
-            "Roadshow",
-            "IPO",
-        ]
-
-        results = []
 
         with fds.sdk.EventsandTranscripts.ApiClient(configuration) as api_client:
             api_instance = calendar_events_api.CalendarEventsApi(api_client)
+            all_events = query_all_event_types(api_instance, monitored_tickers, start_date, end_date)
 
-            for i, event_type in enumerate(event_types_to_test, 1):
-                print(f"\n[{i}/{len(event_types_to_test)}] Testing: {event_type}")
-                count = test_event_type(api_instance, event_type, monitored_tickers, start_date, end_date)
+        print(f"\n✓ Total events retrieved: {len(all_events)}")
 
-                if isinstance(count, int):
-                    if count > 0:
-                        print(f"  ✓ FOUND {count} events")
-                        results.append((event_type, count))
-                    else:
-                        print(f"  - No events (valid type but no data)")
-                else:
-                    print(f"  ✗ {count}")
+        # Group events by event_type
+        if all_events:
+            from collections import defaultdict
+            event_type_counts = defaultdict(int)
+            event_type_examples = defaultdict(list)
 
-        # Summary
-        print("\n" + "=" * 70)
-        print("SUMMARY - Event Types with Data:")
-        print("=" * 70)
+            for event in all_events:
+                event_type = event.get("event_type", "Unknown")
+                ticker = event.get("ticker", "Unknown")
+                event_type_counts[event_type] += 1
+                # Store first 3 examples
+                if len(event_type_examples[event_type]) < 3:
+                    event_type_examples[event_type].append({
+                        "ticker": ticker,
+                        "headline": event.get("description", "")[:60]
+                    })
 
-        if results:
-            for event_type, count in sorted(results, key=lambda x: x[1], reverse=True):
-                print(f"  {event_type:40s} {count:>6d} events")
-            print(f"\nTotal event types with data: {len(results)}")
+            # Summary
+            print("\n" + "=" * 70)
+            print("SUMMARY - Event Types Found:")
+            print("=" * 70)
+
+            for event_type, count in sorted(event_type_counts.items(), key=lambda x: x[1], reverse=True):
+                print(f"\n{event_type}: {count} events")
+                # Show examples
+                for example in event_type_examples[event_type]:
+                    print(f"  - {example['ticker']}: {example['headline']}")
+
+            print("\n" + "=" * 70)
+            print(f"Total unique event types: {len(event_type_counts)}")
+            print(f"Total events: {sum(event_type_counts.values())}")
+            print("=" * 70)
         else:
-            print("  No event types returned data!")
+            print("\n✗ No events returned!")
 
         print("\n" + "=" * 70)
         print("TEST COMPLETE")
