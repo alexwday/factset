@@ -24,6 +24,52 @@ def read_csv_data(csv_path):
     return events
 
 
+def deduplicate_earnings_events(events):
+    """
+    Deduplicate earnings-related events for the same institution on the same date.
+    Priority order: Earnings > ConfirmedEarningsRelease > ProjectedEarningsRelease
+    """
+    # Define priority for earnings-related events (lower number = higher priority)
+    earnings_priority = {
+        'Earnings': 1,
+        'ConfirmedEarningsRelease': 2,
+        'ProjectedEarningsRelease': 3,
+    }
+
+    # Group events by ticker + date
+    from collections import defaultdict
+    event_groups = defaultdict(list)
+
+    for event in events:
+        ticker = event.get('ticker', '')
+        event_date = event.get('event_date', '')  # Just the date part (YYYY-MM-DD)
+        event_type = event.get('event_type', '')
+
+        # Create a key for grouping: ticker + date
+        key = f"{ticker}|{event_date}"
+        event_groups[key].append(event)
+
+    # Deduplicate: keep only highest priority earnings event per group
+    deduplicated = []
+
+    for key, group_events in event_groups.items():
+        # Separate earnings-related from other events
+        earnings_events = [e for e in group_events if e.get('event_type', '') in earnings_priority]
+        other_events = [e for e in group_events if e.get('event_type', '') not in earnings_priority]
+
+        # For earnings events, keep only the highest priority one
+        if earnings_events:
+            # Sort by priority (ascending - lower number is higher priority)
+            earnings_events.sort(key=lambda e: earnings_priority.get(e.get('event_type', ''), 999))
+            # Keep only the first (highest priority)
+            deduplicated.append(earnings_events[0])
+
+        # Add all non-earnings events (they don't need deduplication)
+        deduplicated.extend(other_events)
+
+    return deduplicated
+
+
 def convert_to_fullcalendar_format(events):
     """Convert CSV events to FullCalendar format."""
     calendar_events = []
@@ -706,6 +752,10 @@ def main():
     print(f"📂 Reading CSV data from: {sample_csv.name}")
     csv_events = read_csv_data(sample_csv)
     print(f"✅ Loaded {len(csv_events)} events")
+
+    print("🔍 Deduplicating earnings events (priority: Earnings > Confirmed > Projected)...")
+    csv_events = deduplicate_earnings_events(csv_events)
+    print(f"✅ After deduplication: {len(csv_events)} events")
 
     print("🔄 Converting to calendar format...")
     calendar_events = convert_to_fullcalendar_format(csv_events)
