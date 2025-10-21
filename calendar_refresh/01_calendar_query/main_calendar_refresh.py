@@ -322,16 +322,19 @@ def query_calendar_events(
         log_console(f"  First 5 Tickers: {monitored_tickers[:5]}")
         log_console(f"  Event Types: ['Earnings']")
 
-        # Batch tickers to avoid overwhelming the API (test with smaller batches first)
-        BATCH_SIZE = 10  # Start small to test
+        # Query one ticker at a time to avoid API parameter errors
+        BATCH_SIZE = 1  # Query individually
         ticker_batches = [monitored_tickers[i:i + BATCH_SIZE] for i in range(0, len(monitored_tickers), BATCH_SIZE)]
 
-        log_console(f"Splitting {len(monitored_tickers)} tickers into {len(ticker_batches)} batches of {BATCH_SIZE}")
+        log_console(f"Querying {len(monitored_tickers)} tickers individually (one at a time)...")
 
         all_events = []
+        failed_tickers = []
+        success_tickers = []
 
         for batch_num, ticker_batch in enumerate(ticker_batches, 1):
-            log_console(f"Processing batch {batch_num}/{len(ticker_batches)} ({len(ticker_batch)} tickers)...")
+            ticker = ticker_batch[0]  # Single ticker since BATCH_SIZE = 1
+            log_console(f"[{batch_num}/{len(ticker_batches)}] Querying {ticker}...")
 
             # Build the request object for this batch of tickers
             company_event_request = CompanyEventRequest(
@@ -354,26 +357,59 @@ def query_calendar_events(
 
                 if response and hasattr(response, "data") and response.data:
                     batch_events = [event.to_dict() for event in response.data]
-                    log_console(f"  Found {len(batch_events)} events in batch {batch_num}")
+                    if batch_events:
+                        log_console(f"  ✓ {ticker}: {len(batch_events)} events")
+                    else:
+                        log_console(f"  - {ticker}: No events")
 
                     for event in batch_events:
-                        ticker = event.get("ticker", "Unknown")
-                        if ticker in ticker_batch:
+                        event_ticker = event.get("ticker", "Unknown")
+                        if event_ticker in ticker_batch:
                             all_events.append(event)
 
+                    success_tickers.append(ticker)
+
                 else:
-                    log_console(f"  No events found in batch {batch_num}", "WARNING")
+                    log_console(f"  - {ticker}: No events")
+                    success_tickers.append(ticker)
 
             except Exception as e:
-                log_console(f"  ERROR in batch {batch_num}: {str(e)}", "ERROR")
-                # Continue with next batch even if this one fails
+                log_console(f"  ✗ {ticker} FAILED: {str(e)}", "ERROR")
+                failed_tickers.append(ticker)
+
+                # Show detailed error for first failure only
+                if len(failed_tickers) == 1:
+                    log_console(f"    Detailed error info:", "ERROR")
+                    if hasattr(e, 'body'):
+                        log_console(f"    API Response: {e.body}", "ERROR")
+                    if hasattr(e, 'status'):
+                        log_console(f"    HTTP Status: {e.status}", "ERROR")
+
+                # Continue with next ticker even if this one fails
                 continue
 
         # Summary
-        log_console(f"Total events found across all batches: {len(all_events)}")
+        log_console("=" * 60)
+        log_console(f"QUERY SUMMARY:")
+        log_console(f"  Total Tickers Queried: {len(monitored_tickers)}")
+        log_console(f"  Successful: {len(success_tickers)}")
+        log_console(f"  Failed: {len(failed_tickers)}")
+        log_console(f"  Total Events Found: {len(all_events)}")
+
+        if failed_tickers:
+            log_console(f"  Failed Tickers: {', '.join(failed_tickers[:10])}" + (" ..." if len(failed_tickers) > 10 else ""), "WARNING")
+
+        log_console("=" * 60)
+
         log_execution(
-            "API query completed successfully",
-            {"total_events": len(all_events), "institutions_queried": len(monitored_tickers), "batches": len(ticker_batches)},
+            "API query completed",
+            {
+                "total_events": len(all_events),
+                "institutions_queried": len(monitored_tickers),
+                "successful": len(success_tickers),
+                "failed": len(failed_tickers),
+                "failed_tickers": failed_tickers if failed_tickers else None
+            },
         )
 
         return all_events
