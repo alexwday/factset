@@ -35,10 +35,11 @@ This tool generates an **interactive HTML calendar** from calendar events CSV da
 - **Color Coding**: Each event type has a distinct color
 
 ### Interactive Filters
-- **Dropdown Selectors**: Choose one institution type or event type at a time
+- **Multi-Select Dropdowns**: Click to open dropdown, check multiple options with checkboxes
+- **Smart Labels**: Shows "2 selected" or the single selection name
 - **Smart Grouping**: "Earnings" option includes all earnings-related events (Earnings, ConfirmedEarningsRelease, ProjectedEarningsRelease)
-- **Default View**: Shows all events on page load
-- **One-Click Reset**: Clear all filters to return to default view
+- **Smart Defaults**: Pre-filtered to Canadian Banks, US Banks, and Earnings on page load
+- **One-Click Reset**: Clear all filters to show all events
 
 ### Event Details
 Click any event to see:
@@ -238,27 +239,33 @@ The script can be extended to add filters for:
 
 ## Examples
 
-### Example 1: View All Events (Default)
+### Example 1: Default View (Canadian & US Bank Earnings)
 
 1. Open `output/calendar.html` in browser
-2. Calendar loads showing all events
-3. Use dropdown filters to narrow down to specific institution types or event types
+2. Calendar loads pre-filtered to show Canadian Banks, US Banks, and Earnings events
+3. Use dropdown filters to add more institution types or event types
 
-### Example 2: Filter Canadian Bank Earnings
+### Example 2: View All Events
 
 1. Open calendar
-2. Select "Canadian_Banks" from Institution Type dropdown
-3. Select "Earnings" from Event Type dropdown
-4. Calendar shows only Canadian bank earnings events
+2. Click "Reset All Filters" button
+3. Calendar shows all events across all institution types and event types
 
-### Example 3: Export Events to Calendar
+### Example 3: Filter to Specific Institution
+
+1. Open calendar
+2. Click Institution Type dropdown
+3. Uncheck all, then check only "Canadian_Banks"
+4. Calendar shows only Canadian bank events (with Earnings filter still active)
+
+### Example 4: Export Events to Calendar
 
 1. Click any event on the calendar
 2. Review event details in the modal
 3. Click "Add to Outlook Calendar" to download .ics file
 4. Import to your calendar app (Outlook/Google/Apple Calendar)
 
-### Example 4: Switch to List View
+### Example 5: Switch to List View
 
 1. Open calendar
 2. Click "list" button in top-right
