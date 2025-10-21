@@ -1,6 +1,6 @@
 # Calendar Events Refresh
 
-Simple ETL to maintain a current snapshot of earnings events for monitored financial institutions using the FactSet Calendar Events API.
+Simple ETL to maintain a current snapshot of calendar events (earnings, dividends, conferences, shareholder meetings, etc.) for monitored financial institutions using the FactSet Calendar Events API.
 
 ## Quick Start
 
@@ -38,19 +38,62 @@ Note: monitored_institutions.yaml is NOT in this folder - it's shared from datab
 
 This script:
 1. Queries the FactSet Calendar Events API for all 91 monitored institutions
-2. Retrieves earnings events from the past 6 months and future 6 months
+2. Retrieves **all event types** from the past 6 months and future 6 months
 3. Enriches event data with institution metadata and timezone conversions
 4. **Replaces** the master CSV file on NAS with fresh data
 5. Saves execution logs for monitoring
 
 **No incremental updates.** Each run completely replaces the master CSV with current data from the API.
 
+## Available Event Types
+
+The FactSet Calendar Events API provides the following event types for monitored institutions:
+
+| Event Type | Description | Example |
+|------------|-------------|---------|
+| **Earnings** | Earnings calls and releases (confirmed dates) | Q4 2025 Earnings Conference Call |
+| **ConfirmedEarningsRelease** | Confirmed earnings release with specific date/time | Q3 2025 Earnings Release - 8:00 AM EST |
+| **ProjectedEarningsRelease** | Projected/estimated earnings release dates | Q2 2025 Earnings (Estimated) |
+| **Dividend** | Dividend announcements and declarations | Quarterly Dividend Declaration |
+| **Conference** | Company presentations at industry conferences | Morgan Stanley Financials Conference |
+| **ShareholdersMeeting** | Annual or special shareholder meetings | 2026 Annual Shareholders Meeting |
+| **SalesRevenueCall** | Sales and revenue-specific conference calls | Monthly Sales Results Call |
+| **SalesRevenueMeeting** | Sales/revenue investor meetings | Quarterly Sales Review with Analysts |
+| **SalesRevenueRelease** | Sales and revenue data releases | Monthly Sales Report Release |
+| **AnalystsInvestorsMeeting** | Analyst and investor day events | 2025 Investor Day Presentation |
+| **SpecialSituation** | Special corporate events (M&A, restructuring, etc.) | Strategic Update Call |
+
+**The script captures ALL event types by default.** No filtering is applied unless you configure it in `calendar_config.yaml`.
+
+### Filtering Event Types (Optional)
+
+If you only want specific event types, you can add filtering to your `calendar_config.yaml`:
+
+```yaml
+calendar_refresh:
+  date_range:
+    past_months: 6
+    future_months: 6
+
+  # Optional: Specify which event types to capture
+  # If omitted or empty, ALL event types are captured (recommended)
+  event_types:
+    - "Earnings"
+    - "ConfirmedEarningsRelease"
+    - "Dividend"
+
+  master_database_path: "..."
+  output_logs_path: "..."
+```
+
+**Note:** Filtering is NOT implemented in the current version. The script captures all events. To add filtering support, you would need to modify `main_calendar_refresh.py` to read the `event_types` config and apply it to the API request.
+
 ## Output
 
 ### Master CSV
 - **Location**: `{NAS}/Outputs/CalendarEvents/Database/master_calendar_events.csv`
-- **Format**: 20 columns, sorted by event date
-- **Content**: All current earnings events (past 6 months + future 6 months)
+- **Format**: 16 columns, sorted by event date
+- **Content**: All calendar events across all types (past 6 months + future 6 months)
 - **Update Strategy**: Complete replacement each run
 
 ### Execution Logs
@@ -103,8 +146,8 @@ calendar_refresh:
     past_months: 6      # How far back to query (default: 6 months)
     future_months: 6    # How far ahead to query (default: 6 months)
 
-  event_types:
-    - "Earnings"        # Currently only Earnings events
+  # event_types: []     # Optional: Filter specific types (see Available Event Types section)
+                        # If omitted, ALL event types are captured (default behavior)
 
   master_database_path: "Finance Data and Analytics/.../master_calendar_events.csv"
   output_logs_path: "Finance Data and Analytics/.../Logs"
@@ -216,15 +259,38 @@ SELECT * FROM upcoming_events_30d;
 SELECT * FROM events_by_institution_type;
 
 -- Canadian bank earnings this quarter
-SELECT ticker, institution_name, event_headline, event_date, event_time_local
+SELECT ticker, institution_name, event_type, event_headline, event_date, event_time_local
 FROM calendar_events
 WHERE institution_type = 'Canadian_Banks'
+  AND event_type IN ('Earnings', 'ConfirmedEarningsRelease')
+  AND event_date_time_utc > CURRENT_TIMESTAMP
+ORDER BY event_date_time_utc;
+
+-- All event types for a specific institution
+SELECT event_type, event_headline, event_date, event_time_local
+FROM calendar_events
+WHERE ticker = 'RY-CA'
+  AND event_date_time_utc > CURRENT_TIMESTAMP
+ORDER BY event_date_time_utc;
+
+-- Count events by type
+SELECT event_type, COUNT(*) as event_count
+FROM calendar_events
+WHERE event_date_time_utc > CURRENT_TIMESTAMP
+GROUP BY event_type
+ORDER BY event_count DESC;
+
+-- Upcoming dividends
+SELECT ticker, institution_name, event_headline, event_date
+FROM calendar_events
+WHERE event_type = 'Dividend'
   AND event_date_time_utc > CURRENT_TIMESTAMP
 ORDER BY event_date_time_utc;
 
 -- Calculate days until event
 SELECT
     ticker,
+    event_type,
     event_headline,
     event_date,
     EXTRACT(DAY FROM (event_date_time_utc - CURRENT_TIMESTAMP))::INTEGER as days_until
@@ -292,9 +358,11 @@ CALENDAR_CONFIG_PATH=Finance Data and Analytics/DSA/Earnings Call Transcripts/In
 
 ### Expected Behavior
 - **Execution Time**: 30-60 seconds
-- **Event Count**: 300-500 events (for 91 institutions)
-- **Upcoming Events**: ~200 (varies by quarter)
-- **Past Events**: ~150-200 (within 6-month lookback)
+- **Event Count**: 500-1000+ events (for 91 institutions, all event types)
+  - Previously: ~300-500 when filtering only Earnings
+  - Now: Higher count due to capturing all event types (dividends, conferences, etc.)
+- **Upcoming Events**: Varies by quarter and event type
+- **Past Events**: Within 6-month lookback window
 - **Timezone**: All local times shown in Toronto time (EST/EDT)
 
 ### Health Checks
@@ -305,8 +373,8 @@ CALENDAR_CONFIG_PATH=Finance Data and Analytics/DSA/Earnings Call Transcripts/In
 
 ### Alert Conditions
 - 🚨 No execution log (script didn't run)
-- 🚨 Event count < 200 (API issue?)
-- 🚨 Event count > 700 (API returning unexpected data?)
+- 🚨 Event count < 300 (API issue or data problem?)
+- 🚨 Event count > 1500 (API returning unexpected volume?)
 - 🚨 Error log present (check for failures)
 
 ## Troubleshooting

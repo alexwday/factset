@@ -330,7 +330,7 @@ def query_calendar_events(
         log_console(f"API Request Parameters:")
         log_console(f"  Number of Tickers: {len(monitored_tickers)}")
         log_console(f"  First 5 Tickers: {monitored_tickers[:5]}")
-        log_console(f"  Event Types: ['Earnings']")
+        log_console(f"  Event Types: ALL (no filter)")
 
         all_events = []
 
@@ -353,7 +353,8 @@ def query_calendar_events(
                         symbols=monitored_tickers,
                         type="Tickers",
                     ),
-                    event_types=["Earnings"],
+                    # NOTE: No event_types filter - captures ALL event types
+                    # Available types include: Earnings, Dividend, Conference, etc.
                 ),
             )
 
@@ -437,7 +438,7 @@ def enrich_event_with_institution_data(
         "institution_name": institution.get("name", "Unknown"),
         "institution_id": institution.get("id", ""),
         "institution_type": institution.get("type", "Unknown"),
-        "event_type": event.get("event_type", "Earnings"),
+        "event_type": event.get("event_type", "Unknown"),
         "event_headline": event.get("description", ""),  # Fixed: was event_headline
     }
 
