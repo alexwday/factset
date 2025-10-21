@@ -1,27 +1,11 @@
 -- =====================================================
--- Calendar Events Database Schema
--- =====================================================
--- This schema supports loading calendar events CSV data (16 fields)
--- into PostgreSQL for querying, analytics, and calendar visualization.
---
--- Usage:
---   1. Create database: CREATE DATABASE calendar_events;
---   2. Run this schema: psql -d calendar_events -f postgres_schema.sql
---   3. Load CSV data (see COPY command examples below)
---
--- Strategy: Replace - CSV is completely replaced each run
+-- AEGIS Calendar Events Database Schema
 -- =====================================================
 
--- Drop existing objects if they exist
-DROP VIEW IF EXISTS calendar_events_deduplicated CASCADE;
-DROP VIEW IF EXISTS upcoming_events_30d CASCADE;
-DROP TABLE IF EXISTS calendar_events CASCADE;
-
--- =====================================================
--- Main Table: calendar_events (16 fields from CSV)
+-- Main Table: aegis_calendar_events (16 fields from CSV)
 -- =====================================================
 
-CREATE TABLE calendar_events (
+CREATE TABLE aegis_calendar_events (
     -- Primary Key
     id SERIAL PRIMARY KEY,
 
@@ -77,16 +61,16 @@ CREATE TABLE calendar_events (
 -- =====================================================
 
 -- Date-based queries (most common)
-CREATE INDEX idx_calendar_events_date ON calendar_events(event_date);
-CREATE INDEX idx_calendar_events_datetime_utc ON calendar_events(event_date_time_utc);
+CREATE INDEX idx_aegis_calendar_events_date ON aegis_calendar_events(event_date);
+CREATE INDEX idx_aegis_calendar_events_datetime_utc ON aegis_calendar_events(event_date_time_utc);
 
 -- Filter queries
-CREATE INDEX idx_calendar_events_ticker ON calendar_events(ticker);
-CREATE INDEX idx_calendar_events_institution_type ON calendar_events(institution_type);
-CREATE INDEX idx_calendar_events_event_type ON calendar_events(event_type);
+CREATE INDEX idx_aegis_calendar_events_ticker ON aegis_calendar_events(ticker);
+CREATE INDEX idx_aegis_calendar_events_institution_type ON aegis_calendar_events(institution_type);
+CREATE INDEX idx_aegis_calendar_events_event_type ON aegis_calendar_events(event_type);
 
 -- Fiscal period queries (for earnings)
-CREATE INDEX idx_calendar_events_fiscal_period ON calendar_events(fiscal_year, fiscal_period)
+CREATE INDEX idx_aegis_calendar_events_fiscal_period ON aegis_calendar_events(fiscal_year, fiscal_period)
 WHERE fiscal_year IS NOT NULL AND fiscal_year != '';
 
 -- =====================================================
@@ -96,7 +80,7 @@ WHERE fiscal_year IS NOT NULL AND fiscal_year != '';
 -- View: Deduplicated events for calendar visualization
 -- Matches the deduplication logic in generate_calendar.py
 -- Priority: Earnings > ConfirmedEarningsRelease > ProjectedEarningsRelease
-CREATE VIEW calendar_events_deduplicated AS
+CREATE VIEW aegis_calendar_events_deduplicated AS
 WITH earnings_ranked AS (
     SELECT *,
         CASE event_type
@@ -118,12 +102,12 @@ WITH earnings_ranked AS (
                     ELSE 999
                 END
         ) as rn
-    FROM calendar_events
+    FROM aegis_calendar_events
     WHERE event_type IN ('Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease')
 ),
 non_earnings AS (
     SELECT *, 999 as priority, 1 as rn
-    FROM calendar_events
+    FROM aegis_calendar_events
     WHERE event_type NOT IN ('Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease')
 )
 SELECT
@@ -139,7 +123,7 @@ FROM (
 ORDER BY event_date_time_utc;
 
 -- View: Upcoming events in next 30 days
-CREATE VIEW upcoming_events_30d AS
+CREATE VIEW aegis_upcoming_events_30d AS
 SELECT
     ticker,
     institution_name,
@@ -154,75 +138,9 @@ SELECT
     contact_info,
     fiscal_year,
     fiscal_period
-FROM calendar_events
+FROM aegis_calendar_events
 WHERE event_date_time_utc > CURRENT_TIMESTAMP
   AND event_date_time_utc <= CURRENT_TIMESTAMP + INTERVAL '30 days'
 ORDER BY event_date_time_utc;
 
--- =====================================================
--- Common Queries for Calendar Visualization
--- =====================================================
-
-/*
--- ===== CSV LOADING =====
-
--- Clear existing data and load fresh CSV (replace strategy)
-DELETE FROM calendar_events;
-
-COPY calendar_events (
-    event_id, ticker, institution_name, institution_id, institution_type,
-    event_type, event_date_time_utc, event_date_time_local, event_date,
-    event_time_local, event_headline, webcast_link, contact_info,
-    fiscal_year, fiscal_period, data_fetched_timestamp
-)
-FROM '/path/to/master_calendar_events.csv'
-WITH (FORMAT csv, HEADER true);
-
--- Using psql \copy (works from client machine)
-\copy calendar_events (event_id, ticker, institution_name, institution_id, institution_type, event_type, event_date_time_utc, event_date_time_local, event_date, event_time_local, event_headline, webcast_link, contact_info, fiscal_year, fiscal_period, data_fetched_timestamp) FROM 'master_calendar_events.csv' WITH (FORMAT csv, HEADER true)
-
-
--- ===== CALENDAR VISUALIZATION QUERIES =====
-
--- Get deduplicated events for calendar (use this for visualization)
-SELECT * FROM calendar_events_deduplicated
-WHERE event_date BETWEEN '2025-11-01' AND '2025-11-30'
-ORDER BY event_date_time_utc;
-
--- Filter by institution type (e.g., Canadian Banks and US Banks)
-SELECT * FROM calendar_events_deduplicated
-WHERE institution_type IN ('Canadian_Banks', 'US_Banks')
-  AND event_date_time_utc > CURRENT_TIMESTAMP
-ORDER BY event_date_time_utc;
-
--- Filter by event type (e.g., Earnings only)
-SELECT * FROM calendar_events_deduplicated
-WHERE event_type IN ('Earnings', 'ConfirmedEarningsRelease', 'ProjectedEarningsRelease')
-  AND event_date_time_utc > CURRENT_TIMESTAMP
-ORDER BY event_date_time_utc;
-
--- Get all upcoming events in next 30 days
-SELECT * FROM upcoming_events_30d;
-
--- Get events by fiscal period
-SELECT
-    fiscal_year,
-    fiscal_period,
-    institution_type,
-    COUNT(*) as event_count
-FROM calendar_events_deduplicated
-WHERE fiscal_year IS NOT NULL AND fiscal_year != ''
-  AND fiscal_period IS NOT NULL AND fiscal_period != ''
-GROUP BY fiscal_year, fiscal_period, institution_type
-ORDER BY fiscal_year DESC, fiscal_period, institution_type;
-
--- Get event counts by type
-SELECT
-    event_type,
-    COUNT(*) as total_events,
-    COUNT(*) FILTER (WHERE event_date_time_utc > CURRENT_TIMESTAMP) as upcoming_events
-FROM calendar_events_deduplicated
-GROUP BY event_type
-ORDER BY total_events DESC;
-*/
 
