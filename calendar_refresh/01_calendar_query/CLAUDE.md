@@ -64,7 +64,11 @@ NAS_SERVER_NAME=nas_server
 NAS_SHARE_NAME=share_name
 NAS_PORT=445
 CLIENT_MACHINE_NAME=your_machine
-CONFIG_PATH=path/to/calendar_config.yaml  # On NAS (different from database_refresh!)
+
+# Config Path - IMPORTANT: Use CALENDAR_CONFIG_PATH for this script!
+CALENDAR_CONFIG_PATH=path/to/calendar_config.yaml  # On NAS
+# Note: database_refresh uses CONFIG_PATH, this uses CALENDAR_CONFIG_PATH
+# Both can be set in the same .env file
 ```
 
 ## Inputs

@@ -186,12 +186,17 @@ def nas_path_join(*parts: str) -> str:
 def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
     """Load and validate configuration from NAS."""
     try:
-        config_data = nas_download_file(nas_conn, os.getenv("CONFIG_PATH"))
+        # Use CALENDAR_CONFIG_PATH if set, otherwise fall back to CONFIG_PATH
+        config_path = os.getenv("CALENDAR_CONFIG_PATH") or os.getenv("CONFIG_PATH")
+        if not config_path:
+            raise ValueError("CALENDAR_CONFIG_PATH or CONFIG_PATH environment variable must be set")
+
+        config_data = nas_download_file(nas_conn, config_path)
         if not config_data:
-            raise FileNotFoundError(f"Configuration file not found at {os.getenv('CONFIG_PATH')}")
+            raise FileNotFoundError(f"Configuration file not found at {config_path}")
 
         calendar_config = yaml.safe_load(config_data.decode("utf-8"))
-        log_execution("Configuration loaded successfully")
+        log_execution("Configuration loaded successfully", {"config_path": config_path})
 
         return calendar_config
 
@@ -204,7 +209,8 @@ def load_monitored_institutions(nas_conn: SMBConnection, config: Dict[str, Any])
     """Load monitored institutions from separate file or fall back to config."""
     try:
         # Try to load separate monitored_institutions.yaml file
-        config_path = os.getenv("CONFIG_PATH")
+        # Use CALENDAR_CONFIG_PATH if set, otherwise fall back to CONFIG_PATH
+        config_path = os.getenv("CALENDAR_CONFIG_PATH") or os.getenv("CONFIG_PATH")
         institutions_path = "/".join(config_path.split("/")[:-1]) + "/monitored_institutions.yaml"
 
         log_console("Loading monitored institutions...")

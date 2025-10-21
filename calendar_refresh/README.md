@@ -130,28 +130,30 @@ BMO-CA: {id: 2, name: "Bank of Montreal", type: "Canadian_Banks", ...}
 
 **To set up**: Copy `database_refresh/monitored_institutions.yaml` to the same NAS directory as your `calendar_config.yaml`. The script will automatically find and load it.
 
-### Setting CONFIG_PATH for Calendar Refresh
+### Setting Config Paths
 
-Since both database_refresh and calendar_refresh use the `CONFIG_PATH` environment variable but point to **different files**, you have two options:
+Both scripts use separate environment variables for their config files:
 
-**Option 1: Modify CONFIG_PATH before running calendar_refresh**
+**database_refresh**: Uses `CONFIG_PATH`
 ```bash
-# For database_refresh (existing)
-export CONFIG_PATH="Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/config.yaml"
-python database_refresh/00_download_historical/main.py
-
-# For calendar_refresh (new - change CONFIG_PATH temporarily)
-export CONFIG_PATH="Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/calendar_config.yaml"
-python calendar_refresh/01_calendar_query/main_calendar_refresh.py
+CONFIG_PATH="Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/config.yaml"
 ```
 
-**Option 2: Use a wrapper script that sets CONFIG_PATH**
+**calendar_refresh**: Uses `CALENDAR_CONFIG_PATH`
 ```bash
-# Create run_calendar_refresh.sh
-#!/bin/bash
-export CONFIG_PATH="Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/calendar_config.yaml"
-python calendar_refresh/01_calendar_query/main_calendar_refresh.py
+CALENDAR_CONFIG_PATH="Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/calendar_config.yaml"
 ```
+
+**Add both to your `.env` file** in the `factset/` root directory:
+```bash
+# database_refresh config
+CONFIG_PATH=Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/config.yaml
+
+# calendar_refresh config
+CALENDAR_CONFIG_PATH=Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/calendar_config.yaml
+```
+
+This way both can run without changing environment variables!
 
 **Recommended NAS folder structure**:
 ```
@@ -263,10 +265,24 @@ NAS_PORT=445
 CLIENT_MACHINE_NAME=your_machine_name
 
 # Configuration (from .env)
-CONFIG_PATH=path/to/calendar_config.yaml  # Path on NAS (different from database_refresh!)
+CALENDAR_CONFIG_PATH=path/to/calendar_config.yaml  # Path on NAS
+# Note: database_refresh uses CONFIG_PATH, calendar_refresh uses CALENDAR_CONFIG_PATH
 ```
 
 **Note:** The script uses `load_dotenv()` which searches up the directory tree, so it will find the `.env` file in the `factset/` root folder. **No need to copy the .env file!**
+
+**Example `.env` file**:
+```bash
+# FactSet API
+API_USERNAME=your_username
+API_PASSWORD=your_password
+
+# ... (other variables)
+
+# Config paths (both can coexist in .env)
+CONFIG_PATH=Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/config.yaml
+CALENDAR_CONFIG_PATH=Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Config/calendar_config.yaml
+```
 
 ## Monitoring
 
