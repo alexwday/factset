@@ -26,7 +26,7 @@ def read_csv_data(csv_path):
 
 def deduplicate_earnings_events(events):
     """
-    Deduplicate earnings-related events for the same institution on the same date.
+    Deduplicate earnings-related events for the same institution and fiscal period.
     Priority order: Earnings > ConfirmedEarningsRelease > ProjectedEarningsRelease
     """
     # Define priority for earnings-related events (lower number = higher priority)
@@ -36,17 +36,32 @@ def deduplicate_earnings_events(events):
         'ProjectedEarningsRelease': 3,
     }
 
-    # Group events by ticker + date
+    # Group events by ticker + fiscal period
     from collections import defaultdict
     event_groups = defaultdict(list)
 
     for event in events:
         ticker = event.get('ticker', '')
-        event_date = event.get('event_date', '')  # Just the date part (YYYY-MM-DD)
+        fiscal_year = event.get('fiscal_year', '')
+        fiscal_period = event.get('fiscal_period', '')
         event_type = event.get('event_type', '')
 
-        # Create a key for grouping: ticker + date
-        key = f"{ticker}|{event_date}"
+        # Create a key for grouping: ticker + fiscal_year + fiscal_period
+        # For earnings events with fiscal info, group by fiscal period
+        # For earnings events without fiscal info, group by date (fallback)
+        # For non-earnings events, use unique key (won't be deduplicated)
+        if event_type in earnings_priority:
+            if fiscal_year and fiscal_period:
+                key = f"{ticker}|{fiscal_year}|{fiscal_period}"
+            else:
+                # Fallback to date if no fiscal period info
+                event_date = event.get('event_date', '')
+                key = f"{ticker}|date|{event_date}"
+        else:
+            # Non-earnings events get unique keys (won't be deduplicated)
+            event_id = event.get('event_id', '')
+            key = f"unique|{event_id}"
+
         event_groups[key].append(event)
 
     # Deduplicate: keep only highest priority earnings event per group
@@ -798,7 +813,7 @@ def main():
     csv_events = read_csv_data(sample_csv)
     print(f"✅ Loaded {len(csv_events)} events")
 
-    print("🔍 Deduplicating earnings events (priority: Earnings > Confirmed > Projected)...")
+    print("🔍 Deduplicating earnings events by fiscal period (priority: Earnings > Confirmed > Projected)...")
     csv_events = deduplicate_earnings_events(csv_events)
     print(f"✅ After deduplication: {len(csv_events)} events")
 
