@@ -83,9 +83,10 @@ CALENDAR_CONFIG_PATH=path/to/calendar_config.yaml  # On NAS
 - Date range configuration
 - Output paths
 
-### From NAS (monitored_institutions.yaml)
+### From NAS (monitored_institutions.yaml - shared with database_refresh)
 - Monitored institutions list (91 institutions)
 - Institution metadata (ID, name, type, path_safe_name)
+- Located in same folder as database_refresh config (CONFIG_PATH)
 
 ### From FactSet API
 - Calendar events data (JSON response)
@@ -169,7 +170,8 @@ Only created if errors occur during execution.
    - Get basic auth token
 
 6. LOAD INSTITUTIONS
-   - Try to load monitored_institutions.yaml from NAS
+   - Load monitored_institutions.yaml from database_refresh config folder (using CONFIG_PATH)
+   - This file is shared between database_refresh and calendar_refresh
    - Fall back to config if separate file not found
    - Build list of 91 tickers
 
@@ -281,7 +283,7 @@ Each raw API event is enriched:
 Entry point with 11-step execution flow.
 
 ### `load_monitored_institutions()`
-Loads monitored institutions from separate YAML file on NAS, with fallback to config.yaml.
+Loads monitored institutions from database_refresh config folder (shared file), with fallback to config.yaml.
 
 ### `query_calendar_events()`
 Queries FactSet API for all institutions in single batch call.

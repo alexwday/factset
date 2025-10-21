@@ -208,12 +208,16 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
 def load_monitored_institutions(nas_conn: SMBConnection, config: Dict[str, Any]) -> Dict[str, Any]:
     """Load monitored institutions from separate file or fall back to config."""
     try:
-        # Try to load separate monitored_institutions.yaml file
-        # Use CALENDAR_CONFIG_PATH if set, otherwise fall back to CONFIG_PATH
-        config_path = os.getenv("CALENDAR_CONFIG_PATH") or os.getenv("CONFIG_PATH")
+        # Try to load monitored_institutions.yaml from the database_refresh config folder
+        # This way both scripts share the same monitored_institutions.yaml file
+        # Use CONFIG_PATH (database_refresh config path) to find monitored_institutions.yaml
+        config_path = os.getenv("CONFIG_PATH")
+        if not config_path:
+            raise ValueError("CONFIG_PATH environment variable must be set to locate monitored_institutions.yaml")
+
         institutions_path = "/".join(config_path.split("/")[:-1]) + "/monitored_institutions.yaml"
 
-        log_console("Loading monitored institutions...")
+        log_console("Loading monitored institutions from database_refresh config folder...")
         institutions_data = nas_download_file(nas_conn, institutions_path)
 
         if institutions_data:
