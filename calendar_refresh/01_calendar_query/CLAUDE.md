@@ -76,9 +76,12 @@ CONFIG_PATH=path/to/config.yaml  # On NAS
 
 ### From NAS (via config)
 - SSL certificate (for API calls)
-- Monitored institutions list (91 institutions)
 - Date range configuration
 - Output paths
+
+### From NAS (monitored_institutions.yaml)
+- Monitored institutions list (91 institutions)
+- Institution metadata (ID, name, type, path_safe_name)
 
 ### From FactSet API
 - Calendar events data (JSON response)
@@ -162,7 +165,8 @@ Only created if errors occur during execution.
    - Get basic auth token
 
 6. LOAD INSTITUTIONS
-   - Extract monitored_institutions from config
+   - Try to load monitored_institutions.yaml from NAS
+   - Fall back to config if separate file not found
    - Build list of 91 tickers
 
 7. CALCULATE DATE RANGE
@@ -271,6 +275,9 @@ Each raw API event is enriched:
 
 ### `main()`
 Entry point with 11-step execution flow.
+
+### `load_monitored_institutions()`
+Loads monitored institutions from separate YAML file on NAS, with fallback to config.yaml.
 
 ### `query_calendar_events()`
 Queries FactSet API for all institutions in single batch call.

@@ -200,6 +200,54 @@ def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
         raise
 
 
+def load_monitored_institutions(nas_conn: SMBConnection, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Load monitored institutions from separate file or fall back to config."""
+    try:
+        # Try to load separate monitored_institutions.yaml file
+        config_path = os.getenv("CONFIG_PATH")
+        institutions_path = "/".join(config_path.split("/")[:-1]) + "/monitored_institutions.yaml"
+
+        log_console("Loading monitored institutions...")
+        institutions_data = nas_download_file(nas_conn, institutions_path)
+
+        if institutions_data:
+            monitored_institutions = yaml.safe_load(institutions_data.decode("utf-8"))
+            log_execution(
+                "Monitored institutions loaded from separate file",
+                {"source": "monitored_institutions.yaml", "count": len(monitored_institutions)}
+            )
+            return monitored_institutions
+        else:
+            # Fall back to institutions in main config
+            if "monitored_institutions" in config:
+                log_execution(
+                    "Monitored institutions loaded from config",
+                    {"source": "config.yaml", "count": len(config["monitored_institutions"])}
+                )
+                return config["monitored_institutions"]
+            else:
+                raise ValueError("No monitored institutions found in config or separate file")
+
+    except Exception as e:
+        # Fall back to config if separate file doesn't exist
+        if "monitored_institutions" in config:
+            log_console(
+                f"Could not load separate institutions file, using config: {e}",
+                "WARNING"
+            )
+            log_execution(
+                "Monitored institutions loaded from config (fallback)",
+                {"source": "config.yaml", "count": len(config["monitored_institutions"])}
+            )
+            return config["monitored_institutions"]
+        else:
+            log_error(
+                f"Failed to load monitored institutions: {e}",
+                "config_loading"
+            )
+            raise
+
+
 def setup_ssl_certificate(nas_conn: SMBConnection, ssl_cert_path: str) -> Optional[str]:
     """Download SSL certificate from NAS and set up for use."""
     try:
@@ -564,9 +612,9 @@ def main():
         configuration.get_basic_auth_token()
         log_execution("FactSet API client configured")
 
-        # Step 6: Get monitored institutions
+        # Step 6: Load monitored institutions
         log_console("Step 6: Loading monitored institutions...")
-        monitored_institutions = config["monitored_institutions"]
+        monitored_institutions = load_monitored_institutions(nas_conn, config)
         monitored_tickers = list(monitored_institutions.keys())
         summary["institutions_monitored"] = len(monitored_tickers)
         log_console(f"Monitoring {len(monitored_tickers)} institutions")

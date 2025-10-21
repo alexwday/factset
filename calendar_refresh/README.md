@@ -25,6 +25,7 @@ calendar_refresh/
 │   ├── main_calendar_refresh.py # Query API → Generate CSV
 │   └── CLAUDE.md                # Stage documentation
 ├── config.yaml                  # Configuration (stored on NAS)
+├── monitored_institutions.yaml  # 91 institutions list (copy from database_refresh)
 ├── postgres_schema.sql          # PostgreSQL schema (optional)
 ├── CLAUDE.md                    # Overall documentation
 └── README.md                    # This file
@@ -80,7 +81,11 @@ This script:
 
 ## Configuration
 
-The `config.yaml` file is **stored on NAS** (not locally). The path is specified in your `.env` file's `CONFIG_PATH` variable.
+Configuration is split across **two files on NAS** (not stored locally):
+1. **config.yaml**: Calendar refresh settings
+2. **monitored_institutions.yaml**: List of 91 financial institutions
+
+The path to config.yaml is specified in your `.env` file's `CONFIG_PATH` variable. The monitored_institutions.yaml file should be in the same directory.
 
 ### What's in config.yaml (on NAS)
 
@@ -100,20 +105,25 @@ calendar_refresh:
   replace_on_refresh: true  # Always replace master CSV (no incremental)
 ```
 
-**Section 2: Monitored Institutions (91 total)**
-```yaml
-monitored_institutions:
-  RY-CA: {id: 1, name: "Royal Bank of Canada", type: "Canadian_Banks", ...}
-  BMO-CA: {id: 2, name: "Bank of Montreal", type: "Canadian_Banks", ...}
-  # ... all 91 institutions
-```
-
-**Section 3: SSL Certificate**
+**Section 2: SSL Certificate**
 ```yaml
 ssl_cert_path: "Finance Data and Analytics/.../rbc-ca-bundle.cer"
 ```
 
 **The SSL certificate is already on your NAS from database_refresh setup. The script downloads it at runtime - you don't need to copy it anywhere!**
+
+### What's in monitored_institutions.yaml (on NAS)
+
+This file contains all 91 monitored financial institutions and is **shared with database_refresh**:
+
+```yaml
+# Monitored Financial Institutions (91 Total)
+RY-CA: {id: 1, name: "Royal Bank of Canada", type: "Canadian_Banks", ...}
+BMO-CA: {id: 2, name: "Bank of Montreal", type: "Canadian_Banks", ...}
+# ... all 91 institutions across 12 categories
+```
+
+**To set up**: Copy `database_refresh/monitored_institutions.yaml` to the same NAS directory as your `config.yaml`. The script will automatically find and load it.
 
 ## Scheduling
 
@@ -281,6 +291,7 @@ factset/                         # Root directory
     │   ├── main_calendar_refresh.py  # ETL script
     │   └── CLAUDE.md            # Stage documentation
     ├── config.yaml              # Configuration (on NAS)
+    ├── monitored_institutions.yaml  # 91 institutions (copy from database_refresh)
     ├── postgres_schema.sql      # PostgreSQL schema (optional)
     ├── CLAUDE.md                # Overall documentation
     └── README.md                # This file
