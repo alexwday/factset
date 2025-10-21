@@ -21,7 +21,9 @@ open output/calendar.html
 This tool generates an **interactive HTML calendar** from calendar events CSV data with:
 
 - **📅 Visual Calendar Display**: Month, week, and list views
-- **🔍 Smart Filters**: Filter by institution type and event type
+- **🔍 Smart Filters**: Multi-select filters by institution type and event type
+- **🎯 Smart Defaults**: Pre-filtered to show US/Canadian bank earnings on load
+- **🔄 Intelligent Deduplication**: Shows only the highest priority earnings event per fiscal period
 - **📝 Event Details**: Click any event to see full details
 - **📥 Calendar Downloads**: Download .ics files to add events to Outlook/Google Calendar/Apple Calendar
 
@@ -34,9 +36,10 @@ This tool generates an **interactive HTML calendar** from calendar events CSV da
 - **Color Coding**: Each event type has a distinct color
 
 ### Interactive Filters
-- **Institution Type**: Filter by Canadian_Banks, US_Banks, etc.
-- **Event Type**: Filter by Earnings, Dividend, Conference, etc.
-- **Reset**: Clear all filters with one click
+- **Multi-Select**: Hold Ctrl/Cmd to select multiple institution types or event types
+- **Smart Grouping**: "Earnings" option includes all earnings-related events (Earnings, ConfirmedEarningsRelease, ProjectedEarningsRelease)
+- **Default Selection**: Pre-filtered to US_Banks, Canadian_Banks, and Earnings on page load
+- **One-Click Reset**: Clear all filters to show all events
 
 ### Event Details
 Click any event to see:
@@ -56,7 +59,11 @@ Click any event to see:
 
 ### Using Sample Data
 
-The `sample_data/example_calendar_events.csv` file contains 20 example events showing different event types.
+The `sample_data/example_calendar_events.csv` file contains 27 example events (21 after deduplication) showing:
+- All 11 event types across different institutions
+- Duplicate earnings scenarios to demonstrate deduplication
+- Mix of US and Canadian banks
+- Events spanning Q4 2025 through Q2 2026
 
 Just run:
 ```bash
@@ -111,11 +118,64 @@ python generate_calendar.py
 visualization/
 ├── generate_calendar.py           # Main script
 ├── sample_data/                   # Input CSV files
-│   └── example_calendar_events.csv  # Sample data (20 events)
+│   └── example_calendar_events.csv  # Sample data (27 events, 21 after dedup)
 ├── output/                        # Generated HTML files
 │   └── calendar.html              # Interactive calendar (generated)
 └── README.md                      # This file
 ```
+
+## Smart Deduplication
+
+The script automatically deduplicates earnings events to prevent showing multiple entries for the same fiscal period:
+
+### How It Works
+
+**Priority Order** (highest to lowest):
+1. **Earnings** - Actual earnings call/conference
+2. **ConfirmedEarningsRelease** - Confirmed release with specific date
+3. **ProjectedEarningsRelease** - Estimated/projected date
+
+**Grouping Logic**:
+- Groups events by: `ticker + fiscal_year + fiscal_period`
+- Keeps only the **highest priority** earnings event per group
+- If fiscal period info is missing, falls back to date-based grouping
+- Non-earnings events (Dividend, Conference, etc.) are **never deduplicated**
+
+### Example Scenarios
+
+**Scenario 1: Same Date, Different Types**
+```
+Before Deduplication:
+- Nov 27: RY-CA Earnings (Q4 2025)
+- Nov 27: RY-CA ProjectedEarningsRelease (Q4 2025)
+
+After Deduplication:
+- Nov 27: RY-CA Earnings (Q4 2025) ✅ (ProjectedEarningsRelease removed)
+```
+
+**Scenario 2: Different Dates, Same Fiscal Period**
+```
+Before Deduplication:
+- Nov 25: BNS-CA ConfirmedEarningsRelease (Q4 2025)
+- Nov 26: BNS-CA Earnings (Q4 2025)
+
+After Deduplication:
+- Nov 26: BNS-CA Earnings (Q4 2025) ✅ (ConfirmedEarningsRelease removed)
+```
+
+**Scenario 3: Non-Earnings Events**
+```
+Before/After (No Change):
+- Nov 15: TD-CA Dividend (Q4 2025) ✅
+- Nov 20: TD-CA Dividend (Q4 2025) ✅
+(Both shown - dividends are not deduplicated)
+```
+
+### Benefits
+
+- **Cleaner Calendar**: No duplicate earnings events cluttering the view
+- **Always Shows Best Info**: Actual earnings calls take priority over estimated dates
+- **Automatic**: Runs during calendar generation, no manual cleanup needed
 
 ## Event Type Colors
 
@@ -233,14 +293,21 @@ The script can be extended to add filters for:
 
 ## Examples
 
-### Example 1: View All Earnings Events
+### Example 1: View Default (US/Canadian Bank Earnings)
 
 1. Open `output/calendar.html` in browser
-2. Select "Earnings" from Event Type filter
-3. Click "All Institution Types" or select specific type
-4. View filtered calendar
+2. Calendar loads with default filters already applied:
+   - Institution Types: US_Banks, Canadian_Banks
+   - Event Type: Earnings
+3. Calendar shows only relevant earnings events on load
 
-### Example 2: Export Canadian Bank Dividends
+### Example 2: View All Events (Reset Filters)
+
+1. Open calendar
+2. Click "Reset All Filters" button
+3. See all events across all institution types and event types
+
+### Example 3: Export Canadian Bank Dividends
 
 1. Filter: Institution Type = "Canadian_Banks"
 2. Filter: Event Type = "Dividend"
@@ -248,12 +315,19 @@ The script can be extended to add filters for:
 4. Click "Add to Outlook Calendar" to download .ics
 5. Import to your calendar app
 
-### Example 3: Weekly View of All Events
+### Example 4: Weekly View of All Events
 
 1. Open calendar
 2. Click "week" button in top-right
 3. Navigate weeks using prev/next arrows
 4. See detailed time slots for each event
+
+### Example 5: View Multiple Institution Types
+
+1. Open calendar
+2. In Institution Type filter, Ctrl+Click to select multiple (e.g., Canadian_Banks + US_Banks + European_Banks)
+3. In Event Type filter, select specific types you want
+4. Calendar updates to show only selected combinations
 
 ## FAQ
 
@@ -270,7 +344,10 @@ A: Yes, but you may need to adjust Content Security Policy settings to allow the
 A: After each calendar refresh (daily if using scheduled refresh). You can automate this with a cron job or scheduled task.
 
 **Q: Can I filter by multiple institution types?**
-A: Not in the current version, but the script can be extended to support multi-select filters.
+A: Yes! Use Ctrl+Click (Windows) or Cmd+Click (Mac) to select multiple options in the filter dropdowns.
+
+**Q: Why does "Earnings" show all 3 earnings types?**
+A: The "Earnings" filter option is grouped to include Earnings, ConfirmedEarningsRelease, and ProjectedEarningsRelease. After deduplication, you'll only see the highest priority event for each fiscal period. This simplifies filtering while still showing all relevant earnings events.
 
 **Q: What's the maximum number of events?**
 A: Tested with 1000+ events. Performance depends on browser, but should handle 5000+ events without issues.
