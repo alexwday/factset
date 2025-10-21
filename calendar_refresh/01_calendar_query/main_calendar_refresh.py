@@ -497,15 +497,91 @@ def enrich_event_with_institution_data(
     return enriched
 
 
+def deduplicate_earnings_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Deduplicate earnings-related events for the same institution and fiscal period.
+    Priority order: Earnings > ConfirmedEarningsRelease > ProjectedEarningsRelease
+
+    This matches the deduplication logic in generate_calendar.py.
+    """
+    from collections import defaultdict
+
+    # Define priority for earnings-related events (lower number = higher priority)
+    earnings_priority = {
+        'Earnings': 1,
+        'ConfirmedEarningsRelease': 2,
+        'ProjectedEarningsRelease': 3,
+    }
+
+    # Group events by ticker + fiscal period
+    event_groups = defaultdict(list)
+
+    for event in events:
+        ticker = event.get('ticker', '')
+        fiscal_year = event.get('fiscal_year', '')
+        fiscal_period = event.get('fiscal_period', '')
+        event_type = event.get('event_type', '')
+
+        # Create a key for grouping: ticker + fiscal_year + fiscal_period
+        # For earnings events with fiscal info, group by fiscal period
+        # For earnings events without fiscal info, group by date (fallback)
+        # For non-earnings events, use unique key (won't be deduplicated)
+        if event_type in earnings_priority:
+            if fiscal_year and fiscal_period:
+                key = f"{ticker}|{fiscal_year}|{fiscal_period}"
+            else:
+                # Fallback to date if no fiscal period info
+                event_date = event.get('event_date', '')
+                key = f"{ticker}|date|{event_date}"
+        else:
+            # Non-earnings events get unique keys (won't be deduplicated)
+            event_id = event.get('event_id', '')
+            key = f"unique|{event_id}"
+
+        event_groups[key].append(event)
+
+    # Deduplicate: keep only highest priority earnings event per group
+    deduplicated = []
+
+    for key, group_events in event_groups.items():
+        # Separate earnings-related from other events
+        earnings_events = [e for e in group_events if e.get('event_type', '') in earnings_priority]
+        other_events = [e for e in group_events if e.get('event_type', '') not in earnings_priority]
+
+        # For earnings events, keep only the highest priority one
+        if earnings_events:
+            # Sort by priority (ascending - lower number is higher priority)
+            earnings_events.sort(key=lambda e: earnings_priority.get(e.get('event_type', ''), 999))
+            # Keep only the first (highest priority)
+            deduplicated.append(earnings_events[0])
+
+        # Add all non-earnings events (they don't need deduplication)
+        deduplicated.extend(other_events)
+
+    log_execution(
+        "Events deduplicated",
+        {
+            "original_count": len(events),
+            "deduplicated_count": len(deduplicated),
+            "removed_count": len(events) - len(deduplicated)
+        }
+    )
+
+    return deduplicated
+
+
 def transform_events_to_csv_rows(
     events: List[Dict[str, Any]], institutions: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
-    """Transform API events into CSV-ready rows with enrichment."""
+    """Transform API events into CSV-ready rows with enrichment and deduplication."""
     csv_rows = []
 
     for event in events:
         enriched = enrich_event_with_institution_data(event, institutions)
         csv_rows.append(enriched)
+
+    # Deduplicate earnings events by fiscal period
+    csv_rows = deduplicate_earnings_events(csv_rows)
 
     # Sort by event date
     csv_rows.sort(key=lambda x: x.get("event_date_time_utc", ""))
@@ -705,9 +781,10 @@ def main():
             events = query_calendar_events(api_instance, monitored_tickers, start_date, end_date)
             summary["events_found"] = len(events)
 
-        # Step 9: Transform events to CSV format
+        # Step 9: Transform events to CSV format (with deduplication)
         log_console("Step 9: Transforming events to CSV format...")
         csv_rows = transform_events_to_csv_rows(events, monitored_institutions)
+        log_console(f"Deduplication: {len(events)} → {len(csv_rows)} events (removed {len(events) - len(csv_rows)} duplicates)")
 
         # Step 10: Save master CSV (replace existing)
         log_console("Step 10: Saving master CSV to NAS...")
