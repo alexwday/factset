@@ -58,27 +58,28 @@ This script:
 - **Format**: JSON with detailed execution information
 - **Errors**: Separate error log created if issues occur
 
-## CSV Schema (17 Fields)
+## CSV Schema (16 Fields)
 
-| Column | Description | Example |
-|--------|-------------|---------|
-| event_id | FactSet event identifier | ABC123XYZ |
-| ticker | Institution ticker | RY-CA |
-| institution_name | Full institution name | Royal Bank of Canada |
-| institution_id | Sequential ID | 1 |
-| institution_type | Category | Canadian_Banks |
-| event_type | Type of event | Earnings |
-| event_date_time_utc | Event datetime (UTC) | 2025-11-27T13:00:00Z |
-| event_date_time_local | Event datetime (Toronto EST/EDT) | 2025-11-27T08:00:00-05:00 |
-| event_date | Event date | 2025-11-27 |
-| event_time_local | Event time with timezone | 08:00 EST |
-| event_headline | Event title | Q4 2025 Earnings Call |
-| webcast_status | Webcast availability | Confirmed |
-| webcast_url | Webcast link | https://... |
-| dial_in_info | Conference call details | Dial: 1-800-... |
-| fiscal_year | Parsed fiscal year | 2025 |
-| fiscal_quarter | Parsed quarter | Q4 |
-| data_fetched_timestamp | When data was fetched | 2025-10-21T12:00:00Z |
+**Updated to match FactSet API field names**
+
+| Column | Description | Example | API Source |
+|--------|-------------|---------|------------|
+| event_id | FactSet event identifier | ABC123XYZ | event_id |
+| ticker | Institution ticker | RY-CA | ticker |
+| institution_name | Full institution name | Royal Bank of Canada | config |
+| institution_id | Sequential ID | 1 | config |
+| institution_type | Category | Canadian_Banks | config |
+| event_type | Type of event | Earnings | event_type |
+| event_date_time_utc | Event datetime (UTC) | 2025-11-27T13:00:00Z | event_date_time |
+| event_date_time_local | Event datetime (Toronto EST/EDT) | 2025-11-27T08:00:00-05:00 | calculated |
+| event_date | Event date | 2025-11-27 | calculated |
+| event_time_local | Event time with timezone | 08:00 EST | calculated |
+| event_headline | Event description | Q4 2025 Earnings Call | **description** |
+| webcast_link | Webcast URL | https://... | **webcast_link** |
+| contact_info | Contact details | Contact: John \| Phone: 1-800... | **contact_name, contact_phone, contact_email** |
+| fiscal_year | Fiscal year | 2025 | **fiscal_year** |
+| fiscal_period | Fiscal period/quarter | Q4 | **fiscal_period** |
+| data_fetched_timestamp | When data was fetched | 2025-10-21T12:00:00Z | calculated |
 
 ## Configuration
 

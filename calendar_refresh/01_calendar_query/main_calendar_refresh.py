@@ -438,7 +438,7 @@ def enrich_event_with_institution_data(
         "institution_id": institution.get("id", ""),
         "institution_type": institution.get("type", "Unknown"),
         "event_type": event.get("event_type", "Earnings"),
-        "event_headline": event.get("event_headline", ""),
+        "event_headline": event.get("description", ""),  # Fixed: was event_headline
     }
 
     # Handle event datetime
@@ -472,27 +472,23 @@ def enrich_event_with_institution_data(
         enriched["event_date"] = ""
         enriched["event_time_local"] = ""
 
-    # Webcast information
-    enriched["webcast_status"] = event.get("webcast_status", "")
-    enriched["webcast_url"] = event.get("webcast_url", "")
-    enriched["dial_in_info"] = event.get("dial_in_info", "")
+    # Webcast and contact information
+    enriched["webcast_link"] = event.get("webcast_link", "")  # Fixed: was webcast_url
 
-    # Try to parse fiscal year and quarter from headline
-    headline = enriched["event_headline"]
-    fiscal_year = ""
-    fiscal_quarter = ""
+    # Build contact info from available fields
+    contact_parts = []
+    if event.get("contact_name"):
+        contact_parts.append(f"Contact: {event.get('contact_name')}")
+    if event.get("contact_phone"):
+        contact_parts.append(f"Phone: {event.get('contact_phone')}")
+    if event.get("contact_email"):
+        contact_parts.append(f"Email: {event.get('contact_email')}")
 
-    if headline:
-        import re
+    enriched["contact_info"] = " | ".join(contact_parts) if contact_parts else ""
 
-        # Pattern: "Q1 2025 Earnings Call" or "Q4 2024 Earnings"
-        quarter_match = re.search(r"Q([1-4])\s+(20\d{2})", headline)
-        if quarter_match:
-            fiscal_quarter = f"Q{quarter_match.group(1)}"
-            fiscal_year = quarter_match.group(2)
-
-    enriched["fiscal_year"] = fiscal_year
-    enriched["fiscal_quarter"] = fiscal_quarter
+    # Fiscal information (already provided by API, no parsing needed!)
+    enriched["fiscal_year"] = event.get("fiscal_year", "")
+    enriched["fiscal_period"] = event.get("fiscal_period", "")
 
     # Audit timestamp
     enriched["data_fetched_timestamp"] = datetime.now(pytz.UTC).isoformat()
@@ -527,7 +523,7 @@ def save_master_csv(
             log_console("No events to save", "WARNING")
             return False
 
-        # Define CSV field order (17 fields)
+        # Define CSV field order (16 fields - updated to match FactSet API)
         fieldnames = [
             "event_id",
             "ticker",
@@ -539,12 +535,11 @@ def save_master_csv(
             "event_date_time_local",
             "event_date",
             "event_time_local",
-            "event_headline",
-            "webcast_status",
-            "webcast_url",
-            "dial_in_info",
-            "fiscal_year",
-            "fiscal_quarter",
+            "event_headline",      # Maps to API: description
+            "webcast_link",        # Fixed: was webcast_url
+            "contact_info",        # Built from: contact_name, contact_phone, contact_email
+            "fiscal_year",         # Direct from API
+            "fiscal_period",       # Fixed: was fiscal_quarter
             "data_fetched_timestamp",
         ]
 
