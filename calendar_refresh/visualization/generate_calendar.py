@@ -204,13 +204,17 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
         }}
 
         .filter-group select {{
-            padding: 8px 32px 8px 12px;
+            padding: 8px 12px;
             border: 1px solid #d1d5db;
             border-radius: 6px;
             font-size: 14px;
             background: white;
             cursor: pointer;
-            min-width: 200px;
+            min-width: 220px;
+        }}
+
+        .filter-group select[multiple] {{
+            min-height: 120px;
         }}
 
         .filter-group select:focus {{
@@ -396,22 +400,20 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
 
         <div class="filters">
             <div class="filter-group">
-                <label for="institutionTypeFilter">Institution Type</label>
-                <select id="institutionTypeFilter">
-                    <option value="">All Institution Types</option>
+                <label for="institutionTypeFilter">Institution Type (Ctrl/Cmd+Click for multiple)</label>
+                <select id="institutionTypeFilter" multiple>
                     {'\n'.join(f'<option value="{inst_type}">{inst_type.replace("_", " ")}</option>' for inst_type in institution_types)}
                 </select>
             </div>
 
             <div class="filter-group">
-                <label for="eventTypeFilter">Event Type</label>
-                <select id="eventTypeFilter">
-                    <option value="">All Event Types</option>
+                <label for="eventTypeFilter">Event Type (Ctrl/Cmd+Click for multiple)</label>
+                <select id="eventTypeFilter" multiple>
                     {'\n'.join(f'<option value="{evt_type}">{evt_type}</option>' for evt_type in event_types)}
                 </select>
             </div>
 
-            <button class="reset-btn" onclick="resetFilters()">Reset Filters</button>
+            <button class="reset-btn" onclick="resetFilters()">Reset All Filters</button>
         </div>
 
         <div id="calendar"></div>
@@ -516,18 +518,50 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
 
             calendar.render();
 
+            // Set default filter selections
+            const institutionSelect = document.getElementById('institutionTypeFilter');
+            const eventSelect = document.getElementById('eventTypeFilter');
+
+            // Default institution types: US_Banks and Canadian_Banks
+            Array.from(institutionSelect.options).forEach(option => {{
+                if (option.value === 'US_Banks' || option.value === 'Canadian_Banks') {{
+                    option.selected = true;
+                }}
+            }});
+
+            // Default event types: Earnings-related events
+            Array.from(eventSelect.options).forEach(option => {{
+                if (option.value === 'Earnings' ||
+                    option.value === 'ConfirmedEarningsRelease' ||
+                    option.value === 'ProjectedEarningsRelease') {{
+                    option.selected = true;
+                }}
+            }});
+
+            // Apply initial filters
+            applyFilters();
+
             // Attach filter listeners
-            document.getElementById('institutionTypeFilter').addEventListener('change', applyFilters);
-            document.getElementById('eventTypeFilter').addEventListener('change', applyFilters);
+            institutionSelect.addEventListener('change', applyFilters);
+            eventSelect.addEventListener('change', applyFilters);
         }});
 
+        function getSelectedValues(selectElement) {{
+            return Array.from(selectElement.selectedOptions).map(option => option.value);
+        }}
+
         function applyFilters() {{
-            const institutionType = document.getElementById('institutionTypeFilter').value;
-            const eventType = document.getElementById('eventTypeFilter').value;
+            const institutionSelect = document.getElementById('institutionTypeFilter');
+            const eventSelect = document.getElementById('eventTypeFilter');
+
+            const selectedInstitutions = getSelectedValues(institutionSelect);
+            const selectedEvents = getSelectedValues(eventSelect);
 
             currentEvents = allEvents.filter(event => {{
-                const matchesInstitution = !institutionType || event.institutionType === institutionType;
-                const matchesEvent = !eventType || event.eventType === eventType;
+                const matchesInstitution = selectedInstitutions.length === 0 ||
+                                         selectedInstitutions.includes(event.institutionType);
+                const matchesEvent = selectedEvents.length === 0 ||
+                                   selectedEvents.includes(event.eventType);
                 return matchesInstitution && matchesEvent;
             }});
 
@@ -536,8 +570,13 @@ def generate_html(calendar_events, institution_types, event_types, csv_events):
         }}
 
         function resetFilters() {{
-            document.getElementById('institutionTypeFilter').value = '';
-            document.getElementById('eventTypeFilter').value = '';
+            const institutionSelect = document.getElementById('institutionTypeFilter');
+            const eventSelect = document.getElementById('eventTypeFilter');
+
+            // Deselect all options
+            Array.from(institutionSelect.options).forEach(option => option.selected = false);
+            Array.from(eventSelect.options).forEach(option => option.selected = false);
+
             applyFilters();
         }}
 
