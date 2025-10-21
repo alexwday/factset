@@ -1,0 +1,5 @@
+# Ignore generated HTML files (regenerated each time)
+output/*.html
+
+# Keep the output directory structure
+!output/.gitkeep
