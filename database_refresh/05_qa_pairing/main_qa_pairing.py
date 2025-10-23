@@ -977,7 +977,7 @@ def process_and_save_transcript_resilient(
             })
 
             log_console(f"  Processing Q&A pairing for {transcript_id} (attempt {attempt + 1}/{max_retries})")
-            enhanced_records = process_transcript(transcript_records, transcript_id, enhanced_error_logger)
+            enhanced_records, qa_groups_count, metrics = process_transcript_qa_pairing(transcript_records, transcript_id, enhanced_error_logger)
 
             if not enhanced_records:
                 raise ValueError(f"No records generated for {transcript_id}")
