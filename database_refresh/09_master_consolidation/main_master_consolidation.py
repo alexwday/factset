@@ -280,6 +280,7 @@ def process_master_csv_streaming(nas_conn: SMBConnection, removal_set: Set[str],
     stats = {
         "original_records": 0,
         "records_removed": 0,
+        "records_migrated": 0,  # Records with filename backfilled
         "new_records_added": 0,
         "final_records": 0,
         "file_size_mb": 0
@@ -316,6 +317,15 @@ def process_master_csv_streaming(nas_conn: SMBConnection, removal_set: Set[str],
                 #   - Just filenames for deleted files (e.g., "AAPL_Q1_2024_Corrected_123_1.xml")
                 filename = row.get("filename", "")
 
+                # MIGRATION: Backfill filename from file_path if missing (for old database format)
+                if not filename:
+                    file_path = row.get("file_path", "")
+                    if file_path:
+                        # Extract just the filename from the path
+                        filename = file_path.split('/')[-1] if '/' in file_path else file_path
+                        row["filename"] = filename  # Update the row with migrated value
+                        stats["records_migrated"] += 1
+
                 # Check if this filename matches any file in the removal set
                 should_remove = False
                 for removal_path in removal_set:
@@ -333,6 +343,9 @@ def process_master_csv_streaming(nas_conn: SMBConnection, removal_set: Set[str],
                     log_execution(f"Removed record: {filename}")
 
             log_console(f"Processed {stats['original_records']} existing records, removed {stats['records_removed']}")
+            if stats["records_migrated"] > 0:
+                log_console(f"✅ Migrated {stats['records_migrated']} records (backfilled filename field from file_path)")
+                log_execution("Database migration performed", {"records_migrated": stats["records_migrated"]})
 
     # Load and append new records from Stage 8
     log_console("Loading new records from Stage 8...")
@@ -533,6 +546,7 @@ def main() -> None:
         "execution_time_seconds": 0,
         "original_records": 0,
         "records_removed": 0,
+        "records_migrated": 0,  # Database migration count
         "new_records_added": 0,
         "final_records": 0,
         "master_size_mb": 0,
@@ -604,6 +618,8 @@ def main() -> None:
         log_console("=== STAGE 9 CONSOLIDATION COMPLETE ===")
         log_console(f"Original records: {stage_summary['original_records']}")
         log_console(f"Records removed: {stage_summary['records_removed']}")
+        if stage_summary.get('records_migrated', 0) > 0:
+            log_console(f"Records migrated (filename backfilled): {stage_summary['records_migrated']}")
         log_console(f"New records added: {stage_summary['new_records_added']}")
         log_console(f"Final record count: {stage_summary['final_records']}")
         log_console(f"Master database size: {stage_summary.get('file_size_mb', 0):.2f} MB")

@@ -732,6 +732,14 @@ def load_master_database(nas_conn: SMBConnection) -> Optional[Dict[str, Any]]:
                     record_count += 1
                     # Stage 8 uses 'filename' field (just the filename, not full path)
                     filename = row.get("filename", "")
+
+                    # Fallback: Extract filename from file_path if filename is empty (for old database format)
+                    if not filename:
+                        file_path = row.get("file_path", "")
+                        if file_path:
+                            # Extract just the filename from the path
+                            filename = file_path.split('/')[-1] if '/' in file_path else file_path
+
                     date_modified = row.get("date_last_modified", "")
 
                     # Store only the latest modification date for each file
