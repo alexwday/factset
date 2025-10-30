@@ -1,7 +1,7 @@
-# FactSet SDK
-fds.sdk.EventsandTranscripts
-fds.sdk.FactSetFundamentals
-fds.sdk.StreetAccountNews
+# FactSet SDK - Version pinned to ensure API compatibility
+fds.sdk.EventsandTranscripts==1.1.1  # Required for get_transcripts_dates method
+fds.sdk.FactSetFundamentals==2.5.1
+# fds.sdk.StreetAccountNews  # TODO: Add version pin if needed, currently not in use
 
 # Core dependencies
 pandas
