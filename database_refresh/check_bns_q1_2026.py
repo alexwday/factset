@@ -16,11 +16,13 @@ Read-only behavior:
 from __future__ import annotations
 
 import argparse
+import collections
 import importlib.util
+import re
 import sys
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import fds.sdk.EventsandTranscripts
 import requests
@@ -64,6 +66,14 @@ def parse_args() -> argparse.Namespace:
             "not the sole primary ID. Default remains sole-primary only."
         ),
     )
+    parser.add_argument(
+        "--types",
+        default="all",
+        help=(
+            "Comma-separated transcript types to include (for example: "
+            "Raw,Corrected). Default: all."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -92,6 +102,21 @@ def load_stage1_module() -> Any:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def normalize_transcript_type(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
+
+
+def parse_type_filter(raw_value: str) -> Set[str]:
+    value = (raw_value or "").strip()
+    if not value or value.lower() == "all":
+        return set()
+    return {
+        normalize_transcript_type(item.strip())
+        for item in value.split(",")
+        if item.strip()
+    }
 
 
 def fetch_title_info(
@@ -187,12 +212,19 @@ def main() -> int:
         if response and hasattr(response, "data") and response.data:
             raw_transcripts = [item.to_dict() for item in response.data]
 
+        type_filter = parse_type_filter(args.types)
+
         if args.all_primary_id_rows:
             scoped_transcripts = [
                 t
                 for t in raw_transcripts
                 if isinstance(t.get("primary_ids"), list)
                 and args.ticker in t.get("primary_ids")
+                and (
+                    not type_filter
+                    or normalize_transcript_type(str(t.get("transcript_type", "")))
+                    in type_filter
+                )
             ]
         else:
             scoped_transcripts = [
@@ -200,6 +232,11 @@ def main() -> int:
                 for t in raw_transcripts
                 if isinstance(t.get("primary_ids"), list)
                 and t.get("primary_ids") == [args.ticker]
+                and (
+                    not type_filter
+                    or normalize_transcript_type(str(t.get("transcript_type", "")))
+                    in type_filter
+                )
             ]
 
         inspected_rows: List[Dict[str, Any]] = []
@@ -248,6 +285,7 @@ def main() -> int:
         print(f"Target: {args.quarter} {args.year}")
         print(f"Window: {args.start_date.isoformat()} to {args.end_date.isoformat()}")
         print("Mode: READ-ONLY (no NAS writes, no transcript files saved)")
+        print(f"Type filter: {args.types}")
         print(f"Raw API rows: {len(raw_transcripts)}")
         if args.all_primary_id_rows:
             print(f"Scoped rows (ticker in primary_ids): {len(scoped_transcripts)}")
@@ -255,6 +293,17 @@ def main() -> int:
             print(f"Scoped rows (sole-primary only): {len(scoped_transcripts)}")
         print(f"Rows inspected by XML title parse: {len(inspected_rows)}")
         print(f"Matches for {args.quarter} {args.year}: {len(matches)}")
+
+        type_counter = collections.Counter(
+            str(row.get("transcript_type", "")).strip() for row in inspected_rows
+        )
+        print("")
+        print("Transcript types present (scoped rows):")
+        if type_counter:
+            for transcript_type, count in sorted(type_counter.items()):
+                print(f"- {transcript_type}: {count}")
+        else:
+            print("- none")
 
         if matches:
             print("STATUS: AVAILABLE")
@@ -270,6 +319,24 @@ def main() -> int:
                     f"strict_title={match.get('strict_title_match')}"
                 )
                 print(f"   title={match.get('title')}")
+
+            grouped_types: Dict[str, Set[str]] = {}
+            for row in matches:
+                event_id = str(row.get("event_id", ""))
+                grouped_types.setdefault(event_id, set()).add(
+                    str(row.get("transcript_type", "")).strip()
+                )
+
+            print("")
+            print("Target event type coverage:")
+            required_types = ["Raw", "Corrected"]
+            for event_id in sorted(grouped_types.keys()):
+                available = sorted(grouped_types[event_id])
+                missing = [t for t in required_types if t not in grouped_types[event_id]]
+                print(
+                    f"- event_id={event_id} available={','.join(available) if available else 'none'} "
+                    f"missing_raw_corrected={','.join(missing) if missing else 'none'}"
+                )
         else:
             print("STATUS: NOT AVAILABLE")
             if not inspected_rows:
