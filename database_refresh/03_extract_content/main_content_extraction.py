@@ -9,7 +9,9 @@ import tempfile
 import logging
 import json
 import time
+import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
 import io
@@ -20,6 +22,15 @@ import requests
 import yaml
 from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from pipeline_control import (  # noqa: E402
+    mark_skip_downstream,
+    mark_stage_failure,
+    mark_stage_running,
+    mark_stage_success,
+    should_skip_stage,
+)
 
 # Load environment variables
 load_dotenv()
@@ -1019,6 +1030,18 @@ def main() -> None:
         config = load_config_from_nas(nas_conn)
         log_console(f"Loaded configuration for {len(config['monitored_institutions'])} institutions")
 
+        skip_stage, skip_reason = should_skip_stage(
+            nas_conn, config, "stage_03_extract_content"
+        )
+        if skip_stage:
+            stage_summary["status"] = "skipped_by_flag"
+            log_console(
+                f"Skipping Stage 3 due to pipeline control flag: {skip_reason}",
+                "WARNING",
+            )
+            return
+        mark_stage_running(nas_conn, config, "stage_03_extract_content")
+
         # Step 4: SSL certificate setup
         log_console("Step 4: Setting up SSL certificate...")
         ssl_cert_path = setup_ssl_certificate(nas_conn)
@@ -1035,6 +1058,14 @@ def main() -> None:
         if not processing_queue:
             log_console("No files found in processing queue", "WARNING")
             stage_summary["status"] = "completed_no_files"
+            mark_skip_downstream(
+                nas_conn,
+                config,
+                "stage_03_extract_content",
+                "stage_03_no_files",
+                {"total_files_queued": 0},
+                stage_status="completed_no_files",
+            )
             return
 
         # Step 7: Development mode handling
@@ -1181,6 +1212,12 @@ def main() -> None:
         execution_time = end_time - start_time
         stage_summary["execution_time_seconds"] = execution_time.total_seconds()
         stage_summary["status"] = "completed_successfully"
+        mark_stage_success(
+            nas_conn,
+            config,
+            "stage_03_extract_content",
+            status="completed_successfully",
+        )
 
         # Count errors by type
         for error_entry in error_log:
@@ -1324,6 +1361,8 @@ def main() -> None:
         error_msg = f"Stage 3 content extraction failed: {e}"
         log_console(error_msg, "ERROR")
         log_error(error_msg, "main_execution", {"exception_type": type(e).__name__})
+        if nas_conn and config:
+            mark_stage_failure(nas_conn, config, "stage_03_extract_content", str(e))
 
     finally:
         # Save logs to NAS

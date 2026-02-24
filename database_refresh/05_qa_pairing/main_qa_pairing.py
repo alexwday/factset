@@ -15,7 +15,9 @@ import tempfile
 import logging
 import json
 import time
+import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
 import io
@@ -27,6 +29,15 @@ from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 from openai import OpenAI
 from collections import defaultdict
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from pipeline_control import (  # noqa: E402
+    mark_skip_downstream,
+    mark_stage_failure,
+    mark_stage_running,
+    mark_stage_success,
+    should_skip_stage,
+)
 
 # Load environment variables
 load_dotenv()
@@ -2665,6 +2676,18 @@ def main() -> None:
         config = load_config_from_nas(nas_conn)
         log_console(f"Loaded Q&A pairing configuration - Model: {config['stage_05_qa_pairing']['llm_config']['model']}")
 
+        skip_stage, skip_reason = should_skip_stage(
+            nas_conn, config, "stage_05_qa_pairing"
+        )
+        if skip_stage:
+            stage_summary["status"] = "skipped_by_flag"
+            log_console(
+                f"Skipping Stage 5 due to pipeline control flag: {skip_reason}",
+                "WARNING",
+            )
+            return
+        mark_stage_running(nas_conn, config, "stage_05_qa_pairing")
+
         # Step 4: SSL certificate setup
         log_console("Step 4: Setting up SSL certificate...")
         ssl_cert_path = setup_ssl_certificate(nas_conn)
@@ -2687,6 +2710,14 @@ def main() -> None:
         if not records:
             log_console("No records found to process", "WARNING")
             stage_summary["status"] = "completed_no_content"
+            mark_skip_downstream(
+                nas_conn,
+                config,
+                "stage_05_qa_pairing",
+                "stage_05_no_content",
+                {"total_records_processed": 0},
+                stage_status="completed_no_content",
+            )
             return
 
         stage_summary["total_records_processed"] = len(records)
@@ -2752,6 +2783,12 @@ def main() -> None:
             consolidated_file_path = consolidate_individual_files()
             if consolidated_file_path:
                 log_console(f"Consolidated output: {consolidated_file_path}")
+            mark_stage_success(
+                nas_conn,
+                config,
+                "stage_05_qa_pairing",
+                status="completed_all_processed",
+            )
             return
 
         # Step 12: Process each transcript with crash-resilient saves
@@ -2907,12 +2944,20 @@ def main() -> None:
         if failed_transcripts > 0:
             log_console(f"  • Failed transcripts tracked in manifest.json")
         log_console("=" * 120)
+        mark_stage_success(
+            nas_conn,
+            config,
+            "stage_05_qa_pairing",
+            status=stage_summary.get("status", "completed_successfully"),
+        )
 
     except Exception as e:
         stage_summary["status"] = "failed"
         error_msg = f"Stage 5 Q&A pairing failed: {e}"
         log_console(error_msg, "ERROR")
         log_error(error_msg, "main_execution", {"exception_type": type(e).__name__})
+        if nas_conn and config:
+            mark_stage_failure(nas_conn, config, "stage_05_qa_pairing", str(e))
 
     finally:
         # Save logs to NAS

@@ -208,9 +208,12 @@ class NASTranscriptScanner:
     
     def scan_transcript_folders(self, conn: SMBConnection):
         """Scan the NAS folder structure for transcripts"""
-        # Get the output data path from config (matches Stage 00 configuration)
-        base_path = self.config.get('stage_00_download_historical', {}).get('output_data_path', 
-                                    'Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data')
+        # Use active Stage 2 input path, with legacy Stage 0 fallback for older configs.
+        base_path = (
+            self.config.get('stage_02_database_sync', {}).get('input_data_path')
+            or self.config.get('stage_00_download_historical', {}).get('output_data_path')
+            or 'Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data'
+        )
         
         logger.info(f"Scanning for transcripts in base path: {base_path}")
         

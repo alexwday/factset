@@ -12,7 +12,9 @@ import tempfile
 import logging
 import json
 import time
+import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
 import io
@@ -26,6 +28,14 @@ from openai import OpenAI
 from collections import defaultdict
 import tiktoken
 import csv
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from pipeline_control import (  # noqa: E402
+    mark_stage_failure,
+    mark_stage_running,
+    mark_stage_success,
+    should_skip_stage,
+)
 
 # Load environment variables
 load_dotenv()
@@ -2114,6 +2124,18 @@ def main():
         
         # Load configuration
         config = load_stage_config(nas_conn)
+
+        skip_stage, skip_reason = should_skip_stage(
+            nas_conn, config, "stage_08_embeddings_generation"
+        )
+        if skip_stage:
+            log_console(
+                f"Skipping Stage 8 due to pipeline control flag: {skip_reason}",
+                "WARNING",
+            )
+            nas_conn.close()
+            return 0
+        mark_stage_running(nas_conn, config, "stage_08_embeddings_generation")
         
         # Setup SSL certificate
         ssl_cert_path = setup_ssl_certificate(nas_conn)
@@ -2287,6 +2309,12 @@ def main():
 
         # Save logs
         save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
+        mark_stage_success(
+            nas_conn,
+            config,
+            "stage_08_embeddings_generation",
+            status="completed_successfully",
+        )
 
         # Print summary
         log_console("=" * 50)
@@ -2315,6 +2343,14 @@ def main():
     except Exception as e:
         log_console(f"Stage 8 failed: {e}", "ERROR")
         log_error(f"Stage 8 fatal error: {e}", "fatal", {"traceback": str(e)})
+        if (
+            "nas_conn" in locals()
+            and nas_conn
+            and config
+        ):
+            mark_stage_failure(
+                nas_conn, config, "stage_08_embeddings_generation", str(e)
+            )
         return 1
 
 

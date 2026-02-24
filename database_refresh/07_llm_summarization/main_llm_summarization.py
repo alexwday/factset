@@ -17,7 +17,9 @@ import tempfile
 import logging
 import json
 import time
+import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
 import io
@@ -29,6 +31,14 @@ from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 from openai import OpenAI
 from collections import defaultdict
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from pipeline_control import (  # noqa: E402
+    mark_stage_failure,
+    mark_stage_running,
+    mark_stage_success,
+    should_skip_stage,
+)
 
 # Load environment variables
 load_dotenv()
@@ -1905,6 +1915,18 @@ def main():
         config = load_stage_config(nas_conn)
         log_execution("Configuration loaded successfully")
         log_console(f"Development mode: {config['stage_07_llm_summarization'].get('dev_mode', False)}")
+
+        skip_stage, skip_reason = should_skip_stage(
+            nas_conn, config, "stage_07_llm_summarization"
+        )
+        if skip_stage:
+            log_console(
+                f"Skipping Stage 7 due to pipeline control flag: {skip_reason}",
+                "WARNING",
+            )
+            nas_conn.close()
+            return
+        mark_stage_running(nas_conn, config, "stage_07_llm_summarization")
         
         # Setup SSL certificate
         ssl_cert_path = setup_ssl_certificate(nas_conn)
@@ -2063,6 +2085,12 @@ def main():
         
         # Save logs
         save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
+        mark_stage_success(
+            nas_conn,
+            config,
+            "stage_07_llm_summarization",
+            status="completed_successfully",
+        )
 
         # Cleanup
         if ssl_cert_path and os.path.exists(ssl_cert_path):
@@ -2074,6 +2102,14 @@ def main():
         error_msg = f"Stage 7 execution failed: {e}"
         log_error(error_msg, "stage_execution", {"error": str(e)})
         log_console(error_msg, "ERROR")
+        if (
+            "nas_conn" in locals()
+            and nas_conn
+            and config
+        ):
+            mark_stage_failure(
+                nas_conn, config, "stage_07_llm_summarization", str(e)
+            )
 
         # Save whatever logs we have
         try:

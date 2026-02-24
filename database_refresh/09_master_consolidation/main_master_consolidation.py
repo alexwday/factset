@@ -10,11 +10,22 @@ import io
 import zipfile
 import logging
 import time
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, Optional, List, Set
 from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 import yaml
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from pipeline_control import (  # noqa: E402
+    finalize_run,
+    mark_stage_failure,
+    mark_stage_running,
+    mark_stage_success,
+    should_skip_stage,
+)
 
 # Load environment variables
 load_dotenv()
@@ -451,9 +462,17 @@ def create_refresh_archive(nas_conn: SMBConnection) -> Optional[str]:
         return None
 
 
-def cleanup_refresh_folder(nas_conn: SMBConnection) -> bool:
-    """Optionally clean up refresh folder after successful archive."""
-    if not config["stage_09_master_consolidation"].get("delete_refresh_after_archive", False):
+def cleanup_refresh_folder(nas_conn: SMBConnection, force: bool = False) -> bool:
+    """Clean up refresh folder files after archival.
+
+    Args:
+        nas_conn: Active NAS connection.
+        force: If True, cleanup runs regardless of config safety toggle.
+    """
+    if (
+        not force
+        and not config["stage_09_master_consolidation"].get("delete_refresh_after_archive", False)
+    ):
         log_console("Refresh folder cleanup is disabled (safety setting)")
         return True
 
@@ -468,7 +487,7 @@ def cleanup_refresh_folder(nas_conn: SMBConnection) -> bool:
             for filename in stage_files:
                 file_path = nas_path_join(refresh_path, filename)
                 try:
-                    conn.deleteFiles(os.getenv("NAS_SHARE_NAME"), file_path)
+                    nas_conn.deleteFiles(os.getenv("NAS_SHARE_NAME"), file_path)
                     files_deleted += 1
                 except Exception as e:
                     log_error(f"Failed to delete {filename}: {e}", "file_deletion")
@@ -557,6 +576,7 @@ def main() -> None:
 
     start_time = datetime.now()
     nas_conn = None
+    should_finalize_run = False
 
     try:
         # Step 1: Environment validation
@@ -575,6 +595,19 @@ def main() -> None:
         log_console("Step 3: Loading configuration...")
         config = load_config_from_nas(nas_conn)
 
+        skip_stage, skip_reason = should_skip_stage(
+            nas_conn, config, "stage_09_master_consolidation"
+        )
+        if skip_stage:
+            stage_summary["status"] = "skipped_by_flag"
+            log_console(
+                f"Skipping Stage 9 due to pipeline control flag: {skip_reason}",
+                "WARNING",
+            )
+            return
+        mark_stage_running(nas_conn, config, "stage_09_master_consolidation")
+        should_finalize_run = True
+
         # Step 4: Load removal queue
         log_console("Step 4: Loading removal queue from Stage 2...")
         files_to_remove = load_removal_queue(nas_conn)
@@ -584,18 +617,21 @@ def main() -> None:
         # Step 5: Process master CSV
         log_console("Step 5: Processing master database...")
         new_records_path = config["stage_09_master_consolidation"]["stage_08_output_path"]
+        master_path = config["stage_09_master_consolidation"]["master_database_path"]
+        has_stage8_output = nas_file_exists(nas_conn, new_records_path)
+        has_master = nas_file_exists(nas_conn, master_path)
 
-        # Check if Stage 8 output exists
-        if not nas_file_exists(nas_conn, new_records_path):
-            log_console("No Stage 8 output found - nothing to consolidate", "WARNING")
+        if has_stage8_output or (removal_set and has_master):
+            processing_stats = process_master_csv_streaming(
+                nas_conn, removal_set, new_records_path
+            )
+            stage_summary.update(processing_stats)
+        else:
+            log_console(
+                "No Stage 8 output and no applicable removals - consolidation skipped.",
+                "WARNING",
+            )
             stage_summary["status"] = "skipped_no_input"
-            return
-
-        # Process master database with streaming
-        processing_stats = process_master_csv_streaming(nas_conn, removal_set, new_records_path)
-
-        # Update summary with processing stats
-        stage_summary.update(processing_stats)
 
         # Step 6: Create archive
         log_console("Step 6: Creating archive of refresh folder...")
@@ -603,16 +639,23 @@ def main() -> None:
         if archive_path:
             stage_summary["archive_created"] = archive_path
 
-            # Step 7: Optional cleanup
-            log_console("Step 7: Cleanup (if enabled)...")
-            if cleanup_refresh_folder(nas_conn):
-                stage_summary["refresh_cleaned"] = True
+        # Step 7: Forced cleanup so next timer run always starts clean
+        log_console("Step 7: Cleanup refresh files...")
+        if cleanup_refresh_folder(nas_conn, force=True):
+            stage_summary["refresh_cleaned"] = True
 
         # Calculate execution time
         end_time = datetime.now()
         execution_time = end_time - start_time
         stage_summary["execution_time_seconds"] = execution_time.total_seconds()
-        stage_summary["status"] = "completed_successfully"
+        if stage_summary["status"] == "unknown":
+            stage_summary["status"] = "completed_successfully"
+        mark_stage_success(
+            nas_conn,
+            config,
+            "stage_09_master_consolidation",
+            status=stage_summary["status"],
+        )
 
         # Final summary
         log_console("=== STAGE 9 CONSOLIDATION COMPLETE ===")
@@ -632,8 +675,23 @@ def main() -> None:
         error_msg = f"Stage 9 consolidation failed: {e}"
         log_console(error_msg, "ERROR")
         log_error(error_msg, "main_execution", {"exception_type": type(e).__name__})
+        if nas_conn and config:
+            mark_stage_failure(
+                nas_conn, config, "stage_09_master_consolidation", str(e)
+            )
 
     finally:
+        if should_finalize_run and nas_conn and config:
+            try:
+                finalize_run(
+                    nas_conn,
+                    config,
+                    "stage_09_master_consolidation",
+                    stage_summary.get("status", "unknown"),
+                )
+            except Exception as e:
+                log_console(f"Failed to finalize pipeline run lock: {e}", "WARNING")
+
         # Save logs to NAS
         if nas_conn:
             try:

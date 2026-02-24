@@ -10,7 +10,9 @@ import tempfile
 import logging
 import json
 import time
+import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
 import io
@@ -22,6 +24,14 @@ from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
 from openai import OpenAI
 from collections import defaultdict, deque
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from pipeline_control import (  # noqa: E402
+    mark_stage_failure,
+    mark_stage_running,
+    mark_stage_success,
+    should_skip_stage,
+)
 
 # Load environment variables
 load_dotenv()
@@ -1979,6 +1989,18 @@ def main():
         # Load configuration
         config = load_config_from_nas(nas_conn)
         stage_config = config["stage_06_llm_classification"]
+
+        skip_stage, skip_reason = should_skip_stage(
+            nas_conn, config, "stage_06_llm_classification"
+        )
+        if skip_stage:
+            log_console(
+                f"Skipping Stage 6 due to pipeline control flag: {skip_reason}",
+                "WARNING",
+            )
+            nas_conn.close()
+            return
+        mark_stage_running(nas_conn, config, "stage_06_llm_classification")
         
         # Setup SSL certificate
         ssl_cert_path = setup_ssl_certificate(nas_conn)
@@ -2239,6 +2261,12 @@ def main():
         
         # Save logs
         save_logs_to_nas(nas_conn, stage_summary, enhanced_error_logger)
+        mark_stage_success(
+            nas_conn,
+            config,
+            "stage_06_llm_classification",
+            status="completed_successfully",
+        )
         
         # Close NAS connection
         nas_conn.close()
@@ -2247,6 +2275,14 @@ def main():
         error_msg = f"Stage 6 execution failed: {e}"
         log_error(error_msg, "stage_execution", {"error": str(e)})
         log_console(error_msg, "ERROR")
+        if (
+            "nas_conn" in locals()
+            and nas_conn
+            and config
+        ):
+            mark_stage_failure(
+                nas_conn, config, "stage_06_llm_classification", str(e)
+            )
         
         # Save whatever logs we have
         try:

@@ -9,7 +9,9 @@ import tempfile
 import logging
 import json
 import time
+import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import quote
 from typing import Dict, Any, Optional, List, Tuple
 import io
@@ -20,6 +22,14 @@ import requests
 import yaml
 from smb.SMBConnection import SMBConnection
 from dotenv import load_dotenv
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from pipeline_control import (  # noqa: E402
+    acquire_run_lock,
+    mark_skip_downstream,
+    mark_stage_failure,
+    mark_stage_success,
+)
 
 # Load environment variables
 load_dotenv()
@@ -1395,6 +1405,7 @@ def main() -> None:
     start_time = datetime.now()
     ssl_cert_path = None
     nas_conn = None
+    lock_acquired = False
 
     try:
         # Step 1: Environment validation
@@ -1414,6 +1425,20 @@ def main() -> None:
         config = load_config_from_nas(nas_conn)
         log_console(f"Loaded configuration for {len(config['monitored_institutions'])} institutions")
 
+        # Step 3.5: Acquire pipeline run lock (prevents overlapping timer runs)
+        lock_ok, run_id, lock_reason = acquire_run_lock(
+            nas_conn, config, "stage_02_database_sync"
+        )
+        if not lock_ok:
+            stage_summary["status"] = "skipped_overlap"
+            log_console(
+                f"Skipping Stage 2 because another run is active (reason: {lock_reason})",
+                "WARNING",
+            )
+            return
+        lock_acquired = True
+        log_console(f"Pipeline run lock acquired (run_id={run_id})")
+
         # Step 4: SSL certificate setup
         log_console("Step 4: Setting up SSL certificate...")
         ssl_cert_path = setup_ssl_certificate(nas_conn)
@@ -1430,6 +1455,15 @@ def main() -> None:
         if not nas_inventory:
             log_console("No transcript files found on NAS", "WARNING")
             stage_summary["status"] = "completed_no_files"
+            if lock_acquired:
+                mark_skip_downstream(
+                    nas_conn,
+                    config,
+                    "stage_02_database_sync",
+                    "no_transcripts_on_nas",
+                    {"total_nas_files": 0},
+                    stage_status="completed_no_files",
+                )
             return
 
         # Step 7: Load master database
@@ -1452,6 +1486,32 @@ def main() -> None:
         if not save_processing_queues_version_aware(nas_conn, files_to_process, files_to_remove, nas_inventory):
             stage_summary["status"] = "failed"
             log_console("Failed to save processing queues", "ERROR")
+            if lock_acquired:
+                mark_stage_failure(
+                    nas_conn,
+                    config,
+                    "stage_02_database_sync",
+                    "failed_to_save_processing_queues",
+                )
+            return
+
+        if stage_summary["files_to_process"] == 0:
+            stage_summary["status"] = "completed_no_work"
+            mark_skip_downstream(
+                nas_conn,
+                config,
+                "stage_02_database_sync",
+                "no_files_to_process",
+                {
+                    "files_to_process": stage_summary["files_to_process"],
+                    "files_to_remove": stage_summary["files_to_remove"],
+                },
+                stage_status="completed_no_work",
+            )
+            log_console(
+                "Stage 2 produced no process queue items; downstream stages will skip via control flag.",
+                "WARNING",
+            )
             return
 
         # Calculate execution time
@@ -1459,6 +1519,13 @@ def main() -> None:
         execution_time = end_time - start_time
         stage_summary["execution_time_seconds"] = execution_time.total_seconds()
         stage_summary["status"] = "completed_successfully"
+        if lock_acquired:
+            mark_stage_success(
+                nas_conn,
+                config,
+                "stage_02_database_sync",
+                status="completed_successfully",
+            )
 
         # Count errors by type
         for error_entry in error_log:
@@ -1480,6 +1547,10 @@ def main() -> None:
         error_msg = f"Stage 2 consolidation failed: {e}"
         log_console(error_msg, "ERROR")
         log_error(error_msg, "main_execution", {"exception_type": type(e).__name__})
+        if lock_acquired and nas_conn and config:
+            mark_stage_failure(
+                nas_conn, config, "stage_02_database_sync", str(e)
+            )
 
     finally:
         # Save logs to NAS

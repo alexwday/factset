@@ -51,7 +51,7 @@ make lint  # If available
 
 ### Processing Pipeline Architecture
 ```
-Stage 0: Historical Download → Stage 1: Daily Sync → Stage 2: Database Sync →
+External NAS ingest → Stage 2: Database Sync →
 Stage 3: Content Extraction → Stage 4: Structure Validation → Stage 5: Q&A Pairing →
 Stage 6: LLM Classification → Stage 7: LLM Summarization → Stage 8: Embeddings Generation →
 Stage 9: Master Consolidation & Archive
@@ -60,8 +60,9 @@ Stage 9: Master Consolidation & Archive
 ## 📁 PROJECT STRUCTURE
 ```
 database_refresh/
-├── 00_download_historical/     # Historical transcript acquisition (3-year window)
-├── 01_download_daily/          # Daily incremental sync
+├── deprecated_stages/          # Archived legacy stages (0 and 1)
+│   ├── 00_download_historical/
+│   └── 01_download_daily/
 ├── 02_database_sync/           # File synchronization and delta detection
 ├── 03_extract_content/         # XML parsing and paragraph extraction
 ├── 04_validate_structure/      # Transcript structure validation
@@ -93,7 +94,7 @@ python main_*.py
 ### Pipeline Operations
 ```bash
 # Run complete pipeline (sequential execution)
-for stage in 00_download_historical 01_download_daily 02_database_sync 03_extract_content 04_validate_structure 05_qa_pairing 06_llm_classification 07_llm_summarization 08_embeddings_generation 09_master_consolidation; do
+for stage in 02_database_sync 03_extract_content 04_validate_structure 05_qa_pairing 06_llm_classification 07_llm_summarization 08_embeddings_generation 09_master_consolidation; do
     echo "Running Stage: $stage"
     cd database_refresh/$stage
     python main_*.py
@@ -152,17 +153,9 @@ import json                      # Data serialization
 
 ## 📋 STAGE-BY-STAGE OVERVIEW
 
-### Stage 0: Historical Download (00_download_historical)
-- **Purpose**: Download 3-year rolling window of historical transcripts
-- **Key Features**: FactSet API integration, NAS storage organization, title filtering
-- **Output**: XML transcripts organized by year/quarter/company structure
-- **Critical Logic**: "Qx 20xx Earnings Call" title validation, 3-year window calculation
-
-### Stage 1: Daily Sync (01_download_daily)
-- **Purpose**: Daily incremental transcript synchronization
-- **Key Features**: Date-based API queries, configurable sync ranges, delta detection
-- **Output**: New/updated transcripts added to NAS structure
-- **Critical Logic**: Date range calculation, version management, rate limiting
+### Deprecated Stages 0-1
+- `00_download_historical` and `01_download_daily` are archived in `deprecated_stages/`
+- Active operational flow starts at Stage 2 scanning NAS XML data
 
 ### Stage 2: Database Sync (02_database_sync)
 - **Purpose**: Comprehensive file synchronization between NAS and master database
@@ -231,7 +224,7 @@ import json                      # Data serialization
 ## 💡 DEVELOPMENT NOTES
 
 ### Pipeline Data Flow
-1. **Acquisition** (Stages 0-2): Download and synchronize transcript files
+1. **Ingestion + Sync** (External ingest + Stage 2): Track NAS transcript delta and queue changes
 2. **Extraction** (Stages 3-4): Parse content and validate structure
 3. **Enhancement** (Stages 5-8): AI-powered analysis, classification, summarization, and embedding
 

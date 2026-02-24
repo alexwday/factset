@@ -397,9 +397,10 @@ CALENDAR_CONFIG_PATH=Finance Data and Analytics/DSA/Earnings Call Transcripts/In
 ```
 factset/                         # Root directory
 ├── .env                         # Shared environment variables
-├── database_refresh/            # Transcript processing (9 stages)
-│   ├── 00_download_historical/
-│   ├── 01_download_daily/
+├── database_refresh/            # Transcript processing (active stages start at 02)
+│   ├── deprecated_stages/
+│   │   ├── 00_download_historical/
+│   │   └── 01_download_daily/
 │   └── ...
 └── calendar_refresh/            # Calendar events (1 stage)
     ├── 01_calendar_query/       # Main stage

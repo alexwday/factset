@@ -17,17 +17,28 @@ from __future__ import annotations
 
 import argparse
 import collections
-import importlib.util
+import io
+import logging
+import os
 import re
 import sys
+import tempfile
 import time
+import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Set
 
 import fds.sdk.EventsandTranscripts
 import requests
+import yaml
+from dotenv import load_dotenv
 from fds.sdk.EventsandTranscripts.api import transcripts_api
+from smb.SMBConnection import SMBConnection
+
+load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -127,22 +138,211 @@ def parse_date(value: str) -> date:
         ) from exc
 
 
-def load_stage1_module() -> Any:
-    script_path = (
-        Path(__file__).resolve().parent
-        / "01_download_daily"
-        / "main_daily_sync_with_ignore.py"
+def setup_logging() -> logging.Logger:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler()],
     )
-    if not script_path.exists():
-        raise FileNotFoundError(f"Cannot locate stage script: {script_path}")
+    return logging.getLogger(__name__)
 
-    spec = importlib.util.spec_from_file_location("stage1_daily_sync_module", script_path)
-    if not spec or not spec.loader:
-        raise RuntimeError(f"Failed to load import spec for {script_path}")
 
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def validate_environment_variables() -> None:
+    required_env_vars = [
+        "API_USERNAME",
+        "API_PASSWORD",
+        "PROXY_USER",
+        "PROXY_PASSWORD",
+        "PROXY_URL",
+        "NAS_USERNAME",
+        "NAS_PASSWORD",
+        "NAS_SERVER_IP",
+        "NAS_SERVER_NAME",
+        "NAS_SHARE_NAME",
+        "NAS_PORT",
+        "CONFIG_PATH",
+        "CLIENT_MACHINE_NAME",
+    ]
+    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    if missing_vars:
+        raise ValueError(
+            f"Missing required environment variables: {', '.join(missing_vars)}"
+        )
+
+
+def get_nas_connection() -> Optional[SMBConnection]:
+    conn = SMBConnection(
+        username=os.getenv("NAS_USERNAME"),
+        password=os.getenv("NAS_PASSWORD"),
+        my_name=os.getenv("CLIENT_MACHINE_NAME"),
+        remote_name=os.getenv("NAS_SERVER_NAME"),
+        use_ntlm_v2=True,
+        is_direct_tcp=True,
+    )
+    nas_port = int(os.getenv("NAS_PORT", 445))
+    if conn.connect(os.getenv("NAS_SERVER_IP"), nas_port):
+        return conn
+    return None
+
+
+def nas_download_file(conn: SMBConnection, nas_file_path: str) -> Optional[bytes]:
+    try:
+        file_obj = io.BytesIO()
+        conn.retrieveFile(os.getenv("NAS_SHARE_NAME"), nas_file_path, file_obj)
+        file_obj.seek(0)
+        return file_obj.read()
+    except Exception:
+        return None
+
+
+def sanitize_url_for_logging(url: str) -> str:
+    if not url:
+        return url
+    sanitized = re.sub(
+        r"(password|token|auth)=[^&]*", r"\1=***", url, flags=re.IGNORECASE
+    )
+    sanitized = re.sub(r"://[^@]*@", "://***:***@", sanitized)
+    return sanitized
+
+
+def validate_config_structure(config: Dict[str, Any]) -> None:
+    required_sections = ["ssl_cert_path", "api_settings"]
+    for section in required_sections:
+        if section not in config:
+            raise ValueError(f"Missing required configuration section: {section}")
+
+    required_api_settings = [
+        "industry_categories",
+        "sort_order",
+        "pagination_limit",
+        "pagination_offset",
+    ]
+    for setting in required_api_settings:
+        if setting not in config["api_settings"]:
+            raise ValueError(f"Missing required api_settings field: {setting}")
+
+
+def load_config_from_nas(nas_conn: SMBConnection) -> Dict[str, Any]:
+    config_path = os.getenv("CONFIG_PATH")
+    logger.info("Loading configuration from NAS: %s", sanitize_url_for_logging(config_path))
+
+    config_data = nas_download_file(nas_conn, config_path)
+    if not config_data:
+        raise FileNotFoundError(
+            f"Failed to download configuration file from NAS: {sanitize_url_for_logging(config_path)}"
+        )
+
+    config = yaml.safe_load(config_data.decode("utf-8")) or {}
+
+    config_dir = os.path.dirname(config_path) if config_path else ""
+    institutions_path = os.path.join(config_dir, "monitored_institutions.yaml")
+    institutions_data = nas_download_file(nas_conn, institutions_path)
+    if institutions_data:
+        config["monitored_institutions"] = (
+            yaml.safe_load(institutions_data.decode("utf-8")) or {}
+        )
+    else:
+        config.setdefault("monitored_institutions", {})
+
+    validate_config_structure(config)
+    return config
+
+
+def setup_ssl_certificate(nas_conn: SMBConnection, config: Dict[str, Any]) -> str:
+    cert_path = config["ssl_cert_path"]
+    cert_data = nas_download_file(nas_conn, cert_path)
+    if not cert_data:
+        raise FileNotFoundError(
+            f"Failed to download SSL certificate from NAS: {sanitize_url_for_logging(cert_path)}"
+        )
+
+    temp_cert = tempfile.NamedTemporaryFile(mode="wb", suffix=".cer", delete=False)
+    temp_cert.write(cert_data)
+    temp_cert.close()
+
+    os.environ["REQUESTS_CA_BUNDLE"] = temp_cert.name
+    os.environ["SSL_CERT_FILE"] = temp_cert.name
+    return temp_cert.name
+
+
+def setup_proxy_configuration() -> str:
+    proxy_user = os.getenv("PROXY_USER")
+    proxy_password = os.getenv("PROXY_PASSWORD")
+    proxy_url = os.getenv("PROXY_URL")
+    proxy_domain = os.getenv("PROXY_DOMAIN", "MAPLE")
+
+    escaped_domain = quote(proxy_domain + "\\" + proxy_user)
+    quoted_password = quote(proxy_password)
+    return f"http://{escaped_domain}:{quoted_password}@{proxy_url}"
+
+
+def setup_factset_api_client(proxy_url: str, ssl_cert_path: str) -> Any:
+    configuration = fds.sdk.EventsandTranscripts.Configuration(
+        username=os.getenv("API_USERNAME"),
+        password=os.getenv("API_PASSWORD"),
+        proxy=proxy_url,
+        ssl_ca_cert=ssl_cert_path,
+    )
+    configuration.get_basic_auth_token()
+    return configuration
+
+
+def cleanup_temporary_files(ssl_cert_path: Optional[str]) -> None:
+    if ssl_cert_path:
+        try:
+            os.unlink(ssl_cert_path)
+        except Exception:
+            pass
+
+
+def parse_quarter_and_year_from_xml(xml_content: bytes) -> tuple[str, str, str]:
+    try:
+        root = ET.parse(io.BytesIO(xml_content)).getroot()
+        namespace = ""
+        if root.tag.startswith("{"):
+            namespace = root.tag.split("}")[0] + "}"
+
+        meta = root.find(f"{namespace}meta" if namespace else "meta")
+        if meta is None:
+            return "Unknown", "Unknown", "No title found"
+
+        title_elem = meta.find(f"{namespace}title" if namespace else "title")
+        if title_elem is None or not title_elem.text:
+            return "Unknown", "Unknown", "No title found"
+
+        title = title_elem.text.strip()
+
+        pattern = r"Q([1-4])\s+(20\d{2})"
+        match = re.search(pattern, title, re.IGNORECASE)
+        if match:
+            return f"Q{match.group(1)}", match.group(2), title
+
+        quarter_patterns = [
+            (r"First\s+Quarter\s+(20\d{2})", "Q1"),
+            (r"Second\s+Quarter\s+(20\d{2})", "Q2"),
+            (r"Third\s+Quarter\s+(20\d{2})", "Q3"),
+            (r"Fourth\s+Quarter\s+(20\d{2})", "Q4"),
+            (r"1Q(\d{2})", "Q1"),
+            (r"2Q(\d{2})", "Q2"),
+            (r"3Q(\d{2})", "Q3"),
+            (r"4Q(\d{2})", "Q4"),
+        ]
+        for pattern, quarter_val in quarter_patterns:
+            match = re.search(pattern, title, re.IGNORECASE)
+            if match:
+                year_val = match.group(1)
+                if len(year_val) == 2:
+                    year_val = "20" + year_val
+                return quarter_val, year_val, title
+
+        return "Unknown", "Unknown", title
+    except Exception as exc:
+        return "Unknown", "Unknown", f"Error parsing: {exc}"
+
+
+def is_valid_earnings_call_title(title: str) -> bool:
+    pattern = r"^Q([1-4])\s+(20\d{2})\s+Earnings\s+Call$"
+    return bool(re.match(pattern, title, re.IGNORECASE))
 
 
 def normalize_transcript_type(value: str) -> str:
@@ -176,7 +376,6 @@ def fetch_title_info(
     transcript: Dict[str, Any],
     api_configuration: Any,
     proxy_url: str,
-    stage1_module: Any,
 ) -> Dict[str, Any]:
     transcript_link = transcript.get("transcripts_link")
     if not transcript_link:
@@ -202,10 +401,8 @@ def fetch_title_info(
     )
     response.raise_for_status()
 
-    parsed_quarter, parsed_year, title = stage1_module.parse_quarter_and_year_from_xml(
-        response.content
-    )
-    strict_match = stage1_module.is_valid_earnings_call_title(title)
+    parsed_quarter, parsed_year, title = parse_quarter_and_year_from_xml(response.content)
+    strict_match = is_valid_earnings_call_title(title)
 
     return {
         "error": "",
@@ -219,7 +416,7 @@ def fetch_title_info(
 
 def run_single_check(
     args: argparse.Namespace,
-    stage1: Any,
+    config: Dict[str, Any],
     api_configuration: Any,
     proxy_url: str,
     type_filter: Set[str],
@@ -228,10 +425,10 @@ def run_single_check(
         "ids": [args.ticker],
         "start_date": args.start_date,
         "end_date": args.end_date,
-        "categories": stage1.config["api_settings"]["industry_categories"],
-        "sort": stage1.config["api_settings"]["sort_order"],
-        "pagination_limit": stage1.config["api_settings"]["pagination_limit"],
-        "pagination_offset": stage1.config["api_settings"]["pagination_offset"],
+        "categories": config["api_settings"]["industry_categories"],
+        "sort": config["api_settings"]["sort_order"],
+        "pagination_limit": config["api_settings"]["pagination_limit"],
+        "pagination_offset": config["api_settings"]["pagination_offset"],
     }
 
     with fds.sdk.EventsandTranscripts.ApiClient(api_configuration) as api_client:
@@ -274,7 +471,6 @@ def run_single_check(
                 transcript=transcript,
                 api_configuration=api_configuration,
                 proxy_url=proxy_url,
-                stage1_module=stage1,
             )
             row.update(title_info)
         except Exception as exc:
@@ -479,11 +675,10 @@ def download_raw_corrected_target_matches(
 
 
 def main() -> int:
+    global logger
     args = parse_args()
-    stage1 = load_stage1_module()
-
-    stage1.logger = stage1.setup_logging()
-    stage1.config = {}
+    logger = setup_logging()
+    config: Dict[str, Any] = {}
 
     nas_conn = None
     ssl_cert_path: Optional[str] = None
@@ -492,21 +687,21 @@ def main() -> int:
         if args.watch and args.interval_seconds <= 0:
             raise ValueError("--interval-seconds must be a positive integer")
 
-        stage1.validate_environment_variables()
+        validate_environment_variables()
 
-        nas_conn = stage1.get_nas_connection()
+        nas_conn = get_nas_connection()
         if not nas_conn:
             raise RuntimeError("Failed to establish NAS connection")
 
-        stage1.config = stage1.load_config_from_nas(nas_conn)
-        ssl_cert_path = stage1.setup_ssl_certificate(nas_conn)
+        config = load_config_from_nas(nas_conn)
+        ssl_cert_path = setup_ssl_certificate(nas_conn, config)
         if not ssl_cert_path:
             raise RuntimeError("Failed to configure SSL certificate")
 
-        proxy_url = stage1.setup_proxy_configuration()
-        api_configuration = stage1.setup_factset_api_client(proxy_url, ssl_cert_path)
+        proxy_url = setup_proxy_configuration()
+        api_configuration = setup_factset_api_client(proxy_url, ssl_cert_path)
 
-        if args.ticker not in stage1.config["monitored_institutions"]:
+        if args.ticker not in config.get("monitored_institutions", {}):
             print(
                 f"WARNING: {args.ticker} is not in monitored_institutions. "
                 "Proceeding with direct API lookup."
@@ -523,7 +718,7 @@ def main() -> int:
             iteration += 1
             result = run_single_check(
                 args=args,
-                stage1=stage1,
+                config=config,
                 api_configuration=api_configuration,
                 proxy_url=proxy_url,
                 type_filter=type_filter,
@@ -616,7 +811,7 @@ def main() -> int:
                 nas_conn.close()
             except Exception:
                 pass
-        stage1.cleanup_temporary_files(ssl_cert_path)
+        cleanup_temporary_files(ssl_cert_path)
 
 
 if __name__ == "__main__":

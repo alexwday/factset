@@ -1,5 +1,4 @@
-# Stage 0 Configuration
-# Essential settings for historical transcript sync
+# Database refresh pipeline configuration (active stages start at Stage 2)
 
 # SSL Certificate Configuration
 ssl_cert_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Inputs/Certificate/rbc-ca-bundle.cer"
@@ -32,22 +31,6 @@ api_settings:
   retry_delay: 10.0
   use_exponential_backoff: true
   max_backoff_delay: 120.0
-
-# Stage 00 specific settings
-stage_00_download_historical:
-  description: "Historical download using 3-year rolling window or fixed start year"
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
-  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
-  # Optional: Set a fixed start year instead of using 3-year rolling window
-  # Uncomment and set to desired year (e.g., 2020) to download from that year to present
-  # start_year: 2020
-
-# Stage 01 specific settings
-stage_01_download_daily:
-  description: "Daily incremental sync of recent transcripts"
-  sync_date_range: 1  # Number of days to look back (0 = today only, 1 = today + yesterday)
-  output_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
-  output_logs_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Logs"
 
 # Stage 02 specific settings
 stage_02_database_sync:

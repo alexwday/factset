@@ -4,15 +4,15 @@ A comprehensive multi-stage data processing pipeline for financial earnings tran
 
 ## Overview
 
-This pipeline processes financial earnings call transcripts through 9 sequential stages, from initial data acquisition to AI-enhanced analysis with vector embeddings, culminating in master database consolidation and archival.
+This pipeline processes financial earnings call transcripts starting at Stage 2 (database sync), then proceeds through AI-enhanced analysis and master database consolidation.
 
 ### Pipeline Architecture
 
 ```
-📥 Data Acquisition          🔄 Processing & Validation     🤖 AI Enhancement           📦 Consolidation
+📥 Ingestion (external)      🔄 Processing & Validation     🤖 AI Enhancement           📦 Consolidation
 ┌─────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐     ┌──────────────┐
-│ Stage 0: Historical │────▶│ Stage 2: Database Sync  │────▶│ Stage 5: Q&A Pairing   │────▶│ Stage 9:     │
-│ Stage 1: Daily Sync │     │ Stage 3: Content Extract│     │ Stage 6: Classification │     │ Master DB    │
+│ NAS XML Dataset     │────▶│ Stage 2: Database Sync  │────▶│ Stage 5: Q&A Pairing   │────▶│ Stage 9:     │
+│ (pre-populated)     │     │ Stage 3: Content Extract│     │ Stage 6: Classification │     │ Master DB    │
 └─────────────────────┘     │ Stage 4: Structure Valid│     │ Stage 7: Summarization │     │ & Archive    │
                             └─────────────────────────┘     │ Stage 8: Embeddings    │     └──────────────┘
                                                             └─────────────────────────┘
@@ -78,44 +78,31 @@ CLIENT_MACHINE_NAME=YOUR_MACHINE
 
 ```bash
 # Run individual stages
-cd 01_download_daily
-python main_daily_sync.py
+cd 02_database_sync
+python main_sync_updates.py
 
 # Or run multiple stages sequentially
 ./run_pipeline.sh  # If available
 ```
 
+### Timer-Safe Controls
+
+When stages are scheduled independently (for example every 10 minutes), the ETL now uses a shared NAS control file:
+
+- `.../Outputs/Refresh/pipeline_control_flags.json`
+
+Behavior:
+
+- Stage 2 acquires a run lock. If another run is active, it exits as `skipped_overlap`.
+- Stages 3-8 check the control file and skip when the run is not ready, upstream failed, or Stage 2 had no files to process.
+- Stage 9 acts as finalizer: it archives refresh outputs, force-cleans refresh stage files, and clears the run lock.
+
+This prevents overlap, avoids downstream "missing input" cascades, and ensures cleanup after no-op/failure runs.
+
 ## Stage Details
 
-### Stage 0: Historical Download
-**Purpose**: Download 3-year rolling window of historical earnings transcripts  
-**Input**: FactSet API, monitored institutions list  
-**Output**: XML transcripts organized by year/quarter/company  
-**Key Features**:
-- 3-year rolling window calculation
-- Title validation ("Qx 20xx Earnings Call")
-- NAS directory structure creation
-- SSL certificate handling
-
-```bash
-cd 00_download_historical
-python main_historical_sync.py
-```
-
-### Stage 1: Daily Sync
-**Purpose**: Daily incremental transcript synchronization  
-**Input**: FactSet API date-based queries  
-**Output**: New/updated transcripts  
-**Key Features**:
-- Configurable sync date ranges
-- Version management
-- Delta detection
-- Rate limiting with exponential backoff
-
-```bash
-cd 01_download_daily
-python main_daily_sync.py
-```
+### Deprecated Stages 0-1
+Stage 0 (`00_download_historical`) and Stage 1 (`01_download_daily`) have been archived under `database_refresh/deprecated_stages/` and are no longer part of the active pipeline.
 
 ### Stage 2: Database Sync
 **Purpose**: File synchronization and delta detection  
@@ -244,8 +231,8 @@ The pipeline uses a shared `config.yaml` file stored on NAS, containing stage-sp
 
 ```yaml
 # Example configuration structure
-stage_01_download_daily:
-  sync_date_range: 7  # Days to sync
+stage_02_database_sync:
+  input_data_path: "Finance Data and Analytics/DSA/Earnings Call Transcripts/Outputs/Data"
   
 stage_05_qa_pairing:
   window_size: 10
