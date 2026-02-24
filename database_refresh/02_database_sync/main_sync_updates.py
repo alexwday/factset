@@ -1314,10 +1314,10 @@ def detect_changes_version_aware(nas_inventory: Dict[str, Dict[str, Any]], datab
                 # Different version
                 needs_update = True
                 update_reason = f"Version change: {best_db_version['filename']} -> {best_nas_version['filename']}"
-            elif best_nas_record['date_last_modified'] != best_db_record.get('date_last_modified', ''):
-                # Same version, different date
+            elif best_nas_record['date_last_modified'] > best_db_record.get('date_last_modified', ''):
+                # Same version, NAS date is newer than database date
                 needs_update = True
-                update_reason = f"Date change for {best_nas_version['filename']}"
+                update_reason = f"Newer date for {best_nas_version['filename']}: {best_db_record.get('date_last_modified', '')} -> {best_nas_record['date_last_modified']}"
 
             if needs_update:
                 # Process best NAS version
