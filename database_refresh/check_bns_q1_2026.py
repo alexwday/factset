@@ -10,7 +10,7 @@ Read-only behavior:
 - Reads config and SSL certificate from NAS
 - Calls FactSet API / transcript links
 - Does NOT write/upload to NAS
-- Does NOT save transcript files
+- Optionally saves matched Raw/Corrected transcript XMLs to local disk only
 """
 
 from __future__ import annotations
@@ -99,6 +99,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Exit immediately after the first alert in watch mode.",
     )
+    parser.add_argument(
+        "--no-download",
+        action="store_true",
+        help=(
+            "Disable local download of matched Raw/Corrected transcript XML files "
+            "(enabled by default)."
+        ),
+    )
+    parser.add_argument(
+        "--download-dir",
+        default=None,
+        help=(
+            "Local folder for downloaded Raw/Corrected XML files "
+            "(default: ./adhoc_transcript_downloads next to this script)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -150,6 +166,12 @@ def is_type_selected(transcript_type: str, type_filter: Set[str], raw_filter: st
     return normalize_transcript_type(transcript_type) in type_filter
 
 
+def sanitize_path_component(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "").strip())
+    cleaned = cleaned.strip("._")
+    return cleaned or "Unknown"
+
+
 def fetch_title_info(
     transcript: Dict[str, Any],
     api_configuration: Any,
@@ -191,6 +213,7 @@ def fetch_title_info(
         "parsed_quarter": parsed_quarter,
         "parsed_year": parsed_year,
         "strict_title_match": strict_match,
+        "xml_content": response.content,
     }
 
 
@@ -298,7 +321,7 @@ def print_snapshot(args: argparse.Namespace, result: Dict[str, Any], iteration: 
     print(f"Ticker: {args.ticker}")
     print(f"Target: {args.quarter} {args.year}")
     print(f"Window: {args.start_date.isoformat()} to {args.end_date.isoformat()}")
-    print("Mode: READ-ONLY (no NAS writes, no transcript files saved)")
+    print("Mode: NAS READ-ONLY (local XML download enabled unless --no-download)")
     print(f"Type filter: {args.types}")
     print(f"Raw API rows: {len(raw_transcripts)}")
     if args.all_primary_id_rows:
@@ -400,6 +423,61 @@ def collect_alert_rows(
     ]
 
 
+def build_local_xml_path(download_root: Path, ticker: str, row: Dict[str, Any]) -> Path:
+    ticker_clean = sanitize_path_component(ticker)
+    quarter = sanitize_path_component(str(row.get("parsed_quarter", "Unknown")))
+    year = sanitize_path_component(str(row.get("parsed_year", "Unknown")))
+    transcript_type = sanitize_path_component(str(row.get("transcript_type", "Unknown")))
+    event_id = sanitize_path_component(str(row.get("event_id", "Unknown")))
+    version_id = sanitize_path_component(str(row.get("version_id", "Unknown")))
+
+    filename = (
+        f"{ticker_clean}_{quarter}_{year}_{transcript_type}_{event_id}_{version_id}.xml"
+    )
+    target_dir = download_root / ticker_clean / f"{year}_{quarter}"
+    return target_dir / filename
+
+
+def download_raw_corrected_target_matches(
+    matches: List[Dict[str, Any]],
+    ticker: str,
+    download_root: Path,
+) -> Dict[str, Any]:
+    download_types = {"raw", "corrected"}
+    summary: Dict[str, Any] = {
+        "eligible": 0,
+        "downloaded": 0,
+        "already_exists": 0,
+        "failed": 0,
+        "saved_paths": [],
+    }
+
+    for row in matches:
+        if normalize_transcript_type(str(row.get("transcript_type", ""))) not in download_types:
+            continue
+
+        summary["eligible"] += 1
+        xml_content = row.get("xml_content")
+        if not isinstance(xml_content, (bytes, bytearray)) or not xml_content:
+            summary["failed"] += 1
+            continue
+
+        target_path = build_local_xml_path(download_root, ticker, row)
+        if target_path.exists():
+            summary["already_exists"] += 1
+            continue
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(bytes(xml_content))
+            summary["downloaded"] += 1
+            summary["saved_paths"].append(str(target_path))
+        except Exception:
+            summary["failed"] += 1
+
+    return summary
+
+
 def main() -> int:
     args = parse_args()
     stage1 = load_stage1_module()
@@ -437,6 +515,9 @@ def main() -> int:
         alert_type_filter = parse_type_filter(args.alert_types)
         seen_alert_keys: Set[str] = set()
         iteration = 0
+        download_root = Path(args.download_dir).expanduser() if args.download_dir else (
+            Path(__file__).resolve().parent / "adhoc_transcript_downloads"
+        )
 
         while True:
             iteration += 1
@@ -451,6 +532,30 @@ def main() -> int:
             print_snapshot(args, result, iteration if args.watch else None)
 
             matches = result["matches"]
+
+            if args.no_download:
+                print("")
+                print("Local download: disabled (--no-download)")
+            else:
+                download_summary = download_raw_corrected_target_matches(
+                    matches=matches,
+                    ticker=args.ticker,
+                    download_root=download_root,
+                )
+                print("")
+                print(
+                    "Local Raw/Corrected XML downloads (target matches): "
+                    f"eligible={download_summary['eligible']} "
+                    f"downloaded={download_summary['downloaded']} "
+                    f"already_exists={download_summary['already_exists']} "
+                    f"failed={download_summary['failed']}"
+                )
+                print(f"Download folder: {download_root}")
+                if download_summary["saved_paths"]:
+                    print("New files:")
+                    for path in download_summary["saved_paths"]:
+                        print(f"- {path}")
+
             if args.watch:
                 alert_rows = collect_alert_rows(
                     matches=matches,
