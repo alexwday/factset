@@ -20,6 +20,7 @@ import collections
 import importlib.util
 import re
 import sys
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -74,6 +75,30 @@ def parse_args() -> argparse.Namespace:
             "Raw,Corrected). Default: all."
         ),
     )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Keep polling and warn when alert transcript types appear.",
+    )
+    parser.add_argument(
+        "--interval-seconds",
+        type=int,
+        default=300,
+        help="Polling interval in seconds when --watch is enabled (default: 300).",
+    )
+    parser.add_argument(
+        "--alert-types",
+        default="Raw,Corrected",
+        help=(
+            "Comma-separated transcript types that trigger a warning in watch mode "
+            "(default: Raw,Corrected). Use 'all' to alert on any type."
+        ),
+    )
+    parser.add_argument(
+        "--exit-on-alert",
+        action="store_true",
+        help="Exit immediately after the first alert in watch mode.",
+    )
     return parser.parse_args()
 
 
@@ -117,6 +142,12 @@ def parse_type_filter(raw_value: str) -> Set[str]:
         for item in value.split(",")
         if item.strip()
     }
+
+
+def is_type_selected(transcript_type: str, type_filter: Set[str], raw_filter: str) -> bool:
+    if (raw_filter or "").strip().lower() in {"", "all"}:
+        return True
+    return normalize_transcript_type(transcript_type) in type_filter
 
 
 def fetch_title_info(
@@ -163,6 +194,212 @@ def fetch_title_info(
     }
 
 
+def run_single_check(
+    args: argparse.Namespace,
+    stage1: Any,
+    api_configuration: Any,
+    proxy_url: str,
+    type_filter: Set[str],
+) -> Dict[str, Any]:
+    api_params = {
+        "ids": [args.ticker],
+        "start_date": args.start_date,
+        "end_date": args.end_date,
+        "categories": stage1.config["api_settings"]["industry_categories"],
+        "sort": stage1.config["api_settings"]["sort_order"],
+        "pagination_limit": stage1.config["api_settings"]["pagination_limit"],
+        "pagination_offset": stage1.config["api_settings"]["pagination_offset"],
+    }
+
+    with fds.sdk.EventsandTranscripts.ApiClient(api_configuration) as api_client:
+        api_instance = transcripts_api.TranscriptsApi(api_client)
+        response = api_instance.get_transcripts_ids(**api_params)
+
+    raw_transcripts: List[Dict[str, Any]] = []
+    if response and hasattr(response, "data") and response.data:
+        raw_transcripts = [item.to_dict() for item in response.data]
+
+    if args.all_primary_id_rows:
+        scoped_transcripts = [
+            t
+            for t in raw_transcripts
+            if isinstance(t.get("primary_ids"), list)
+            and args.ticker in t.get("primary_ids")
+            and is_type_selected(str(t.get("transcript_type", "")), type_filter, args.types)
+        ]
+    else:
+        scoped_transcripts = [
+            t
+            for t in raw_transcripts
+            if isinstance(t.get("primary_ids"), list)
+            and t.get("primary_ids") == [args.ticker]
+            and is_type_selected(str(t.get("transcript_type", "")), type_filter, args.types)
+        ]
+
+    inspected_rows: List[Dict[str, Any]] = []
+    for transcript in scoped_transcripts:
+        row: Dict[str, Any] = {
+            "event_date": transcript.get("event_date", ""),
+            "story_datetime": transcript.get("story_date_time", ""),
+            "transcript_type": transcript.get("transcript_type", ""),
+            "event_id": str(transcript.get("event_id", "")),
+            "version_id": str(transcript.get("version_id", "")),
+        }
+
+        try:
+            title_info = fetch_title_info(
+                transcript=transcript,
+                api_configuration=api_configuration,
+                proxy_url=proxy_url,
+                stage1_module=stage1,
+            )
+            row.update(title_info)
+        except Exception as exc:
+            row.update(
+                {
+                    "error": str(exc),
+                    "title": "",
+                    "parsed_quarter": "Unknown",
+                    "parsed_year": "Unknown",
+                    "strict_title_match": False,
+                }
+            )
+
+        inspected_rows.append(row)
+
+    target_year = str(args.year)
+    matches = [
+        row
+        for row in inspected_rows
+        if row.get("parsed_quarter", "").upper() == args.quarter
+        and row.get("parsed_year") == target_year
+    ]
+
+    return {
+        "raw_transcripts": raw_transcripts,
+        "scoped_transcripts": scoped_transcripts,
+        "inspected_rows": inspected_rows,
+        "matches": matches,
+    }
+
+
+def print_snapshot(args: argparse.Namespace, result: Dict[str, Any], iteration: Optional[int]) -> None:
+    raw_transcripts = result["raw_transcripts"]
+    scoped_transcripts = result["scoped_transcripts"]
+    inspected_rows = result["inspected_rows"]
+    matches = result["matches"]
+    target_year = str(args.year)
+
+    print("")
+    print("=== BNS Transcript Availability Check ===")
+    if iteration is not None:
+        print(f"Iteration: {iteration}")
+    print(f"Run Time: {datetime.now().isoformat(timespec='seconds')}")
+    print(f"Ticker: {args.ticker}")
+    print(f"Target: {args.quarter} {args.year}")
+    print(f"Window: {args.start_date.isoformat()} to {args.end_date.isoformat()}")
+    print("Mode: READ-ONLY (no NAS writes, no transcript files saved)")
+    print(f"Type filter: {args.types}")
+    print(f"Raw API rows: {len(raw_transcripts)}")
+    if args.all_primary_id_rows:
+        print(f"Scoped rows (ticker in primary_ids): {len(scoped_transcripts)}")
+    else:
+        print(f"Scoped rows (sole-primary only): {len(scoped_transcripts)}")
+    print(f"Rows inspected by XML title parse: {len(inspected_rows)}")
+    print(f"Matches for {args.quarter} {args.year}: {len(matches)}")
+
+    type_counter = collections.Counter(
+        str(row.get("transcript_type", "")).strip() for row in inspected_rows
+    )
+    print("")
+    print("Transcript types present (scoped rows):")
+    if type_counter:
+        for transcript_type, count in sorted(type_counter.items()):
+            print(f"- {transcript_type}: {count}")
+    else:
+        print("- none")
+
+    if matches:
+        print("STATUS: AVAILABLE")
+        matches_sorted = sorted(
+            matches, key=lambda row: (row.get("event_date", ""), row.get("event_id", ""))
+        )
+        for idx, match in enumerate(matches_sorted, start=1):
+            print(
+                f"{idx}. event_date={match.get('event_date')} "
+                f"type={match.get('transcript_type')} "
+                f"event_id={match.get('event_id')} "
+                f"version_id={match.get('version_id')} "
+                f"strict_title={match.get('strict_title_match')}"
+            )
+            print(f"   title={match.get('title')}")
+
+        grouped_types: Dict[str, Set[str]] = {}
+        for row in matches:
+            event_id = str(row.get("event_id", ""))
+            grouped_types.setdefault(event_id, set()).add(
+                str(row.get("transcript_type", "")).strip()
+            )
+
+        print("")
+        print("Target event type coverage:")
+        required_types = ["Raw", "Corrected"]
+        for event_id in sorted(grouped_types.keys()):
+            available = sorted(grouped_types[event_id])
+            missing = [t for t in required_types if t not in grouped_types[event_id]]
+            print(
+                f"- event_id={event_id} available={','.join(available) if available else 'none'} "
+                f"missing_raw_corrected={','.join(missing) if missing else 'none'}"
+            )
+    else:
+        print("STATUS: NOT AVAILABLE")
+        if not inspected_rows:
+            print("No scoped transcripts were returned for the query window.")
+
+    print("")
+    print("=== Full Transcript Listing (Scoped Rows) ===")
+    if not inspected_rows:
+        print("No rows to display.")
+    else:
+        all_rows_sorted = sorted(
+            inspected_rows,
+            key=lambda row: (row.get("event_date", ""), row.get("event_id", "")),
+            reverse=True,
+        )
+        for idx, row in enumerate(all_rows_sorted, start=1):
+            parsed_label = f"{row.get('parsed_quarter')} {row.get('parsed_year')}"
+            is_target = (
+                row.get("parsed_quarter", "").upper() == args.quarter
+                and row.get("parsed_year") == target_year
+            )
+            target_flag = "TARGET_MATCH" if is_target else "non-target"
+            print(
+                f"{idx}. event_date={row.get('event_date')} "
+                f"type={row.get('transcript_type')} "
+                f"parsed={parsed_label} "
+                f"strict_title={row.get('strict_title_match')} "
+                f"{target_flag} "
+                f"event_id={row.get('event_id')} "
+                f"version_id={row.get('version_id')}"
+            )
+            title = row.get("title") or "<title unavailable>"
+            print(f"   title={title}")
+            if row.get("error"):
+                print(f"   error={row.get('error')}")
+
+
+def collect_alert_rows(
+    matches: List[Dict[str, Any]], alert_type_filter: Set[str], alert_types_raw: str
+) -> List[Dict[str, Any]]:
+    return [
+        row
+        for row in matches
+        if is_type_selected(
+            str(row.get("transcript_type", "")), alert_type_filter, alert_types_raw
+        )
+    ]
+
+
 def main() -> int:
     args = parse_args()
     stage1 = load_stage1_module()
@@ -174,6 +411,9 @@ def main() -> int:
     ssl_cert_path: Optional[str] = None
 
     try:
+        if args.watch and args.interval_seconds <= 0:
+            raise ValueError("--interval-seconds must be a positive integer")
+
         stage1.validate_environment_variables()
 
         nas_conn = stage1.get_nas_connection()
@@ -193,190 +433,75 @@ def main() -> int:
                 f"WARNING: {args.ticker} is not in monitored_institutions. "
                 "Proceeding with direct API lookup."
             )
-
-        api_params = {
-            "ids": [args.ticker],
-            "start_date": args.start_date,
-            "end_date": args.end_date,
-            "categories": stage1.config["api_settings"]["industry_categories"],
-            "sort": stage1.config["api_settings"]["sort_order"],
-            "pagination_limit": stage1.config["api_settings"]["pagination_limit"],
-            "pagination_offset": stage1.config["api_settings"]["pagination_offset"],
-        }
-
-        with fds.sdk.EventsandTranscripts.ApiClient(api_configuration) as api_client:
-            api_instance = transcripts_api.TranscriptsApi(api_client)
-            response = api_instance.get_transcripts_ids(**api_params)
-
-        raw_transcripts = []
-        if response and hasattr(response, "data") and response.data:
-            raw_transcripts = [item.to_dict() for item in response.data]
-
         type_filter = parse_type_filter(args.types)
+        alert_type_filter = parse_type_filter(args.alert_types)
+        seen_alert_keys: Set[str] = set()
+        iteration = 0
 
-        if args.all_primary_id_rows:
-            scoped_transcripts = [
-                t
-                for t in raw_transcripts
-                if isinstance(t.get("primary_ids"), list)
-                and args.ticker in t.get("primary_ids")
-                and (
-                    not type_filter
-                    or normalize_transcript_type(str(t.get("transcript_type", "")))
-                    in type_filter
-                )
-            ]
-        else:
-            scoped_transcripts = [
-                t
-                for t in raw_transcripts
-                if isinstance(t.get("primary_ids"), list)
-                and t.get("primary_ids") == [args.ticker]
-                and (
-                    not type_filter
-                    or normalize_transcript_type(str(t.get("transcript_type", "")))
-                    in type_filter
-                )
-            ]
-
-        inspected_rows: List[Dict[str, Any]] = []
-        for transcript in scoped_transcripts:
-            row: Dict[str, Any] = {
-                "event_date": transcript.get("event_date", ""),
-                "story_datetime": transcript.get("story_date_time", ""),
-                "transcript_type": transcript.get("transcript_type", ""),
-                "event_id": str(transcript.get("event_id", "")),
-                "version_id": str(transcript.get("version_id", "")),
-            }
-
-            try:
-                title_info = fetch_title_info(
-                    transcript=transcript,
-                    api_configuration=api_configuration,
-                    proxy_url=proxy_url,
-                    stage1_module=stage1,
-                )
-                row.update(title_info)
-            except Exception as exc:
-                row.update(
-                    {
-                        "error": str(exc),
-                        "title": "",
-                        "parsed_quarter": "Unknown",
-                        "parsed_year": "Unknown",
-                        "strict_title_match": False,
-                    }
-                )
-
-            inspected_rows.append(row)
-
-        target_year = str(args.year)
-        matches = [
-            row
-            for row in inspected_rows
-            if row.get("parsed_quarter", "").upper() == args.quarter
-            and row.get("parsed_year") == target_year
-        ]
-
-        print("")
-        print("=== BNS Transcript Availability Check ===")
-        print(f"Run Time: {datetime.now().isoformat(timespec='seconds')}")
-        print(f"Ticker: {args.ticker}")
-        print(f"Target: {args.quarter} {args.year}")
-        print(f"Window: {args.start_date.isoformat()} to {args.end_date.isoformat()}")
-        print("Mode: READ-ONLY (no NAS writes, no transcript files saved)")
-        print(f"Type filter: {args.types}")
-        print(f"Raw API rows: {len(raw_transcripts)}")
-        if args.all_primary_id_rows:
-            print(f"Scoped rows (ticker in primary_ids): {len(scoped_transcripts)}")
-        else:
-            print(f"Scoped rows (sole-primary only): {len(scoped_transcripts)}")
-        print(f"Rows inspected by XML title parse: {len(inspected_rows)}")
-        print(f"Matches for {args.quarter} {args.year}: {len(matches)}")
-
-        type_counter = collections.Counter(
-            str(row.get("transcript_type", "")).strip() for row in inspected_rows
-        )
-        print("")
-        print("Transcript types present (scoped rows):")
-        if type_counter:
-            for transcript_type, count in sorted(type_counter.items()):
-                print(f"- {transcript_type}: {count}")
-        else:
-            print("- none")
-
-        if matches:
-            print("STATUS: AVAILABLE")
-            matches = sorted(
-                matches, key=lambda row: (row.get("event_date", ""), row.get("event_id", ""))
+        while True:
+            iteration += 1
+            result = run_single_check(
+                args=args,
+                stage1=stage1,
+                api_configuration=api_configuration,
+                proxy_url=proxy_url,
+                type_filter=type_filter,
             )
-            for idx, match in enumerate(matches, start=1):
+
+            print_snapshot(args, result, iteration if args.watch else None)
+
+            matches = result["matches"]
+            if args.watch:
+                alert_rows = collect_alert_rows(
+                    matches=matches,
+                    alert_type_filter=alert_type_filter,
+                    alert_types_raw=args.alert_types,
+                )
+
+                new_alert_rows: List[Dict[str, Any]] = []
+                for row in alert_rows:
+                    key = (
+                        f"{row.get('event_id')}|{row.get('version_id')}|"
+                        f"{normalize_transcript_type(str(row.get('transcript_type', '')))}"
+                    )
+                    if key not in seen_alert_keys:
+                        seen_alert_keys.add(key)
+                        new_alert_rows.append(row)
+
+                if new_alert_rows:
+                    print("")
+                    print(
+                        f"\aALERT [{datetime.now().isoformat(timespec='seconds')}]: "
+                        f"New {args.alert_types} transcript type(s) detected for "
+                        f"{args.ticker} {args.quarter} {args.year}"
+                    )
+                    for row in new_alert_rows:
+                        print(
+                            f"- event_date={row.get('event_date')} "
+                            f"type={row.get('transcript_type')} "
+                            f"event_id={row.get('event_id')} "
+                            f"version_id={row.get('version_id')}"
+                        )
+                        print(f"  title={row.get('title')}")
+
+                    if args.exit_on_alert:
+                        return 0
+
+                print("")
                 print(
-                    f"{idx}. event_date={match.get('event_date')} "
-                    f"type={match.get('transcript_type')} "
-                    f"event_id={match.get('event_id')} "
-                    f"version_id={match.get('version_id')} "
-                    f"strict_title={match.get('strict_title_match')}"
+                    f"Watch mode active. Sleeping {args.interval_seconds}s "
+                    f"(alert types: {args.alert_types})..."
                 )
-                print(f"   title={match.get('title')}")
+                time.sleep(args.interval_seconds)
+                continue
 
-            grouped_types: Dict[str, Set[str]] = {}
-            for row in matches:
-                event_id = str(row.get("event_id", ""))
-                grouped_types.setdefault(event_id, set()).add(
-                    str(row.get("transcript_type", "")).strip()
-                )
+            if args.fail_if_missing and not matches:
+                return 1
+            return 0
 
-            print("")
-            print("Target event type coverage:")
-            required_types = ["Raw", "Corrected"]
-            for event_id in sorted(grouped_types.keys()):
-                available = sorted(grouped_types[event_id])
-                missing = [t for t in required_types if t not in grouped_types[event_id]]
-                print(
-                    f"- event_id={event_id} available={','.join(available) if available else 'none'} "
-                    f"missing_raw_corrected={','.join(missing) if missing else 'none'}"
-                )
-        else:
-            print("STATUS: NOT AVAILABLE")
-            if not inspected_rows:
-                print("No scoped transcripts were returned for the query window.")
-
-        print("")
-        print("=== Full Transcript Listing (Scoped Rows) ===")
-        if not inspected_rows:
-            print("No rows to display.")
-        else:
-            all_rows_sorted = sorted(
-                inspected_rows,
-                key=lambda row: (row.get("event_date", ""), row.get("event_id", "")),
-                reverse=True,
-            )
-            for idx, row in enumerate(all_rows_sorted, start=1):
-                parsed_label = f"{row.get('parsed_quarter')} {row.get('parsed_year')}"
-                is_target = (
-                    row.get("parsed_quarter", "").upper() == args.quarter
-                    and row.get("parsed_year") == target_year
-                )
-                target_flag = "TARGET_MATCH" if is_target else "non-target"
-                print(
-                    f"{idx}. event_date={row.get('event_date')} "
-                    f"type={row.get('transcript_type')} "
-                    f"parsed={parsed_label} "
-                    f"strict_title={row.get('strict_title_match')} "
-                    f"{target_flag} "
-                    f"event_id={row.get('event_id')} "
-                    f"version_id={row.get('version_id')}"
-                )
-                title = row.get("title") or "<title unavailable>"
-                print(f"   title={title}")
-                if row.get("error"):
-                    print(f"   error={row.get('error')}")
-
-        if args.fail_if_missing and not matches:
-            return 1
+    except KeyboardInterrupt:
+        print("\nWatch stopped by user.")
         return 0
-
     except Exception as exc:
         print(f"ERROR: {exc}")
         return 2
