@@ -56,6 +56,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Exit with code 1 when no matching transcript is found.",
     )
+    parser.add_argument(
+        "--all-primary-id-rows",
+        action="store_true",
+        help=(
+            "List transcripts where ticker appears in primary_ids even when it is "
+            "not the sole primary ID. Default remains sole-primary only."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -179,14 +187,20 @@ def main() -> int:
         if response and hasattr(response, "data") and response.data:
             raw_transcripts = [item.to_dict() for item in response.data]
 
-        allowed_types = set(stage1.config["api_settings"]["transcript_types"])
-        scoped_transcripts = [
-            t
-            for t in raw_transcripts
-            if isinstance(t.get("primary_ids"), list)
-            and t.get("primary_ids") == [args.ticker]
-            and t.get("transcript_type") in allowed_types
-        ]
+        if args.all_primary_id_rows:
+            scoped_transcripts = [
+                t
+                for t in raw_transcripts
+                if isinstance(t.get("primary_ids"), list)
+                and args.ticker in t.get("primary_ids")
+            ]
+        else:
+            scoped_transcripts = [
+                t
+                for t in raw_transcripts
+                if isinstance(t.get("primary_ids"), list)
+                and t.get("primary_ids") == [args.ticker]
+            ]
 
         inspected_rows: List[Dict[str, Any]] = []
         for transcript in scoped_transcripts:
@@ -235,7 +249,10 @@ def main() -> int:
         print(f"Window: {args.start_date.isoformat()} to {args.end_date.isoformat()}")
         print("Mode: READ-ONLY (no NAS writes, no transcript files saved)")
         print(f"Raw API rows: {len(raw_transcripts)}")
-        print(f"Sole-primary + configured transcript types: {len(scoped_transcripts)}")
+        if args.all_primary_id_rows:
+            print(f"Scoped rows (ticker in primary_ids): {len(scoped_transcripts)}")
+        else:
+            print(f"Scoped rows (sole-primary only): {len(scoped_transcripts)}")
         print(f"Rows inspected by XML title parse: {len(inspected_rows)}")
         print(f"Matches for {args.quarter} {args.year}: {len(matches)}")
 
@@ -255,25 +272,39 @@ def main() -> int:
                 print(f"   title={match.get('title')}")
         else:
             print("STATUS: NOT AVAILABLE")
-            recent_rows = sorted(
+            if not inspected_rows:
+                print("No scoped transcripts were returned for the query window.")
+
+        print("")
+        print("=== Full Transcript Listing (Scoped Rows) ===")
+        if not inspected_rows:
+            print("No rows to display.")
+        else:
+            all_rows_sorted = sorted(
                 inspected_rows,
                 key=lambda row: (row.get("event_date", ""), row.get("event_id", "")),
                 reverse=True,
-            )[:5]
-            if recent_rows:
-                print("Most recent inspected titles:")
-                for idx, row in enumerate(recent_rows, start=1):
-                    title = row.get("title") or "<title unavailable>"
-                    parsed_label = f"{row.get('parsed_quarter')} {row.get('parsed_year')}"
-                    print(
-                        f"{idx}. event_date={row.get('event_date')} "
-                        f"type={row.get('transcript_type')} "
-                        f"parsed={parsed_label} "
-                        f"event_id={row.get('event_id')}"
-                    )
-                    print(f"   title={title}")
-            else:
-                print("No scoped transcripts were returned for the query window.")
+            )
+            for idx, row in enumerate(all_rows_sorted, start=1):
+                parsed_label = f"{row.get('parsed_quarter')} {row.get('parsed_year')}"
+                is_target = (
+                    row.get("parsed_quarter", "").upper() == args.quarter
+                    and row.get("parsed_year") == target_year
+                )
+                target_flag = "TARGET_MATCH" if is_target else "non-target"
+                print(
+                    f"{idx}. event_date={row.get('event_date')} "
+                    f"type={row.get('transcript_type')} "
+                    f"parsed={parsed_label} "
+                    f"strict_title={row.get('strict_title_match')} "
+                    f"{target_flag} "
+                    f"event_id={row.get('event_id')} "
+                    f"version_id={row.get('version_id')}"
+                )
+                title = row.get("title") or "<title unavailable>"
+                print(f"   title={title}")
+                if row.get("error"):
+                    print(f"   error={row.get('error')}")
 
         if args.fail_if_missing and not matches:
             return 1
