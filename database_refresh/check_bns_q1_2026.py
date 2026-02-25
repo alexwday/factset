@@ -6,7 +6,7 @@ This script reuses the same environment and setup approach as the stage refresh
 scripts (env vars, NAS config load, proxy/SSL, FactSet SDK auth) and only
 reports what is currently available from FactSet transcripts.
 
-Read-only behavior:
+Read-only (NAS) behavior:
 - Reads config and SSL certificate from NAS
 - Calls FactSet API / transcript links
 - Does NOT write/upload to NAS
