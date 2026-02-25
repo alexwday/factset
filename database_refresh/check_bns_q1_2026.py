@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Adhoc transcript availability checker for BNS Q1 2026.
+Adhoc transcript availability checker for Canadian Big 6 banks.
 
 This script reuses the same environment and setup approach as the stage refresh
 scripts (env vars, NAS config load, proxy/SSL, FactSet SDK auth) and only
@@ -28,7 +28,7 @@ import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, OrderedDict, Set, Tuple
 
 import fds.sdk.EventsandTranscripts
 import requests
@@ -40,12 +40,42 @@ from smb.SMBConnection import SMBConnection
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Big 6 Canadian banks: FactSet ticker -> (short name, full name)
+BIG_6_BANKS: OrderedDict[str, Tuple[str, str]] = collections.OrderedDict([
+    ("RY-CA", ("RBC", "Royal Bank of Canada")),
+    ("TD-CA", ("TD", "Toronto-Dominion Bank")),
+    ("BMO-CA", ("BMO", "Bank of Montreal")),
+    ("BNS-CA", ("BNS", "Bank of Nova Scotia")),
+    ("CM-CA", ("CIBC", "Canadian Imperial Bank of Commerce")),
+    ("NA-CA", ("NBC", "National Bank of Canada")),
+])
+
+
+def resolve_tickers(raw: str) -> List[str]:
+    if raw.lower() == "big6":
+        return list(BIG_6_BANKS.keys())
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
+def bank_label(ticker: str) -> str:
+    if ticker in BIG_6_BANKS:
+        short, _ = BIG_6_BANKS[ticker]
+        return f"{short} ({ticker})"
+    return ticker
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Check FactSet transcript availability for BNS Q1 2026."
+        description="Check FactSet transcript availability for Big 6 Canadian banks."
     )
-    parser.add_argument("--ticker", default="BNS-CA", help="FactSet ticker ID")
+    parser.add_argument(
+        "--ticker",
+        default="big6",
+        help=(
+            "FactSet ticker ID(s). Use 'big6' for all Big 6 Canadian banks, "
+            "or comma-separated tickers (e.g. BNS-CA,TD-CA). Default: big6."
+        ),
+    )
     parser.add_argument(
         "--quarter",
         default="Q1",
@@ -416,13 +446,14 @@ def fetch_title_info(
 
 def run_single_check(
     args: argparse.Namespace,
+    ticker: str,
     config: Dict[str, Any],
     api_configuration: Any,
     proxy_url: str,
     type_filter: Set[str],
 ) -> Dict[str, Any]:
     api_params = {
-        "ids": [args.ticker],
+        "ids": [ticker],
         "start_date": args.start_date,
         "end_date": args.end_date,
         "categories": config["api_settings"]["industry_categories"],
@@ -444,7 +475,7 @@ def run_single_check(
             t
             for t in raw_transcripts
             if isinstance(t.get("primary_ids"), list)
-            and args.ticker in t.get("primary_ids")
+            and ticker in t.get("primary_ids")
             and is_type_selected(str(t.get("transcript_type", "")), type_filter, args.types)
         ]
     else:
@@ -452,7 +483,7 @@ def run_single_check(
             t
             for t in raw_transcripts
             if isinstance(t.get("primary_ids"), list)
-            and t.get("primary_ids") == [args.ticker]
+            and t.get("primary_ids") == [ticker]
             and is_type_selected(str(t.get("transcript_type", "")), type_filter, args.types)
         ]
 
@@ -502,7 +533,9 @@ def run_single_check(
     }
 
 
-def print_snapshot(args: argparse.Namespace, result: Dict[str, Any], iteration: Optional[int]) -> None:
+def print_ticker_detail(
+    args: argparse.Namespace, ticker: str, result: Dict[str, Any]
+) -> None:
     raw_transcripts = result["raw_transcripts"]
     scoped_transcripts = result["scoped_transcripts"]
     inspected_rows = result["inspected_rows"]
@@ -510,101 +543,132 @@ def print_snapshot(args: argparse.Namespace, result: Dict[str, Any], iteration: 
     target_year = str(args.year)
 
     print("")
-    print("=== BNS Transcript Availability Check ===")
-    if iteration is not None:
-        print(f"Iteration: {iteration}")
-    print(f"Run Time: {datetime.now().isoformat(timespec='seconds')}")
-    print(f"Ticker: {args.ticker}")
-    print(f"Target: {args.quarter} {args.year}")
-    print(f"Window: {args.start_date.isoformat()} to {args.end_date.isoformat()}")
-    print("Mode: NAS READ-ONLY (local XML download enabled unless --no-download)")
-    print(f"Type filter: {args.types}")
-    print(f"Raw API rows: {len(raw_transcripts)}")
-    if args.all_primary_id_rows:
-        print(f"Scoped rows (ticker in primary_ids): {len(scoped_transcripts)}")
-    else:
-        print(f"Scoped rows (sole-primary only): {len(scoped_transcripts)}")
-    print(f"Rows inspected by XML title parse: {len(inspected_rows)}")
-    print(f"Matches for {args.quarter} {args.year}: {len(matches)}")
-
-    type_counter = collections.Counter(
-        str(row.get("transcript_type", "")).strip() for row in inspected_rows
-    )
-    print("")
-    print("Transcript types present (scoped rows):")
-    if type_counter:
-        for transcript_type, count in sorted(type_counter.items()):
-            print(f"- {transcript_type}: {count}")
-    else:
-        print("- none")
+    print(f"--- {bank_label(ticker)} ---")
+    print(f"Raw API rows: {len(raw_transcripts)}  |  "
+          f"Scoped: {len(scoped_transcripts)}  |  "
+          f"Target matches: {len(matches)}")
 
     if matches:
-        print("STATUS: AVAILABLE")
         matches_sorted = sorted(
             matches, key=lambda row: (row.get("event_date", ""), row.get("event_id", ""))
         )
         for idx, match in enumerate(matches_sorted, start=1):
             print(
-                f"{idx}. event_date={match.get('event_date')} "
-                f"type={match.get('transcript_type')} "
-                f"event_id={match.get('event_id')} "
-                f"version_id={match.get('version_id')} "
-                f"strict_title={match.get('strict_title_match')}"
-            )
-            print(f"   title={match.get('title')}")
-
-        grouped_types: Dict[str, Set[str]] = {}
-        for row in matches:
-            event_id = str(row.get("event_id", ""))
-            grouped_types.setdefault(event_id, set()).add(
-                str(row.get("transcript_type", "")).strip()
-            )
-
-        print("")
-        print("Target event type coverage:")
-        required_types = ["Raw", "Corrected"]
-        for event_id in sorted(grouped_types.keys()):
-            available = sorted(grouped_types[event_id])
-            missing = [t for t in required_types if t not in grouped_types[event_id]]
-            print(
-                f"- event_id={event_id} available={','.join(available) if available else 'none'} "
-                f"missing_raw_corrected={','.join(missing) if missing else 'none'}"
+                f"  {idx}. {match.get('event_date')}  "
+                f"type={match.get('transcript_type')}  "
+                f"event_id={match.get('event_id')}  "
+                f"title={match.get('title')}"
             )
     else:
-        print("STATUS: NOT AVAILABLE")
-        if not inspected_rows:
-            print("No scoped transcripts were returned for the query window.")
+        print("  No target transcripts found.")
+
+
+def print_summary(
+    args: argparse.Namespace,
+    tickers: List[str],
+    all_results: Dict[str, Dict[str, Any]],
+) -> None:
+    # Collect all transcript types seen across all banks
+    all_types: Set[str] = set()
+    for ticker in tickers:
+        for row in all_results[ticker]["matches"]:
+            ttype = str(row.get("transcript_type", "")).strip()
+            if ttype:
+                all_types.add(ttype)
+
+    # Always show Raw and Corrected, plus any others found
+    display_types = ["Raw", "Corrected"]
+    for t in sorted(all_types):
+        if t not in display_types:
+            display_types.append(t)
+
+    # Build the table
+    name_col_width = max(len(bank_label(t)) for t in tickers)
+    type_col_width = max(len(t) for t in display_types) if display_types else 5
+    type_col_width = max(type_col_width, 5)
 
     print("")
-    print("=== Full Transcript Listing (Scoped Rows) ===")
-    if not inspected_rows:
-        print("No rows to display.")
-    else:
-        all_rows_sorted = sorted(
-            inspected_rows,
-            key=lambda row: (row.get("event_date", ""), row.get("event_id", "")),
-            reverse=True,
+    print("=" * 70)
+    print(f"  {args.quarter} {args.year} EARNINGS TRANSCRIPT AVAILABILITY")
+    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  "
+          f"Window: {args.start_date} to {args.end_date}")
+    print("=" * 70)
+    print("")
+
+    # Header row
+    header = f"  {'Bank':<{name_col_width}}"
+    for t in display_types:
+        header += f"  {t:^{type_col_width}}"
+    print(header)
+    print(f"  {'-' * name_col_width}", end="")
+    for _ in display_types:
+        print(f"  {'-' * type_col_width}", end="")
+    print("")
+
+    # Data rows
+    any_missing = False
+    for ticker in tickers:
+        matches = all_results[ticker]["matches"]
+        available_types: Set[str] = set()
+        for row in matches:
+            ttype = str(row.get("transcript_type", "")).strip()
+            if ttype:
+                available_types.add(ttype)
+
+        label = bank_label(ticker)
+        row_str = f"  {label:<{name_col_width}}"
+        for t in display_types:
+            if t in available_types:
+                row_str += f"  {'YES':^{type_col_width}}"
+            else:
+                row_str += f"  {'--':^{type_col_width}}"
+                any_missing = True
+        print(row_str)
+
+    print("")
+
+    # Counts
+    total_banks = len(tickers)
+    banks_with_raw = sum(
+        1 for ticker in tickers
+        if any(
+            str(r.get("transcript_type", "")).strip() == "Raw"
+            for r in all_results[ticker]["matches"]
         )
-        for idx, row in enumerate(all_rows_sorted, start=1):
-            parsed_label = f"{row.get('parsed_quarter')} {row.get('parsed_year')}"
-            is_target = (
-                row.get("parsed_quarter", "").upper() == args.quarter
-                and row.get("parsed_year") == target_year
+    )
+    banks_with_corrected = sum(
+        1 for ticker in tickers
+        if any(
+            str(r.get("transcript_type", "")).strip() == "Corrected"
+            for r in all_results[ticker]["matches"]
+        )
+    )
+    banks_complete = sum(
+        1 for ticker in tickers
+        if {"Raw", "Corrected"}.issubset(
+            {str(r.get("transcript_type", "")).strip() for r in all_results[ticker]["matches"]}
+        )
+    )
+
+    print(f"  Raw:        {banks_with_raw}/{total_banks} banks")
+    print(f"  Corrected:  {banks_with_corrected}/{total_banks} banks")
+    print(f"  Both:       {banks_complete}/{total_banks} banks")
+
+    if banks_complete == total_banks:
+        print("")
+        print("  ALL BANKS COMPLETE - Raw + Corrected available for all Big 6")
+    elif any_missing:
+        missing_banks = [
+            bank_label(ticker)
+            for ticker in tickers
+            if not {"Raw", "Corrected"}.issubset(
+                {str(r.get("transcript_type", "")).strip() for r in all_results[ticker]["matches"]}
             )
-            target_flag = "TARGET_MATCH" if is_target else "non-target"
-            print(
-                f"{idx}. event_date={row.get('event_date')} "
-                f"type={row.get('transcript_type')} "
-                f"parsed={parsed_label} "
-                f"strict_title={row.get('strict_title_match')} "
-                f"{target_flag} "
-                f"event_id={row.get('event_id')} "
-                f"version_id={row.get('version_id')}"
-            )
-            title = row.get("title") or "<title unavailable>"
-            print(f"   title={title}")
-            if row.get("error"):
-                print(f"   error={row.get('error')}")
+        ]
+        print("")
+        print(f"  WAITING ON: {', '.join(missing_banks)}")
+
+    print("=" * 70)
 
 
 def collect_alert_rows(
@@ -687,6 +751,10 @@ def main() -> int:
         if args.watch and args.interval_seconds <= 0:
             raise ValueError("--interval-seconds must be a positive integer")
 
+        tickers = resolve_tickers(args.ticker)
+        if not tickers:
+            raise ValueError("No tickers specified.")
+
         validate_environment_variables()
 
         nas_conn = get_nas_connection()
@@ -701,11 +769,6 @@ def main() -> int:
         proxy_url = setup_proxy_configuration()
         api_configuration = setup_factset_api_client(proxy_url, ssl_cert_path)
 
-        if args.ticker not in config.get("monitored_institutions", {}):
-            print(
-                f"WARNING: {args.ticker} is not in monitored_institutions. "
-                "Proceeding with direct API lookup."
-            )
         type_filter = parse_type_filter(args.types)
         alert_type_filter = parse_type_filter(args.alert_types)
         seen_alert_keys: Set[str] = set()
@@ -716,91 +779,84 @@ def main() -> int:
 
         while True:
             iteration += 1
-            result = run_single_check(
-                args=args,
-                config=config,
-                api_configuration=api_configuration,
-                proxy_url=proxy_url,
-                type_filter=type_filter,
-            )
+            all_results: Dict[str, Dict[str, Any]] = {}
 
-            print_snapshot(args, result, iteration if args.watch else None)
-
-            matches = result["matches"]
-
-            if args.no_download:
-                print("")
-                print("Local download: disabled (--no-download)")
-            else:
-                download_summary = download_raw_corrected_target_matches(
-                    matches=matches,
-                    ticker=args.ticker,
-                    download_root=download_root,
+            for ticker in tickers:
+                print(f"\nChecking {bank_label(ticker)}...")
+                result = run_single_check(
+                    args=args,
+                    ticker=ticker,
+                    config=config,
+                    api_configuration=api_configuration,
+                    proxy_url=proxy_url,
+                    type_filter=type_filter,
                 )
-                print("")
-                print(
-                    "Local Raw/Corrected XML downloads (target matches): "
-                    f"eligible={download_summary['eligible']} "
-                    f"downloaded={download_summary['downloaded']} "
-                    f"already_exists={download_summary['already_exists']} "
-                    f"failed={download_summary['failed']}"
-                )
-                print(f"Download folder: {download_root}")
-                if download_summary["saved_paths"]:
-                    print("New files:")
-                    for path in download_summary["saved_paths"]:
-                        print(f"- {path}")
+                all_results[ticker] = result
+                print_ticker_detail(args, ticker, result)
+
+                # Download per ticker
+                matches = result["matches"]
+                if not args.no_download and matches:
+                    dl = download_raw_corrected_target_matches(
+                        matches=matches, ticker=ticker, download_root=download_root,
+                    )
+                    if dl["downloaded"] > 0:
+                        print(f"  Downloaded {dl['downloaded']} XML file(s) to {download_root}")
+
+            # Print the summary table
+            print_summary(args, tickers, all_results)
 
             if args.watch:
-                alert_rows = collect_alert_rows(
-                    matches=matches,
-                    alert_type_filter=alert_type_filter,
-                    alert_types_raw=args.alert_types,
-                )
-
-                new_alert_rows: List[Dict[str, Any]] = []
-                for row in alert_rows:
-                    key = (
-                        f"{row.get('event_id')}|{row.get('version_id')}|"
-                        f"{normalize_transcript_type(str(row.get('transcript_type', '')))}"
+                # Check for new alerts across all tickers
+                new_alert_rows: List[Tuple[str, Dict[str, Any]]] = []
+                for ticker in tickers:
+                    alert_rows = collect_alert_rows(
+                        matches=all_results[ticker]["matches"],
+                        alert_type_filter=alert_type_filter,
+                        alert_types_raw=args.alert_types,
                     )
-                    if key not in seen_alert_keys:
-                        seen_alert_keys.add(key)
-                        new_alert_rows.append(row)
+                    for row in alert_rows:
+                        key = (
+                            f"{ticker}|{row.get('event_id')}|{row.get('version_id')}|"
+                            f"{normalize_transcript_type(str(row.get('transcript_type', '')))}"
+                        )
+                        if key not in seen_alert_keys:
+                            seen_alert_keys.add(key)
+                            new_alert_rows.append((ticker, row))
 
                 if new_alert_rows:
                     print("")
                     print(
                         f"\aALERT [{datetime.now().isoformat(timespec='seconds')}]: "
-                        f"New {args.alert_types} transcript type(s) detected for "
-                        f"{args.ticker} {args.quarter} {args.year}"
+                        f"New transcript(s) detected!"
                     )
-                    for row in new_alert_rows:
+                    for ticker, row in new_alert_rows:
                         print(
-                            f"- event_date={row.get('event_date')} "
+                            f"  {bank_label(ticker)}: "
                             f"type={row.get('transcript_type')} "
-                            f"event_id={row.get('event_id')} "
-                            f"version_id={row.get('version_id')}"
+                            f"event_date={row.get('event_date')} "
+                            f"title={row.get('title')}"
                         )
-                        print(f"  title={row.get('title')}")
 
                     if args.exit_on_alert:
                         return 0
 
                 print("")
                 print(
-                    f"Watch mode active. Sleeping {args.interval_seconds}s "
-                    f"(alert types: {args.alert_types})..."
+                    f"Watch mode: iteration {iteration} complete. "
+                    f"Sleeping {args.interval_seconds}s..."
                 )
                 time.sleep(args.interval_seconds)
                 continue
 
-            if args.fail_if_missing and not matches:
-                return 1
+            if args.fail_if_missing:
+                for ticker in tickers:
+                    if not all_results[ticker]["matches"]:
+                        return 1
             return 0
 
     except KeyboardInterrupt:
-        print("\nWatch stopped by user.")
+        print("\nStopped by user.")
         return 0
     except Exception as exc:
         print(f"ERROR: {exc}")
