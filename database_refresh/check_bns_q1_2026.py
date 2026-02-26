@@ -554,13 +554,39 @@ def print_ticker_detail(
         )
         for idx, match in enumerate(matches_sorted, start=1):
             print(
-                f"  {idx}. {match.get('event_date')}  "
+                f"  target {idx}. {match.get('event_date')}  "
                 f"type={match.get('transcript_type')}  "
                 f"event_id={match.get('event_id')}  "
                 f"title={match.get('title')}"
             )
     else:
         print("  No target transcripts found.")
+
+    print("  Found transcript titles (all scoped rows):")
+    if not inspected_rows:
+        print("    none")
+        return
+
+    all_rows_sorted = sorted(
+        inspected_rows,
+        key=lambda row: (row.get("event_date", ""), row.get("event_id", "")),
+        reverse=True,
+    )
+    for idx, row in enumerate(all_rows_sorted, start=1):
+        parsed_label = f"{row.get('parsed_quarter')} {row.get('parsed_year')}"
+        is_target = (
+            row.get("parsed_quarter", "").upper() == args.quarter
+            and row.get("parsed_year") == target_year
+        )
+        target_flag = "target" if is_target else "non-target"
+        print(
+            f"    {idx}. {row.get('event_date')}  "
+            f"type={row.get('transcript_type')}  "
+            f"parsed={parsed_label}  "
+            f"{target_flag}  "
+            f"event_id={row.get('event_id')}  "
+            f"title={row.get('title')}"
+        )
 
 
 def print_summary(
