@@ -50,16 +50,40 @@ BIG_6_BANKS: OrderedDict[str, Tuple[str, str]] = collections.OrderedDict([
     ("NA-CA", ("NBC", "National Bank of Canada")),
 ])
 
+# Hardcoded supplement:
+# If Canadian listing is being checked, also check selected US listing(s).
+EXTRA_BANK_CHECKS: OrderedDict[str, Tuple[str, str]] = collections.OrderedDict([
+    ("RY-US", ("RBC-US", "Royal Bank of Canada (US listing)")),
+    ("TD-US", ("TD-US", "Toronto-Dominion Bank (US listing)")),
+])
+
+EXTRA_TICKER_DEPENDENCIES: Dict[str, str] = {
+    "RY-CA": "RY-US",
+    "TD-CA": "TD-US",
+}
+
 
 def resolve_tickers(raw: str) -> List[str]:
     if raw.lower() == "big6":
-        return list(BIG_6_BANKS.keys())
-    return [t.strip() for t in raw.split(",") if t.strip()]
+        tickers = list(BIG_6_BANKS.keys())
+    else:
+        tickers = [t.strip() for t in raw.split(",") if t.strip()]
+
+    # Hardcoded behavior requested: when specific CA listings are included,
+    # also query mapped US listings.
+    for source_ticker, extra_ticker in EXTRA_TICKER_DEPENDENCIES.items():
+        if source_ticker in tickers and extra_ticker not in tickers:
+            tickers.append(extra_ticker)
+
+    return tickers
 
 
 def bank_label(ticker: str) -> str:
     if ticker in BIG_6_BANKS:
         short, _ = BIG_6_BANKS[ticker]
+        return f"{short} ({ticker})"
+    if ticker in EXTRA_BANK_CHECKS:
+        short, _ = EXTRA_BANK_CHECKS[ticker]
         return f"{short} ({ticker})"
     return ticker
 
