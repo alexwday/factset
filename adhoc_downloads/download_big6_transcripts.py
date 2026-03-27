@@ -31,13 +31,21 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # ===== CONFIGURATION =====
 
-BIG_6_TICKERS = {
+TICKERS = {
+    # Big 6 Canadian Banks
     "RY-CA": "Royal Bank of Canada",
     "BMO-CA": "Bank of Montreal",
     "CM-CA": "Canadian Imperial Bank of Commerce",
     "NA-CA": "National Bank of Canada",
     "BNS-CA": "Bank of Nova Scotia",
     "TD-CA": "Toronto-Dominion Bank",
+    # Big 6 US Banks
+    "JPM-US": "JPMorgan Chase & Co.",
+    "BAC-US": "Bank of America Corporation",
+    "WFC-US": "Wells Fargo & Company",
+    "C-US": "Citigroup Inc.",
+    "MS-US": "Morgan Stanley",
+    "GS-US": "Goldman Sachs Group Inc.",
 }
 
 # Fiscal quarters (fiscal year starts Nov 1)
@@ -484,7 +492,7 @@ def main():
 
         # Pre-create quarter/bank folder structure
         for _, _, label in quarters:
-            for ticker in BIG_6_TICKERS:
+            for ticker in TICKERS:
                 (OUTPUT_DIR / label / ticker).mkdir(parents=True, exist_ok=True)
 
         # Create API instance
@@ -497,7 +505,7 @@ def main():
         total_no_quarter = 0
         summary = {}
 
-        for ticker, bank_name in BIG_6_TICKERS.items():
+        for ticker, bank_name in TICKERS.items():
             logger.info(f"\n{'='*60}")
             logger.info(f"Processing: {ticker} - {bank_name}")
             logger.info(f"{'='*60}")
