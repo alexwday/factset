@@ -40,17 +40,11 @@ BIG_6_TICKERS = {
     "TD-CA": "Toronto-Dominion Bank",
 }
 
-# Fiscal quarters (fiscal year starts Oct 1)
-# FQ1: Oct 1 - Jan 31
+# Fiscal quarters (fiscal year starts Nov 1)
+# FQ1: Nov 1 - Jan 31
 # FQ2: Feb 1 - Apr 30
 # FQ3: May 1 - Jul 31
-# FQ4: Aug 1 - Sep 30
-FISCAL_QUARTERS = [
-    (10, 1, 1, 31),   # FQ1: Oct 1 - Jan 31 (crosses calendar year)
-    (2, 1, 4, 30),    # FQ2: Feb 1 - Apr 30
-    (5, 1, 7, 31),    # FQ3: May 1 - Jul 31
-    (8, 1, 9, 30),    # FQ4: Aug 1 - Sep 30
-]
+# FQ4: Aug 1 - Oct 31
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 
@@ -356,16 +350,17 @@ def get_last_4_fiscal_quarters(today: date) -> List[Tuple[date, date, str]]:
     The current (possibly partial) quarter is included.
     """
     # Determine which fiscal quarter today falls in
+    # FQ1: Nov-Jan, FQ2: Feb-Apr, FQ3: May-Jul, FQ4: Aug-Oct
     month = today.month
     year = today.year
 
-    if month >= 10:
+    if month >= 11:
         # FQ1 starts this calendar year
-        current_fq_start = date(year, 10, 1)
+        current_fq_start = date(year, 11, 1)
         current_fq_end = date(year + 1, 1, 31)
     elif month <= 1:
         # FQ1 started last calendar year
-        current_fq_start = date(year - 1, 10, 1)
+        current_fq_start = date(year - 1, 11, 1)
         current_fq_end = date(year, 1, 31)
     elif month <= 4:
         current_fq_start = date(year, 2, 1)
@@ -375,7 +370,7 @@ def get_last_4_fiscal_quarters(today: date) -> List[Tuple[date, date, str]]:
         current_fq_end = date(year, 7, 31)
     else:
         current_fq_start = date(year, 8, 1)
-        current_fq_end = date(year, 9, 30)
+        current_fq_end = date(year, 10, 31)
 
     quarters = [(current_fq_start, current_fq_end)]
 
@@ -384,8 +379,8 @@ def get_last_4_fiscal_quarters(today: date) -> List[Tuple[date, date, str]]:
         prev_end = quarters[-1][0] - timedelta(days=1)
         m = prev_end.month
         y = prev_end.year
-        if m >= 10:
-            prev_start = date(y, 10, 1)
+        if m >= 11:
+            prev_start = date(y, 11, 1)
         elif m >= 8:
             prev_start = date(y, 8, 1)
         elif m >= 5:
@@ -393,7 +388,7 @@ def get_last_4_fiscal_quarters(today: date) -> List[Tuple[date, date, str]]:
         elif m >= 2:
             prev_start = date(y, 2, 1)
         else:
-            prev_start = date(y - 1, 10, 1)
+            prev_start = date(y - 1, 11, 1)
         quarters.append((prev_start, prev_end))
 
     # Reverse so oldest is first, and build labels
