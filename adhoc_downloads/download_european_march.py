@@ -48,7 +48,7 @@ TICKERS = {
 }
 
 START_DATE = date(2026, 3, 1)
-END_DATE = date(2026, 3, 31)
+END_DATE = min(date(2026, 3, 31), date.today())
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "output_european"
 
