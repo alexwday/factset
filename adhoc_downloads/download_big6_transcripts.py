@@ -15,6 +15,7 @@ import time
 import logging
 from datetime import datetime, date, timedelta
 from urllib.parse import quote
+from collections import defaultdict
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 
@@ -499,11 +500,13 @@ def main():
         api_client = fds.sdk.EventsandTranscripts.ApiClient(api_configuration)
         api_instance = transcripts_api.TranscriptsApi(api_client)
 
-        # Process each Big 6 bank
+        # Process each bank
         total_downloaded = 0
         total_skipped = 0
         total_no_quarter = 0
         summary = {}
+        # Track events by title -> set of tickers for the event summary
+        event_map = defaultdict(set)
 
         for ticker, bank_name in TICKERS.items():
             logger.info(f"\n{'='*60}")
@@ -550,6 +553,9 @@ def main():
                 filename = build_filename(ticker, title, event_date)
                 filepath = bank_dir / filename
 
+                # Track event for summary
+                event_map[title].add(ticker)
+
                 # Skip if already downloaded
                 if filepath.exists():
                     logger.info(f"  Already downloaded: {filename} — skipping")
@@ -576,9 +582,9 @@ def main():
             # Delay between institutions
             time.sleep(config["api_settings"]["request_delay"])
 
-        # Print summary
+        # Print download stats
         logger.info(f"\n{'='*60}")
-        logger.info("DOWNLOAD SUMMARY")
+        logger.info("DOWNLOAD STATS")
         logger.info(f"{'='*60}")
         for ticker, stats in summary.items():
             logger.info(
@@ -591,7 +597,38 @@ def main():
             f"  TOTAL: {total_downloaded} downloaded, "
             f"{total_skipped} skipped, {total_no_quarter} outside range"
         )
-        logger.info(f"  Output directory: {OUTPUT_DIR}")
+        logger.info(f"  Output: {OUTPUT_DIR}")
+
+        # Event summary
+        shared_events = {t: tickers for t, tickers in event_map.items() if len(tickers) > 1}
+        unique_events = {t: tickers for t, tickers in event_map.items() if len(tickers) == 1}
+
+        print(f"\n{'='*60}")
+        print("EVENT SUMMARY")
+        print(f"{'='*60}")
+
+        if shared_events:
+            print(f"\nSHARED EVENTS ({len(shared_events)} events)")
+            print("─" * 50)
+            for title in sorted(shared_events, key=lambda t: len(shared_events[t]), reverse=True):
+                tickers = sorted(shared_events[title])
+                print(f"  {title}")
+                print(f"    {', '.join(tickers)}")
+                print()
+
+        if unique_events:
+            print(f"BANK-SPECIFIC EVENTS ({len(unique_events)} events)")
+            print("─" * 50)
+            # Group by bank
+            bank_unique = defaultdict(list)
+            for title, tickers in unique_events.items():
+                ticker = next(iter(tickers))
+                bank_unique[ticker].append(title)
+            for ticker in sorted(bank_unique):
+                print(f"  {ticker}")
+                for title in sorted(bank_unique[ticker]):
+                    print(f"    {title}")
+                print()
 
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
