@@ -420,22 +420,22 @@ def get_fiscal_quarter_folder(event_date, quarters: List[Tuple[date, date, str]]
     return None
 
 
-def build_filename(ticker: str, transcript: Dict[str, Any], title: str) -> str:
-    """Build filename from transcript metadata. Uses title to extract Q/year if possible."""
-    event_id = str(transcript.get("event_id", "unknown"))
-    version_id = str(transcript.get("version_id", "unknown"))
-    transcript_type = transcript.get("transcript_type", "Unknown")
+def build_filename(ticker: str, title: str, event_date) -> str:
+    """Build filename as ticker_title_date.xml, sanitizing the title for filesystem safety."""
+    safe_title = re.sub(r'[^\w\s\-]', '', title)  # remove special chars
+    safe_title = re.sub(r'\s+', '_', safe_title.strip())  # spaces to underscores
+    if not safe_title:
+        safe_title = "untitled"
 
-    # Try to extract quarter and year from title
-    match = re.search(r"Q([1-4])\s+(20\d{2})", title, re.IGNORECASE)
-    if match:
-        quarter = f"Q{match.group(1)}"
-        year = match.group(2)
+    # Format date
+    if isinstance(event_date, (date, datetime)):
+        date_str = event_date.strftime("%Y-%m-%d")
+    elif isinstance(event_date, str):
+        date_str = event_date
     else:
-        quarter = "Unknown"
-        year = "Unknown"
+        date_str = "unknown-date"
 
-    return f"{ticker}_{quarter}_{year}_{transcript_type}_{event_id}_{version_id}.xml"
+    return f"{ticker}_{safe_title}_{date_str}.xml"
 
 
 # ===== MAIN =====
@@ -518,7 +518,6 @@ def main():
 
             for t in transcripts:
                 event_id = str(t.get("event_id", ""))
-                version_id = str(t.get("version_id", ""))
                 event_date = t.get("event_date")
 
                 # Determine fiscal quarter folder from event_date
@@ -533,13 +532,6 @@ def main():
 
                 bank_dir = OUTPUT_DIR / quarter_label / ticker
 
-                # Check if we already have this file locally (search across all quarter folders)
-                existing = list(OUTPUT_DIR.glob(f"*/{ticker}/*_{event_id}_{version_id}.xml"))
-                if existing:
-                    logger.info(f"  Already downloaded: {existing[0].name} — skipping")
-                    bank_skipped += 1
-                    continue
-
                 # Download
                 result = download_transcript(t, ticker, api_configuration, config)
                 if result is None:
@@ -547,11 +539,17 @@ def main():
                     continue
 
                 xml_content, title = result
-                filename = build_filename(ticker, t, title)
+                filename = build_filename(ticker, title, event_date)
                 filepath = bank_dir / filename
 
+                # Skip if already downloaded
+                if filepath.exists():
+                    logger.info(f"  Already downloaded: {filename} — skipping")
+                    bank_skipped += 1
+                    continue
+
                 filepath.write_bytes(xml_content)
-                logger.info(f"  Saved: {quarter_label}/{ticker}/{filename}  (title: {title})")
+                logger.info(f"  Saved: {quarter_label}/{ticker}/{filename}")
                 bank_downloaded += 1
 
                 # Rate limiting
