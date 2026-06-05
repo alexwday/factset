@@ -1,0 +1,121 @@
+# Monitored Financial Institution Fiscal Year Mapping (91 Total)
+# Source list: database_refresh/monitored_institutions.yaml
+# Format: ticker: {id, name, type, fiscal_year_end, fiscal_year_start, source_url}
+# Dates are MM-DD. Fiscal years are labeled by the calendar year in which fiscal_year_end falls.
+
+# Canadian Banks (7)
+RY-CA: {id: 1, name: "Royal Bank of Canada", type: "Canadian_Banks", fiscal_year_end: "10-31", fiscal_year_start: "11-01", source_url: "https://data.sec.gov/submissions/CIK0001000275.json"}
+BMO-CA: {id: 2, name: "Bank of Montreal", type: "Canadian_Banks", fiscal_year_end: "10-31", fiscal_year_start: "11-01", source_url: "https://data.sec.gov/submissions/CIK0000927971.json"}
+CM-CA: {id: 3, name: "Canadian Imperial Bank of Commerce", type: "Canadian_Banks", fiscal_year_end: "10-31", fiscal_year_start: "11-01", source_url: "https://data.sec.gov/submissions/CIK0001045520.json"}
+NA-CA: {id: 4, name: "National Bank of Canada", type: "Canadian_Banks", fiscal_year_end: "10-31", fiscal_year_start: "11-01", source_url: "https://www.nationalbank.com/content/dam/bnc/a-propos-de-nous/relations-investisseurs/assemblee-annuelle/2025/na-annual-report-2024.pdf"}
+BNS-CA: {id: 5, name: "Bank of Nova Scotia", type: "Canadian_Banks", fiscal_year_end: "10-31", fiscal_year_start: "11-01", source_url: "https://data.sec.gov/submissions/CIK0000009631.json"}
+TD-CA: {id: 6, name: "Toronto-Dominion Bank", type: "Canadian_Banks", fiscal_year_end: "10-31", fiscal_year_start: "11-01", source_url: "https://data.sec.gov/submissions/CIK0000947263.json"}
+LB-CA: {id: 7, name: "Laurentian Bank", type: "Canadian_Banks", fiscal_year_end: "10-31", fiscal_year_start: "11-01", source_url: "https://www.laurentianbank.ca/en/about-us/investor-relations/annual-reports"}
+
+# U.S. Banks (7)
+JPM-US: {id: 8, name: "JPMorgan Chase & Co.", type: "US_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000019617.json"}
+BAC-US: {id: 9, name: "Bank of America Corporation", type: "US_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000070858.json"}
+WFC-US: {id: 10, name: "Wells Fargo & Company", type: "US_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000072971.json"}
+C-US: {id: 11, name: "Citigroup Inc.", type: "US_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000831001.json"}
+MS-US: {id: 12, name: "Morgan Stanley", type: "US_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000895421.json"}
+GS-US: {id: 13, name: "Goldman Sachs Group Inc.", type: "US_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000886982.json"}
+JEF-US: {id: 14, name: "Jefferies Financial Group Inc.", type: "US_Banks", fiscal_year_end: "11-30", fiscal_year_start: "12-01", source_url: "https://data.sec.gov/submissions/CIK0000096223.json"}
+
+# European Banks (14)
+UBS-US: {id: 15, name: "UBS Group AG", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001610520.json"}
+BCS-US: {id: 16, name: "Barclays PLC", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000312069.json"}
+DBK-DE: {id: 17, name: "Deutsche Bank AG", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001159508.json"}
+GLE-FR: {id: 18, name: "Societe Generale", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://societegenerale.fr.digital-report.net/en/report/2064#title_932230"}
+BNP-FR: {id: 19, name: "BNP Paribas", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://reports.invest.bnpparibas/esef/2025/bnp-2025-12-31-1-en_viewer.html"}
+BBVA-ES: {id: 20, name: "Banco Bilbao Vizcaya Argentaria S.A.", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000842180.json"}
+SAN-ES: {id: 21, name: "Banco Santander S.A.", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000891478.json"}
+HSBA-GB: {id: 22, name: "HSBC Holdings plc", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001089113.json"}
+LLOY-GB: {id: 23, name: "Lloyds Banking Group plc", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.lloydsbankinggroup.com/investors/annual-report.html"}
+ING-US: {id: 24, name: "ING Groep N.V.", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001039765.json"}
+STAN-GB: {id: 25, name: "Standard Chartered PLC", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.sc.com/en/investors/financial-results/annual-report/"}
+RBS-GB: {id: 26, name: "NatWest Group plc", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000844150.json"}
+UCG-IT: {id: 27, name: "UniCredit S.p.A.", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.unicreditgroup.eu/en/investors/annual-report.html"}
+ISP-IT: {id: 28, name: "Intesa Sanpaolo", type: "European_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://group.intesasanpaolo.com/content/dam/portalgroup/repository-documenti/investor-relations/bilanci-relazioni-en/2025/2025_Annual_Report.pdf"}
+
+# U.S. Boutiques (9)
+LAZ-US: {id: 29, name: "Lazard Ltd", type: "US_Boutiques", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001311370.json"}
+EVR-US: {id: 30, name: "Evercore Inc", type: "US_Boutiques", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001360901.json"}
+HLI-US: {id: 31, name: "Houlihan Lokey Inc", type: "US_Boutiques", fiscal_year_end: "03-31", fiscal_year_start: "04-01", source_url: "https://data.sec.gov/submissions/CIK0001302215.json"}
+MC-US: {id: 32, name: "Moelis & Company", type: "US_Boutiques", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001596967.json"}
+PIPR-US: {id: 33, name: "Piper Sandler Companies", type: "US_Boutiques", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001230245.json"}
+PJT-US: {id: 34, name: "PJT Partners Inc", type: "US_Boutiques", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001626115.json"}
+SF-US: {id: 35, name: "Stifel Financial Corp", type: "US_Boutiques", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000720672.json"}
+RJF-US: {id: 36, name: "Raymond James Financial Inc", type: "US_Boutiques", fiscal_year_end: "09-30", fiscal_year_start: "10-01", source_url: "https://data.sec.gov/submissions/CIK0000720005.json"}
+CF-CA: {id: 37, name: "Canaccord Genuity Group Inc", type: "US_Boutiques", fiscal_year_end: "03-31", fiscal_year_start: "04-01", source_url: "https://www.canaccordgenuity.com/49bf65/globalassets/investor-relations/documents/financial-reports-en/2025/q4/canaccord-genuity-group-inc.-reports-fourth-quarter-and-fiscal-2025-results.pdf"}
+
+# Canadian Asset Managers (4)
+CIX-CA: {id: 38, name: "CI Financial Corp", type: "Canadian_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://ir.cifinancial.com/news/news-details/2025/CI-Financial-Reports-Financial-Results-for-the-Fourth-Quarter-of-2024/default.aspx"}
+AGF.B-CA: {id: 39, name: "AGF Management Limited", type: "Canadian_Asset_Managers", fiscal_year_end: "11-30", fiscal_year_start: "12-01", source_url: "https://www.agf.com/agf-files/en/investor-relations/annual-reports/corp144-2025-agf-annual-report.pdf"}
+IGM-CA: {id: 40, name: "IGM Financial Inc.", type: "Canadian_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.igmfinancial.com/en/investor-relations/annual.html"}
+FSZ-CA: {id: 41, name: "Fiera Capital Corporation", type: "Canadian_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://ir.fieracapital.com/annual-report/2024/en/corporate-information.php"}
+
+# U.S. Regionals (15)
+TFC-US: {id: 42, name: "Truist Financial Corporation", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000092230.json"}
+USB-US: {id: 43, name: "U.S. Bancorp", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000036104.json"}
+PNC-US: {id: 44, name: "PNC Financial Services Group", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000713676.json"}
+RF-US: {id: 45, name: "Regions Financial Corporation", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001281761.json"}
+FITB-US: {id: 46, name: "Fifth Third Bancorp", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000035527.json"}
+MTB-US: {id: 47, name: "M&T Bank Corporation", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000036270.json"}
+HBAN-US: {id: 48, name: "Huntington Bancshares Incorporated", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000049196.json"}
+KEY-US: {id: 49, name: "KeyCorp", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000091576.json"}
+WAL-US: {id: 50, name: "Western Alliance Bancorporation", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001212545.json"}
+FLG-US: {id: 51, name: "Flagstar Financial Inc.", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000910073.json"}
+ALLY-US: {id: 52, name: "Ally Financial Inc.", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000040729.json"}
+FHN-US: {id: 53, name: "First Horizon Corporation", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000036966.json"}
+CMA-US: {id: 54, name: "Comerica Incorporated", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000028412.json"}
+CFG-US: {id: 55, name: "Citizens Financial Group Inc.", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000759944.json"}
+SNV-US: {id: 56, name: "Synovus Financial Corp.", type: "US_Regionals", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000018349.json"}
+
+# U.S. Wealth & Asset Managers (10)
+SCHW-US: {id: 57, name: "Charles Schwab Corporation", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000316709.json"}
+BLK-US: {id: 58, name: "BlackRock Inc.", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0002012383.json"}
+BEN-US: {id: 59, name: "Franklin Resources Inc.", type: "US_Wealth_Asset_Managers", fiscal_year_end: "09-30", fiscal_year_start: "10-01", source_url: "https://data.sec.gov/submissions/CIK0000038777.json"}
+IVZ-US: {id: 60, name: "Invesco Ltd.", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000914208.json"}
+AMG-US: {id: 61, name: "Affiliated Managers Group Inc.", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001004434.json"}
+AMP-US: {id: 62, name: "Ameriprise Financial Inc.", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000820027.json"}
+AB-US: {id: 63, name: "AllianceBernstein Holding LP", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000825313.json"}
+FHI-US: {id: 64, name: "Federated Hermes Inc.", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001056288.json"}
+JHG-US: {id: 65, name: "Janus Henderson Group plc", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001274173.json"}
+TROW-US: {id: 66, name: "T. Rowe Price Group Inc.", type: "US_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001113169.json"}
+
+# UK Wealth & Asset Managers (3)
+RAT-GB: {id: 67, name: "Rathbones Group Plc", type: "UK_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.rathbones.com/en-gb/wealth-management/investor-relations/results-reports-and-presentations/annual-reports/2025"}
+SJP-GB: {id: 68, name: "St. James's Place plc", type: "UK_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.sjp.co.uk/sites/sjp-corp/files/SJP/shareholders/2025-in-review/SJP_AR_2025_Financial_Statements.pdf"}
+QLT-GB: {id: 69, name: "Quilter plc", type: "UK_Wealth_Asset_Managers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://plc.quilter.com/investor-relations/annual-report/"}
+
+# Nordic Banks (4)
+DANSKE-DK: {id: 70, name: "Danske Bank A/S", type: "Nordic_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://danskebank.com/news-and-insights/news-archive/press-releases/2026/pr05022026"}
+NDA-FI: {id: 71, name: "Nordea Bank Abp", type: "Nordic_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.nordea.com/en/investors/latest-annual-report"}
+SWDBY: {id: 72, name: "Swedbank AB", type: "Nordic_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.swedbank.com/investor-relations/reports-and-presentations/annual-reports.html"}
+SEBA-SE: {id: 73, name: "Skandinaviska Enskilda Banken AB", type: "Nordic_Banks", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://sebgroup.com/annualreport"}
+
+# Canadian Insurers (6)
+MFC-CA: {id: 74, name: "Manulife Financial Corporation", type: "Canadian_Insurers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001086888.json"}
+SLF-CA: {id: 75, name: "Sun Life Financial Inc.", type: "Canadian_Insurers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001097362.json"}
+IAG-CA: {id: 76, name: "iA Financial Corporation Inc.", type: "Canadian_Insurers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://ia.ca/-/media/files/ia/investisseurs/rapportsfinanciers/trimestriel/2024/t4/q4-annual-2024-ia-financial-corporation-mda-v1-acc.pdf"}
+GWO-CA: {id: 77, name: "Great-West Lifeco Inc.", type: "Canadian_Insurers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000850918.json"}
+POW-CA: {id: 78, name: "Power Corporation of Canada", type: "Canadian_Insurers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.powercorporation.com/en/investisseurs/"}
+IFC-CA: {id: 79, name: "Intact Financial Corporation", type: "Canadian_Insurers", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://newsfile.futunn.com/public/NN-PersistNoticeAttachment/7781/20260327/SEDAR_PLUS/CSA_SEDAR_PLUS_NOTICE_RECORD_ID_2357259.pdf"}
+
+# Canadian Monoline Lenders (4)
+EQB-CA: {id: 80, name: "Equitable Group Inc.", type: "Canadian_Monoline_Lenders", fiscal_year_end: "10-31", fiscal_year_start: "11-01", source_url: "https://filecache.investorroom.com/mr5ircnw_eqbank2/1591/EQB-2025_Annual_Report_Final.pdf"}
+FN-CA: {id: 81, name: "First National Financial Corp.", type: "Canadian_Monoline_Lenders", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://www.firstnational.ca/investor-relations/financial-reports-filings"}
+MKP-CA: {id: 82, name: "MCAN Mortgage Corporation", type: "Canadian_Monoline_Lenders", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://mcanfinancial.com/wp-content/uploads/2025/06/2023-Q4-Report_V2.pdf"}
+GSY-CA: {id: 83, name: "goeasy Ltd.", type: "Canadian_Monoline_Lenders", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://goeasy.investorroom.com/2026-03-31-goeasy-Ltd-Reports-Results-for-the-Fourth-Quarter-and-Full-Year-2025"}
+
+# Australian Banks (5)
+WBC-AU: {id: 84, name: "Westpac Banking Corporation", type: "Australian_Banks", fiscal_year_end: "09-30", fiscal_year_start: "10-01", source_url: "https://data.sec.gov/submissions/CIK0000719245.json"}
+CBA-AU: {id: 85, name: "Commonwealth Bank of Australia", type: "Australian_Banks", fiscal_year_end: "06-30", fiscal_year_start: "07-01", source_url: "https://www.commbank.com.au/content/dam/commbank-assets/investors/docs/results/fy25/2025-annual-report.pdf"}
+ANZ-AU: {id: 86, name: "ANZ Group Holdings Limited", type: "Australian_Banks", fiscal_year_end: "09-30", fiscal_year_start: "10-01", source_url: "https://www.anz.com/content/dam/anzcom/shareholder/2025-annual-report/anz-2025-annual-report.pdf"}
+NAB-AU: {id: 87, name: "National Australia Bank Limited", type: "Australian_Banks", fiscal_year_end: "09-30", fiscal_year_start: "10-01", source_url: "https://www.nab.com.au/content/dam/nab/documents/reports/corporate/2025-annual-report.pdf"}
+BOQ-AU: {id: 88, name: "Bank of Queensland Limited", type: "Australian_Banks", fiscal_year_end: "08-31", fiscal_year_start: "09-01", source_url: "https://www.boq.com.au/shareholder-centre/financial-results"}
+
+# Trusts (3)
+BK-US: {id: 89, name: "Bank of New York Mellon Corporation", type: "Trusts", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0001390777.json"}
+STT-US: {id: 90, name: "State Street Corporation", type: "Trusts", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000093751.json"}
+NTRS-US: {id: 91, name: "Northern Trust Corporation", type: "Trusts", fiscal_year_end: "12-31", fiscal_year_start: "01-01", source_url: "https://data.sec.gov/submissions/CIK0000073124.json"}
